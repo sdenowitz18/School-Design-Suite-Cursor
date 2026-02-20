@@ -1,0 +1,314 @@
+Designed Experience Tab Spec (Single Screen)
+Purpose
+
+Help a school leader/design partner understand what students experience in this component by making the schema legible:
+
+Aims for Learners = Outcomes + Leaps
+
+Practices = things learners experience / what shapes the experience
+
+Supporting Resources = what enables the student experience
+
+Artifacts = exemplars/evidence (can be component-level or subcomponent-level)
+
+The screen must work in a half-screen height context via expand/collapse.
+
+Top-level layout (vertical stack)
+
+Header (context + description)
+
+Featured Artifacts (component-level)
+
+Key Items (expandable drawers)
+
+Subcomponents list (each expands inline)
+
+Everything below should be built as collapsible panels or inline expanders to avoid scroll overload.
+
+1) Header
+1.1 Title
+
+"{Component Name} — Designed Experience"
+
+1.2 Context (must be visible)
+
+“Viewing: {Blueprint Version Name}” (Baseline / Aspirational / Checkpoint)
+
+Optional small secondary line: “As of {date}” (if checkpoint)
+
+1.3 Component-level overview description (optional)
+
+1–3 lines shown
+
+“Read more” expands to full text
+
+Acceptance (lite)
+
+User can always tell which blueprint version they’re viewing.
+
+Long text doesn’t push everything down by default.
+
+2) Featured Artifacts (Component-level)
+
+Goal: show 2–6 artifacts that define the component overall (not tied to one subcomponent only).
+
+2.1 Display
+
+Horizontal strip / carousel
+
+Each card shows:
+
+thumbnail/icon
+
+title
+
+artifact type (doc/link/video)
+
+optional tags (chips): Outcome, Leap, Practice, Support, Subcomponent (if tagged)
+
+2.2 Behaviors
+
+“View all” opens a modal/drawer with full artifact list
+
+“+ Add artifact” opens an add modal (stub is fine)
+
+Clicking an artifact opens preview (or link)
+
+Rules
+
+Component-level artifacts can be optionally tagged to subcomponents, but do not have to be.
+
+Acceptance
+
+User can see featured artifacts without scrolling.
+
+User can open a full list and add at least a placeholder artifact.
+
+3) Key Items (Expandable Drawers)
+
+Goal: scan the “top line” design intent, but expand to see everything.
+
+3.1 Three drawers (collapsed by default if space constrained)
+
+Each drawer has:
+
+Title + count
+
+Top 3–5 items visible
+
+“Expand” reveals full list
+
+Drawer A: Aims for Learners
+
+Two subgroups inside:
+
+Outcomes
+
+Leaps
+
+Items show:
+
+name
+
+optional priority badge: Primary/Secondary (optional)
+
+Drawer B: Practices
+
+List of practices (top 3–5, expandable)
+
+Drawer C: Supporting Resources
+
+Grouped by category (see section 5)
+
+Collapsed view shows top categories + top items
+
+3.2 “Where it shows up” interaction (recommended, simple)
+
+Each item has a small “Used in X subcomponents” indicator.
+
+Clicking the indicator:
+
+highlights subcomponents below where it appears
+
+adds a temporary filter pill at top: Filtered: Practice = "Math discussions" with “Clear”
+
+Acceptance
+
+User can expand each drawer to see the full inventory.
+
+User can click an item and see which subcomponents contain it.
+
+4) Subcomponents list (Primary meaning-maker)
+
+Goal: prevent “tag soup” by making each subcomponent understandable with a description.
+
+4.1 Subcomponents section header
+
+“Subcomponents” + count
+
+“+ Add subcomponent” button (can be stubbed)
+
+Optional: “Sort” dropdown (manual order default)
+
+4.2 Subcomponent card (collapsed state)
+
+Each subcomponent card must show:
+
+Header row
+
+Subcomponent name
+
+Grade band / time slice (optional)
+
+Cadence (optional)
+
+Expand chevron
+
+Required
+
+1-line description (truncate to 2 lines)
+
+Mini schema preview rows (distinct visually)
+
+Aims: show up to 2 outcomes + 1 leap (chips labeled)
+
+Practices: show up to 3 practices (chips labeled)
+
+Supports: show up to 2 supports (chips labeled)
+
+Artifacts: show thumbnail + count (e.g., “📎 3”)
+
+4.3 Subcomponent card (expanded state)
+
+Expands inline beneath the card to show full detail:
+
+A) Description (full)
+
+Editable text area (or read-only if you want v1 view-only)
+
+B) Aims
+
+Outcomes list
+
+Leaps list
+
+C) Practices
+
+Full list
+
+D) Supporting Resources
+
+Full list grouped by category
+
+E) Artifacts
+
+Grid/list of artifact cards (for this subcomponent)
+
+“+ Add artifact” (stub ok)
+
+Acceptance
+
+Every subcomponent has a visible description without expanding.
+
+Expanding reveals full lists for aims/practices/supports/artifacts.
+
+5) Supporting Resources structure (the “sublayer” you asked for)
+
+Supporting resources should not be a single undifferentiated list. Use categories that match your schema conceptually.
+
+5.1 Categories (recommended default buckets)
+
+Use a small set that maps to your supporting elements list without being overwhelming:
+
+Curricular & Assessment Materials
+
+Tools & Technology
+
+Staffing / Roles
+
+Scheduling / Use of Time
+
+Spaces / Environment
+
+Systems & Routines
+
+Family / Community Partnerships
+
+5.2 Display
+
+In drawers: show categories as mini headers with chips underneath
+
+In subcomponent expanded view: show category sections
+
+Acceptance
+
+Supporting resources are always grouped by category.
+
+6) Visual differentiation (so schema is always obvious)
+
+Do NOT make everything look like the same chip.
+
+6.1 Chip/token rules
+
+Outcome chips: prefix Outcome: or icon 🎯
+
+Leap chips: prefix Leap: or icon ✦
+
+Practice chips: prefix Practice: or icon ↻
+
+Support chips: prefix Support: or icon 🧰
+
+Artifact: thumbnail / 📎 icon
+
+Even in grayscale, the schema should be readable.
+
+7) Empty states (must-have)
+No subcomponents yet
+
+Show a friendly empty panel:
+
+“Subcomponents are the experiences that make up this component.”
+
+CTA: “Add your first subcomponent”
+
+No aims/practices/supports
+
+In Key drawers and inside subcomponent expanded sections:
+
+“None added yet” + “Add” CTA (can be stub)
+
+No artifacts
+
+“No artifacts yet” + “Add artifact”
+
+8) Minimum data requirements (for usability)
+
+To avoid ambiguity (especially for non-traditional components):
+
+Each subcomponent should have:
+
+Name
+
+1-line description (required)
+
+Everything else can be optional initially.
+
+9) Build order (pragmatic)
+
+If you want to ship in slices:
+
+V1 (fast)
+
+Header + featured artifacts strip (static)
+
+Key drawers (static lists)
+
+Subcomponent cards with descriptions + expand/collapse (static)
+
+V1.5
+
+“Used in X subcomponents” highlighting interaction
+
+V2
+
+Add/edit flows for aims/practices/supports/artifacts

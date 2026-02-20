@@ -1,0 +1,83 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  
+  /* Clean, Academic Palette */
+  --color-background: 0 0% 100%; /* Pure white */
+  --color-foreground: 222 47% 11%; /* Deep slate text */
+  
+  --color-card: 0 0% 100%;
+  --color-card-foreground: 222 47% 11%;
+  
+  --color-popover: 0 0% 100%;
+  --color-popover-foreground: 222 47% 11%;
+  
+  --color-primary: 222 47% 11%; /* Deep Slate */
+  --color-primary-foreground: 210 40% 98%;
+  
+  --color-secondary: 210 40% 96.1%; /* Very light gray */
+  --color-secondary-foreground: 222 47% 11%;
+  
+  --color-muted: 210 40% 96.1%;
+  --color-muted-foreground: 215.4 16.3% 46.9%;
+  
+  --color-accent: 210 40% 96.1%;
+  --color-accent-foreground: 222 47% 11%;
+  
+  --color-destructive: 0 84.2% 60.2%;
+  --color-destructive-foreground: 210 40% 98%;
+  
+  --color-border: 214.3 31.8% 91.4%;
+  --color-input: 214.3 31.8% 91.4%;
+  --color-ring: 222 47% 11%;
+  
+  --color-chart-1: 12 76% 61%;
+  --color-chart-2: 173 58% 39%;
+  --color-chart-3: 197 37% 24%;
+  --color-chart-4: 43 74% 66%;
+  --color-chart-5: 27 87% 67%;
+  
+  /* Semantic Colors for Schema */
+  --color-outcome: 142 76% 36%; /* Green */
+  --color-outcome-bg: 142 76% 96%;
+  
+  --color-leap: 262 83% 58%; /* Purple */
+  --color-leap-bg: 262 83% 97%;
+  
+  --color-practice: 24 94% 50%; /* Orange */
+  --color-practice-bg: 24 94% 97%;
+  
+  --color-support: 201 96% 32%; /* Blue */
+  --color-support-bg: 201 96% 97%;
+  
+  --color-sidebar: 0 0% 98%;
+  --color-sidebar-foreground: 240 5.3% 26.1%;
+  --color-sidebar-primary: 240 5.9% 10%;
+  --color-sidebar-primary-foreground: 0 0% 98%;
+  --color-sidebar-accent: 240 4.8% 95.9%;
+  --color-sidebar-accent-foreground: 240 5.9% 10%;
+  --color-sidebar-border: 220 13% 91%;
+  --color-sidebar-ring: 217.2 91.2% 59.8%;
+
+  --font-sans: 'Inter', sans-serif;
+  --font-serif: 'Libre Baskerville', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply font-sans antialiased bg-gray-50/50 text-foreground;
+  }
+}

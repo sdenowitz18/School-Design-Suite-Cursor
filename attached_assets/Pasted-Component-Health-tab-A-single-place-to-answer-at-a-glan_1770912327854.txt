@@ -1,0 +1,307 @@
+Component Health tab
+
+A single place to answer, at a glance:
+
+How’s it going? (Performance: Experience + Outcomes)
+
+Why is it going that way? (Drivers: Design + Conditions + Implementation)
+
+Where are we in redesign, and how should I interpret these numbers? (Journey/Status + “as of” context)
+
+1) Product goals
+Primary goal
+
+Create a clean, integrated “Performance & Status” view for a Ring Component that combines:
+
+Performance health (Experience score + Outcomes score)
+
+Driver strength (Design / Conditions / Implementation)
+
+Journey context (component status + “as-of” blueprint)
+
+…so a user can interpret performance correctly and decide where to focus next.
+
+Secondary goals
+
+Make it easy to compare across time (Baseline vs an “as-of” blueprint) without cluttering the UI.
+
+Support drill-down from “summary” → “driver details” (e.g., headwinds/tailwinds, implementation dimensions) without turning the tab into a long scroll.
+
+Keep consistent patterns with the other tabs (Snapshot / Experience / Details), including:
+
+compact sections
+
+expandable panels
+
+clear hierarchy
+
+minimal repeated labels
+
+Non-goals (for now)
+
+Finalizing the exact scoring math for Design (still TBD).
+
+Building the full “center-card journey dashboard” inside this screen (only mirror the concept).
+
+Perfect data integration for participation / reach or automated computations (manual can stand in).
+
+2) Target users & key jobs-to-be-done
+Users
+
+School leader / design partner trying to understand component performance and what to redesign next.
+
+Internal team member supporting facilitation / advising.
+
+Jobs-to-be-done
+
+Quickly answer: “Is Math healthy right now?”
+
+Interpret: “Is it unhealthy because the outcomes are weak, the experience is weak, or both?”
+
+Diagnose: “Which drivers (Design/Conditions/Implementation) are limiting performance?”
+
+Contextualize: “Is this expected given we’re early in Craft/Test?”
+
+Decide: “What should we work on next and where should we click to go deeper?”
+
+3) Key concepts the UI must express
+A) Performance vs Drivers
+
+Performance = Experience score + Outcomes score
+
+Drivers = Design + Conditions + Implementation
+
+UI should make it obvious these are different categories and relate:
+
+drivers help explain performance
+
+B) Journey context (status + as-of)
+
+Every number shown should be interpretable in context of:
+
+Blueprint context: Baseline / Aspirational / an “As-of” date along the journey
+
+Component status at that blueprint:
+
+Traditional
+
+Traditional (Planned Redesign)
+
+Craft
+
+Test
+
+Implement
+
+C) “As-of” is a first-class control
+
+This tab is always showing health for a specific blueprint snapshot:
+
+Baseline, or
+
+A selected as-of blueprint (e.g., “Sept ’26”), or
+
+Aspirational (optional later)
+
+4) Screen-level information architecture
+
+The tab should have three stacked zones (tight, not scroll-heavy):
+
+Zone 1: Context header (compact)
+
+Purpose: anchor interpretation.
+Must include:
+
+Component name (already in header)
+
+As-of selector (Baseline / As-of date dropdown)
+
+Component status for the selected as-of (Traditional / Craft / Test / Implement, etc.)
+
+Optional: small “journey phase” cue (e.g., “Early stage / Late stage” if available later)
+
+Design constraint: Do not repeat “type/level” everywhere; keep this header compact.
+
+Zone 2: Health summary (the integrated triad)
+
+Purpose: deliver the “three parts live together” requirement from Chris.
+
+2A) Performance health (Experience + Outcomes)
+
+Must show:
+
+Experience score (big number)
+
+Outcomes score (big number)
+
+Optional micro-text: “Performance” label (but don’t over-label)
+
+2B) Driver strength (Design / Conditions / Implementation)
+
+Must show:
+
+A compact driver summary that lets the user see relative strength across the 3 drivers.
+
+Representation can be:
+
+mini “flux-capacitor” / tri-spoke visual, OR
+
+3 compact tiles with scores/badges
+
+Conditions should be able to surface “(x tailwinds / y headwinds)” as a compact secondary line.
+
+2C) Journey status integrated into the same zone
+
+Must show:
+
+The status (Traditional/Craft/Test/Implement) as a badge inside the same card/frame as performance+drivers.
+
+The “as-of” date right near it.
+
+Key requirement: A user should not have to scroll to understand “what am I looking at?”
+
+Zone 3: Driver drill-down + performance drill-down (expandable, not overwhelming)
+
+Purpose: let user diagnose without clutter.
+
+Recommended structure:
+
+Two expandable groups:
+
+Drivers (Design / Conditions / Implementation)
+
+Performance (Experience / Outcomes)
+
+Within Drivers:
+
+Conditions drill-down supports:
+
+headwinds/tailwinds list preview (top 3 each)
+
+magnitude indicator if available
+
+“View all” to open full list / deeper page
+
+Implementation drill-down supports:
+
+dimensions preview (Quality / Fidelity / Scale / Learner Demand)
+
+simple indicator per dimension (score/badge)
+
+Design drill-down supports:
+
+placeholder until defined (e.g., “Design measurement coming soon” or a simple rubric-based input)
+
+but still must appear as a section so the schema stays stable
+
+Within Performance:
+
+Experience drill-down supports:
+
+contributing outcome categories (Leaps, Mental/Physical Health, Behavior/Attendance/Engagement)
+
+Outcomes drill-down supports:
+
+the outcome areas this component is tagged to
+
+Design constraint: avoid the current “five big scroll boxes” layout unless they collapse cleanly. Prioritize compact previews + expand.
+
+5) Interaction requirements
+As-of / timeline interaction
+
+“As-of” control is a dropdown:
+
+Baseline
+
+list of journey snapshots (dates)
+
+(optional later) Aspirational
+
+Changing “as-of” updates:
+
+component status badge
+
+driver strength
+
+performance scores
+
+drill-down previews
+
+Drill-down behavior
+
+Clicking a driver (Design/Conditions/Implementation) expands its panel and/or navigates to deeper view later.
+
+Clicking Experience/Outcomes expands its panel (or links to the Experience tab later, but not required now).
+
+Status behavior (component status for this blueprint)
+
+Status is displayed, not edited here (for now).
+
+Later editing could happen in Component Details or a journey workflow.
+
+6) Data + content rules (lightweight)
+Scores shown
+
+Experience score: number 1–5 (or your scale)
+
+Outcomes score: number 1–5
+
+Driver scores:
+
+Design score (TBD scale)
+
+Conditions score (or proxy: net headwind/tailwind)
+
+Implementation score (or composite)
+
+Conditions preview
+
+Always show:
+
+count of headwinds/tailwinds OR top 1–3 each
+
+If magnitude exists, preview it as:
+
+“High/Med/Low” or small numeric badges
+
+Implementation preview
+
+Show 3–5 dimensions (Quality, Fidelity, Scale, Learner Demand, etc.)
+
+Each dimension has a small indicator (badge/score)
+
+7) Design principles for this tab (so Replit builds it “clean”)
+
+One integrated summary card that contains:
+
+performance + drivers + journey status
+
+Minimal repetition: don’t restate “baseline/selected date” in 3 places.
+
+Compact previews > long scroll areas:
+
+show top items, then expand
+
+Consistent visual language with other tabs:
+
+pills/badges
+
+compact sections
+
+expandable details
+
+Interpretability first:
+
+users should understand “what am I looking at?” within 3 seconds
+
+8) Open questions to keep explicit (but not blocking the build)
+
+Design score definition (placeholder UI acceptable)
+
+Whether to render drivers as:
+
+mini “flux capacitor” visual, or
+
+3 driver tiles (recommended for clarity/space), or both in expanded view
+
+Whether status should show “early stage/late stage” vs Craft/Test/Implement only

@@ -1,0 +1,422 @@
+Product Spec: Component Snapshot / Overview Tab
+1) Purpose and goals
+
+The Snapshot tab provides a fast, high-confidence understanding of a component’s “shape” without requiring deeper navigation.
+
+It should answer four user questions:
+
+What is this? (definition + purpose)
+
+What’s included / how is it organized? (high-level structure + sequence)
+
+How does time work? (daily vs block + basic dosage)
+
+Who does it serve and how many students does it reach? (scope + participation)
+
+Snapshot is a single screen that uses progressive disclosure to show different fields depending on:
+
+Component Type: STEM, Humanities, Wayfinding, Well-being, Cross-cutting
+
+If Component Type is STEM or Humanities: Level = Course vs Subject
+
+Course = collection/set (e.g., Math)
+
+Subject = a specific course (e.g., Algebra I)
+
+Snapshot is not the place to define full designed experience; it should remain “overview” level and link users to deeper screens later.
+
+2) Entry logic and progressive disclosure
+Step 1: Component Type (required to render template)
+
+User selects one:
+
+STEM
+
+Humanities
+
+Wayfinding
+
+Well-being
+
+Cross-cutting
+
+Step 2: Course vs Subject (only if STEM or Humanities)
+
+If Component Type is STEM or Humanities, user selects:
+
+Course (collection/set)
+
+Subject (specific course)
+
+After selections are made, the screen renders the appropriate Snapshot template.
+
+3) Screen structure (applies to all templates)
+
+Snapshot is organized into four sections in a single scrollable view:
+
+Definition & Purpose
+
+High-Level Structure
+
+Who it serves / Scope
+
+Participation / Reach (manual entry for now)
+
+Each section can be collapsible if needed for half-screen contexts, but the default should keep Definition & Purpose expanded.
+
+4) Template A: STEM / Humanities — Course Snapshot
+A1) Definition & Purpose
+
+Goal: define what the “course collection” is and what it’s for.
+
+Fields
+
+Component Name
+
+Component Set Name (optional; use when this course is part of a named set)
+
+Component Description (scaffolded entry)
+
+Prompt: “In 1–3 sentences, what is this course collection and why does it exist?”
+
+Optional helper prompts (collapsible):
+
+“What should students reliably get from this?”
+
+“How does it differ from current/previous practice?”
+
+Level: Course (display only)
+
+Component Type: STEM or Humanities (display only)
+
+Primary Outcomes (L3) (tag input)
+
+Examples: Algebra, Geometry
+
+A2) High-Level Structure
+
+Goal: show what’s inside the course collection and the broad sequence + time model.
+
+Fields
+
+What’s included (tag list or simple list)
+
+Guidance: “List the subjects/courses included (e.g., Algebra I, Geometry, Algebra II).”
+
+Note: This is not required to map directly to subcomponents; it’s an overview list.
+
+Course Sequence (ordered list)
+
+Display supports an “arrow” preview (Algebra I → Geometry → Algebra II)
+
+Time Model at a Glance
+
+Daily vs Block (two-option selector)
+
+Total time / week
+
+Days per week
+
+Minutes / class
+
+A3) Who it serves / Scope
+
+Goal: clarify reach across grades and major student group targeting.
+
+Fields
+
+Grades Served (range)
+
+Student Groups (multi-select)
+
+Examples: All Students, Honors, Intervention, Pathway
+
+Optional: Placement notes (short text)
+
+A4) Participation / Reach (manual for now)
+
+Goal: capture basic participation and composition until data connections exist.
+
+Fields
+
+# Students participating
+
+% of student body
+
+% advanced vs on-level vs intervention (manual breakdown)
+
+% in each included class/subject (manual breakdown)
+
+Example: % Algebra vs % Geometry vs % Algebra II
+
+Optional: Other composition notes (text)
+
+Optional UI enhancement (ok to implement simply)
+
+A small chart (bars) that reflects the manual breakdown values.
+
+5) Template B: STEM / Humanities — Subject Snapshot
+B1) Definition & Purpose
+
+Goal: define the specific course and what it aims to produce.
+
+Fields
+
+Component Name
+
+Component Description
+
+Level: Subject (display only)
+
+Component Type: STEM or Humanities (display only)
+
+Primary Outcomes (L3) (tag input)
+
+B2) High-Level Structure
+
+Goal: show variants/levels of the subject and its time model.
+
+Fields
+
+What’s included (variants/levels) (tag list)
+
+Example: Algebra A, Algebra Honors
+
+AP / IB Courses Offered? (toggle)
+
+If Yes: List AP/IB offerings (tag list)
+
+Time Model at a Glance
+
+Daily vs Block
+
+Term length (Semester vs Full Year)
+
+Total time / week
+
+Days per week
+
+Minutes / class
+
+B3) Who it serves / Scope
+
+Goal: clarify the typical grade band and whether it’s universal/elective.
+
+Fields
+
+Typical on-level grade band
+
+Targeted student groups (multi-select + optional notes)
+
+Universal vs Elective (selector: Universal / Elective / Mixed)
+
+B4) Participation / Reach (manual for now)
+
+Fields
+
+# Students participating
+
+% of student body
+
+% advanced vs on-level vs intervention
+
+If variants exist: % by variant (e.g., Honors vs On-level)
+
+6) Template C: Non-traditional Snapshot (Wayfinding / Well-being / Cross-cutting)
+C1) Definition & Purpose
+
+Goal: make a non-traditional component legible even when the label is ambiguous.
+
+Fields
+
+Component Name
+
+Component Set Name (optional)
+
+Component Description (scaffolded entry)
+
+Component Type (display only)
+
+Primary Outcomes (L2 or L3) (tag input)
+
+Examples: Critical Thinking, Leadership
+
+Statement of Purpose / Intent
+
+Prompt: “What should a student reliably get from this?”
+
+C2) Where it shows up
+
+Goal: clarify the delivery context so “what this is” becomes concrete.
+
+Fields
+
+Where it shows up (multi-select)
+
+Embedded in classes
+
+Advisory sessions
+
+Dedicated blocks/periods
+
+After school
+
+Other
+
+Optional: Short description of where it shows up (text)
+
+C3) Who it serves / Scope
+
+Goal: clarify participation model and targeting.
+
+Fields
+
+Grade bands
+
+Participation model (selector)
+
+All students
+
+Opt-in
+
+Targeted subset
+
+If targeted subset: Target group description (text)
+
+C4) High-Level Structure
+
+Goal: describe the structure at a glance and what must exist for it to function.
+
+Fields
+
+Structure Type (multi-select; 1–3)
+
+Embedded strand
+
+Recurring routine
+
+Program sessions/events
+
+Dedicated blocks/periods
+
+Other
+
+Cadence (selector)
+
+Daily / Weekly / Monthly / Quarterly / Seasonal / Other
+
+Optional: Dosage (hidden until “Add dosage”)
+
+Minutes per week
+
+Events per year
+
+Infrastructure Requirements (summary + structured elements)
+
+Infrastructure Requirements (Summary)
+
+Multiline text prompt:
+
+“What must be in place (schedule, staffing, tech, space) for this to work?”
+
+Infrastructure Elements (structured add-ons)
+Below the summary, show four actions:
+
++ Add Schedule element
+
++ Add Staffing element
+
++ Add Tech element
+
++ Add Space element
+
+Each added element appears as a small card with:
+
+Name/label (required)
+
+Short description (optional)
+
+Remove
+
+(You can optionally offer a small starter list for each category, but free text is acceptable for v1.)
+
+C5) Ownership / Delivery
+
+Goal: clarify who owns and coordinates delivery.
+
+Fields
+
+Primary Owner (selector)
+
+Teacher / Advisor / Administrator / External partner / Mixed
+
+Optional: Delivery / coordination notes (text)
+
+C6) Participation / Reach (manual for now)
+
+Fields
+
+All students vs # students (derived from participation model, plus editable number if not “All students”)
+
+% of student body
+
+7) Display rules (shown/hidden)
+Rule 1: Course/Subject selector
+
+Show only when Component Type is STEM or Humanities
+
+Hide for Wayfinding / Well-being / Cross-cutting
+
+Rule 2: Course-only fields
+
+Show only when Level = Course:
+
+Course Sequence
+
+Included subjects/courses list oriented to sequence
+Hide:
+
+AP/IB
+
+Term length
+
+Universal vs Elective
+
+Rule 3: Subject-only fields
+
+Show only when Level = Subject:
+
+AP/IB toggle + offerings list
+
+Term length
+
+Universal vs Elective
+Hide:
+
+Course Sequence
+
+Rule 4: Non-traditional-only fields
+
+Show only when Component Type is non-traditional:
+
+Where it shows up
+
+Structure Type
+
+Cadence + optional dosage
+
+Infrastructure Requirements + Infrastructure Elements
+
+Ownership / Delivery
+
+8) Lite acceptance criteria
+
+User can select Component Type (and Course vs Subject when required) and Snapshot updates immediately to the correct template.
+
+Snapshot communicates the four core answers: what it is, how it’s structured, time model, who it serves/reach.
+
+Non-traditional components are understandable without relying on “obvious” labels because Purpose + Where it shows up are present.
+
+Participation/Reach is editable manually and supports a future move to data-connected display without redesigning the section.
+
+Infrastructure Elements can be added in the four categories and remain visible in Snapshot as scannable “requirements.”

@@ -1,0 +1,46 @@
+The starting points I had (w/o the acceptance criteria) are here
+
+Ring Component Snapshot (“What is this?”)
+
+As a school leader or design partner,
+
+I want a clear, concise snapshot of a Ring Component
+
+So that I can quickly understand what this component is, its purpose, and its key characteristics without drilling into detailed working spaces.
+
+User Needs: The snapshot should answer:
+- What is this component?
+- What’s its purpose?
+- What are the most important defining attributes?
+- How is it positioned in the school’s overall design?
+
+It is not meant to be exhaustive — it’s an orientation layer. Although it should be able to link the user to deeper layers where they can make additional changes as needed
+
+Ring Component DEsigned Experience  (“What do kids do here?” / “What learning looks like”)
+
+As a school leader or design partner,
+
+I want to clearly see and define what students actually experience in this component / subcomponent
+
+So that I can understand the intended learning model and assess how it aligns with our aims and outcomes.
+
+User Needs: Designed Experience must show:
+- What students are doing (subcomponents and/or uploaded resources that give an overview of the experience
+- What learning this is trying to produce for students (aims for learners)
+- What practices shape the experience (instructional / program practices)
+- What supporting resources enable it (curriculum materials, tools, spaces, schedules, etc.)
+
+Ring Component Health (“How’s it going?”)
+
+As a school leader or design partner,
+
+I want to see the overall health and journey status of a Ring Component or Subcomponent in one place
+
+So that I can understand performance (E/O), drivers of performance (design implementation, conditions) and where we are in redesign — so that I can get an understanding how the component is doing (over time) and dig in to get a deeper understanding
+
+User Need: 
+- Performance Health (E/O)
+- Driver Strength (Design, Implementation, Conditions)
+- Journey Status (Baseline, Early Stage, etc.)
+
+Please use this as a template to build your's off of! DOn't need to copy exactly

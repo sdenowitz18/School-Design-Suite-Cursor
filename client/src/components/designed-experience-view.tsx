@@ -1,0 +1,1483 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { 
+  Target, 
+  Sparkles, 
+  RotateCw, 
+  Wrench, 
+  Paperclip, 
+  ChevronDown, 
+  ChevronRight,
+  ChevronLeft,
+  Plus,
+  X,
+  Star,
+  Trash2,
+  Pencil,
+  Check,
+  Search,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { AnimatePresence, motion } from "framer-motion";
+import { componentQueries, useUpdateComponent } from "@/lib/api";
+import OutcomeSummaryView from "./outcome-summary-view";
+import OutcomeDetailView from "./outcome-detail-view";
+import OutcomeScoreView from "./outcome-score-view";
+
+import artifactDoc from "@/assets/images/artifact-doc.png";
+import artifactSlide from "@/assets/images/artifact-slide.png";
+import artifactRubric from "@/assets/images/artifact-rubric.png";
+
+export type TagType = "outcome" | "leap" | "practice" | "support" | "artifact";
+
+export type TagLevel = "High" | "Medium" | "Low" | "Absent";
+
+export interface Tag {
+  id: string;
+  type: TagType;
+  label: string;
+  isPrimary?: boolean;
+  isKey?: boolean;
+  level?: TagLevel;
+}
+
+export interface DESubcomponent {
+  id: string;
+  name: string;
+  description: string;
+  aims: Tag[];
+  practices: Tag[];
+  supports: Tag[];
+}
+
+export interface KeyDesignElements {
+  aims: Tag[];
+  practices: Tag[];
+  supports: Tag[];
+}
+
+export interface DesignedExperienceData {
+  description?: string;
+  keyDesignElements?: KeyDesignElements;
+  subcomponents?: DESubcomponent[];
+}
+
+
+interface Artifact {
+  id: string;
+  title: string;
+  type: "doc" | "video" | "link";
+  thumbnail: string;
+  tags?: Tag[];
+}
+
+const FEATURED_ARTIFACTS: Artifact[] = [
+  { id: "1", title: "Curriculum Overview", type: "doc", thumbnail: artifactDoc, tags: [{ id: "t1", type: "outcome", label: "Algebra" }] },
+  { id: "2", title: "Cooperative Groups", type: "doc", thumbnail: artifactSlide, tags: [{ id: "t2", type: "practice", label: "Pedagogy" }] },
+  { id: "3", title: "Grade 7 Reasoning Task", type: "doc", thumbnail: artifactDoc, tags: [{ id: "t3", type: "outcome", label: "Geometry" }] },
+  { id: "4", title: "Student Self-Assessment", type: "doc", thumbnail: artifactRubric, tags: [{ id: "t4", type: "support", label: "Rubric" }] },
+];
+
+export const OUTCOME_SCHEMA: Record<string, Record<string, string[]>> = {
+  "STEM": {
+    "Mathematics": ["Algebra", "Geometry", "Calculus"],
+    "Natural sciences": ["Physics", "Chemistry", "Biology"],
+    "Digital & AI literacies": ["Computer science", "AI literacy", "Robotics"]
+  },
+  "Humanities": {
+    "English language arts": ["Reading", "Writing", "Literature"],
+    "Social studies & civics": ["US history", "World history", "Civics"],
+    "World languages": ["Mandarin", "French"],
+    "Performing & visual arts": ["Visual art", "Music", "Drama"]
+  },
+  "Cross-cutting": {
+    "Higher-order thinking skills": ["Critical thinking", "Systems thinking", "Creativity"],
+    "Learning strategies & habits": ["Goal-setting", "Note-taking"],
+    "Collaboration & communication skills": ["Collaboration", "Communication", "Leadership & followership"]
+  },
+  "Well-being": {
+    "Social emotional capacities": ["Identity & purpose", "Mindsets & self-regulation", "Relationship skills"],
+    "Physical capacities": ["Athletics", "Healthy habits"],
+    "Mental & physical health": ["Emotional well-being & mood", "Stress & resilience", "Anxiety/depressive symptoms"],
+    "Behavior, attendance, & engagement": ["Attendance", "Positive & negative behavioral incidents", "Participation"]
+  },
+  "Wayfinding": {
+    "Practical, professional, & continuing education capacities": ["Practical knowledge & life skills", "Professional knowledge & skills", "Continuing-education / post-secondary knowledge & exposure"],
+    "Postsecondary assets": ["Industry-recognized credentials", "Early college coursework", "Postsecondary plan"],
+    "Transitional milestones": ["Promotion / graduation", "Postsecondary enrollment", "Successful career transition"]
+  }
+};
+
+export const LEAP_SCHEMA: Record<string, string[]> = {
+  "Level 1": ["Whole-child focus", "Connection & community", "High expectations with rigorous learning", "Relevance", "Customization", "Agency"],
+};
+
+export const PRACTICE_SCHEMA: Record<string, string[]> = {
+  "Instructional Strategies": ["Direct instruction", "Problem-based instruction", "Project-based learning", "Inquiry-based learning", "Socratic seminar", "Flipped classroom", "Lecture", "Modeling"],
+  "Student Engagement": ["Discourse", "Collaborative learning", "Peer tutoring", "Student-led discussion", "Think-pair-share", "Gallery walk", "Jigsaw"],
+  "Assessment Practices": ["Formative assessment", "Fluency practice", "Exit tickets", "Self-assessment", "Peer review", "Portfolio assessment", "Standards-based grading"],
+  "Differentiation": ["Scaffolding", "Tiered assignments", "Flexible grouping", "Choice boards", "Learning stations", "Accommodations & modifications"],
+};
+
+export const SUPPORT_SCHEMA: Record<string, string[]> = {
+  "Curriculum & Materials": ["High-quality aligned curriculum", "Supplemental materials", "Digital resources", "Manipulatives & tools", "Textbook adoption"],
+  "Assessment Tools": ["Common unit assessments", "Interim assessments", "Diagnostic assessments", "Benchmark assessments", "Rubrics & scoring guides"],
+  "Professional Development": ["Coaching cycles", "PLC collaboration", "Instructional rounds", "Content-area training", "Data literacy training"],
+  "Student Support Structures": ["Tutoring program", "Intervention block", "Office hours", "Study groups", "Mentoring program"],
+  "Technology & Infrastructure": ["Learning management system", "Student devices", "Assessment platform", "Data dashboard", "Communication tools"],
+};
+
+let deIdCounter = 0;
+const generateId = () => `de_${Date.now()}_${++deIdCounter}`;
+
+const levelToHml = (level: TagLevel | undefined): "H" | "M" | "L" => {
+  if (level === "High") return "H";
+  if (level === "Low") return "L";
+  return "M";
+};
+
+const Chip = ({ 
+  type, 
+  label, 
+  className, 
+  onClick,
+  meta,
+  isPrimary,
+  onRemove,
+}: { 
+  type: TagType; 
+  label: string; 
+  className?: string;
+  onClick?: () => void;
+  meta?: string;
+  isPrimary?: boolean;
+  onRemove?: () => void;
+}) => {
+  const styles = {
+    outcome: "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100",
+    leap: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+    practice: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+    support: "bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100",
+    artifact: "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100",
+  };
+
+  const icons = {
+    outcome: Target,
+    leap: Sparkles,
+    practice: RotateCw,
+    support: Wrench,
+    artifact: Paperclip,
+  };
+
+  const Icon = icons[type];
+
+  return (
+    <Badge 
+      variant="outline" 
+      className={cn(
+        "font-medium gap-1 px-2 py-0.5 transition-all cursor-default text-[11px] max-w-full min-w-0 overflow-hidden", 
+        styles[type], 
+        onClick && "cursor-pointer",
+        isPrimary && "font-bold border-2",
+        className
+      )}
+      onClick={onClick}
+      title={label}
+    >
+      {isPrimary && <Star className="w-2.5 h-2.5 fill-current text-current opacity-100" />}
+      {!isPrimary && <Icon className="w-2.5 h-2.5 opacity-70" />}
+      <span className="truncate min-w-0">{label}</span>
+      {meta && <span className="text-[10px] font-bold opacity-70 shrink-0">({meta})</span>}
+      {onRemove && (
+        <button 
+          className="ml-0.5 p-0.5 rounded-full hover:bg-black/10 transition-colors shrink-0"
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        >
+          <X className="w-2.5 h-2.5" />
+        </button>
+      )}
+    </Badge>
+  );
+};
+
+const SectionHeader = ({ title, count, onAdd, children }: { title: string; count?: number; onAdd?: () => void; children?: React.ReactNode }) => (
+  <div className="flex items-center justify-between mb-3 mt-6">
+    <div className="flex items-center gap-2">
+      <h3 className="text-sm font-semibold tracking-tight text-gray-900 uppercase">{title}</h3>
+      {count !== undefined && <span className="text-xs font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">{count}</span>}
+    </div>
+    <div className="flex items-center gap-2">
+      {children}
+      {onAdd && (
+        <Button size="sm" variant="outline" onClick={onAdd} className="h-7 text-xs gap-1 border-dashed border-gray-300 text-gray-500 hover:text-blue-600 hover:border-blue-300 bg-transparent" data-testid="button-add-subcomponent">
+          <Plus className="w-3 h-3" /> Add
+        </Button>
+      )}
+    </div>
+  </div>
+);
+
+const ArtifactCard = ({ artifact }: { artifact: Artifact }) => (
+  <div className="flex flex-col w-[160px] group cursor-pointer">
+    <div className="relative aspect-[4/3] bg-gray-100 rounded-md border border-gray-200 overflow-hidden transition-all group-hover:shadow-md group-hover:border-gray-300">
+      <img src={artifact.thumbnail} alt={artifact.title} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+    </div>
+    <div className="mt-2 space-y-1">
+      <h4 className="text-xs font-medium text-gray-900 leading-snug line-clamp-2 group-hover:text-blue-600 transition-colors">
+        {artifact.title}
+      </h4>
+      <div className="flex flex-wrap gap-1">
+        {artifact.tags?.map(tag => (
+          <span key={tag.id} className="text-[10px] text-gray-500 bg-gray-50 px-1 py-0.5 rounded border border-gray-100">
+            {tag.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+function SchemaPickerSheet({
+  title,
+  description,
+  schema,
+  selectedLabels,
+  onToggle,
+  getLevel,
+  onSetLevel,
+  getIsKey,
+  onSetIsKey,
+  type,
+  triggerLabel,
+  triggerIcon: TriggerIcon,
+  children,
+}: {
+  title: string;
+  description: string;
+  schema: Record<string, Record<string, string[]>> | Record<string, string[]>;
+  selectedLabels: string[];
+  onToggle: (label: string) => void;
+  getLevel?: (label: string) => TagLevel | undefined;
+  onSetLevel?: (label: string, level: TagLevel) => void;
+  getIsKey?: (label: string) => boolean;
+  onSetIsKey?: (label: string, isKey: boolean) => void;
+  type: TagType;
+  triggerLabel: string;
+  triggerIcon?: any;
+  children?: React.ReactNode;
+}) {
+  const [search, setSearch] = useState("");
+  const searchLower = search.toLowerCase();
+
+  const isNested = Object.values(schema).some(v => typeof v === "object" && !Array.isArray(v));
+
+  const colorMap: Record<string, { selected: string; icon: string }> = {
+    outcome: { selected: "bg-emerald-50 border-emerald-200 text-emerald-800", icon: "text-emerald-600" },
+    leap: { selected: "bg-purple-50 border-purple-200 text-purple-800", icon: "text-purple-600" },
+    practice: { selected: "bg-orange-50 border-orange-200 text-orange-800", icon: "text-orange-600" },
+    support: { selected: "bg-sky-50 border-sky-200 text-sky-800", icon: "text-sky-600" },
+    artifact: { selected: "bg-gray-50 border-gray-200 text-gray-800", icon: "text-gray-600" },
+  };
+  const colors = colorMap[type];
+
+  const isPriorityEnabled = (type === "outcome" || type === "leap") && !!onSetLevel;
+  const isKeyEnabled = (type === "practice" || type === "support") && !!onSetIsKey;
+  const levelToHml = (level: TagLevel | undefined): "H" | "M" | "L" => {
+    if (level === "High") return "H";
+    if (level === "Low") return "L";
+    return "M";
+  };
+  const hmlToLevel = (hml: "H" | "M" | "L"): TagLevel => (hml === "H" ? "High" : hml === "L" ? "Low" : "Medium");
+
+  const PriorityMini = ({ label, selected }: { label: string; selected: boolean }) => {
+    if (!isPriorityEnabled) return null;
+    if (!selected) return null;
+    const current = levelToHml(getLevel?.(label));
+    return (
+      <div
+        className="inline-flex rounded-md border border-gray-200 overflow-hidden bg-white"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {(["H", "M", "L"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            className={cn(
+              "px-1.5 py-0.5 text-[10px] font-bold transition-colors",
+              k !== "H" && "border-l border-gray-100",
+              current === k ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:text-gray-800",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetLevel?.(label, hmlToLevel(k));
+            }}
+            data-testid={`${type}-priority-${label}-${k}`}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const KeyMini = ({ label, selected }: { label: string; selected: boolean }) => {
+    if (!isKeyEnabled) return null;
+    if (!selected) return null;
+    const current = !!getIsKey?.(label);
+    return (
+      <button
+        type="button"
+        className={cn(
+          "px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors",
+          current ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-500 border-gray-200 hover:text-gray-800",
+        )}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSetIsKey?.(label, !current);
+        }}
+        data-testid={`${type}-key-${label}`}
+      >
+        Key
+      </button>
+    );
+  };
+
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        {children || (
+          <button
+            className={cn(
+              "flex items-center gap-1 text-[11px] font-medium border border-dashed rounded-full px-2 py-0.5 transition-colors",
+              type === "outcome" ? "text-emerald-500 border-emerald-300 hover:text-emerald-700 hover:border-emerald-400" :
+              type === "leap" ? "text-purple-500 border-purple-300 hover:text-purple-700 hover:border-purple-400" :
+              type === "practice" ? "text-orange-500 border-orange-300 hover:text-orange-700 hover:border-orange-400" :
+              "text-sky-500 border-sky-300 hover:text-sky-700 hover:border-sky-400"
+            )}
+            data-testid={`button-add-${type}`}
+          >
+            {TriggerIcon && <TriggerIcon className="w-3 h-3" />}
+            <Plus className="w-3 h-3" />
+            {triggerLabel}
+          </button>
+        )}
+      </SheetTrigger>
+      <SheetContent className="overflow-y-auto bg-white">
+        <SheetHeader>
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
+        </SheetHeader>
+        <div className="mt-4 space-y-4">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+            <Input
+              placeholder={`Search ${title.toLowerCase()}...`}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 h-9 text-sm"
+              data-testid={`input-search-${type}`}
+            />
+          </div>
+          {isNested ? (
+            Object.entries(schema as Record<string, Record<string, string[]>>).map(([category, subcategories]) => {
+              const hasMatch = !search || Object.values(subcategories).some(items =>
+                items.some(item => item.toLowerCase().includes(searchLower))
+              );
+              if (!hasMatch) return null;
+              return (
+                <div key={category} className="space-y-2">
+                  <h4 className="text-xs font-bold text-gray-900 border-b pb-1">{category}</h4>
+                  <div className="space-y-3 pl-1">
+                    {Object.entries(subcategories).map(([subcategory, items]) => {
+                      const filtered = search ? items.filter(i => i.toLowerCase().includes(searchLower)) : items;
+                      if (filtered.length === 0) return null;
+                      return (
+                        <div key={subcategory} className="space-y-1">
+                          <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">{subcategory}</h5>
+                          {filtered.map(item => {
+                            const isSelected = selectedLabels.includes(item);
+                            return (
+                              <div
+                                key={item}
+                                className={cn(
+                                  "flex items-center justify-between gap-2 p-1.5 rounded cursor-pointer border transition-colors text-xs min-w-0",
+                                  isSelected ? `${colors.selected}` : "hover:bg-gray-50 border-transparent hover:border-gray-100 text-gray-700"
+                                )}
+                                onClick={() => onToggle(item)}
+                                data-testid={`${type}-option-${item}`}
+                              >
+                                <span className="truncate min-w-0">{item}</span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {isSelected && <PriorityMini label={item} selected={isSelected} />}
+                                  {isSelected && <KeyMini label={item} selected={isSelected} />}
+                                  {isSelected ? <Check className={cn("w-3.5 h-3.5", colors.icon)} /> : <Plus className="w-3.5 h-3.5 text-gray-300" />}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            Object.entries(schema as Record<string, string[]>).map(([category, items]) => {
+              const filtered = search ? items.filter(i => i.toLowerCase().includes(searchLower)) : items;
+              if (filtered.length === 0) return null;
+              return (
+                <div key={category} className="space-y-1">
+                  <h4 className="text-xs font-bold text-gray-900 border-b pb-1">{category}</h4>
+                  {filtered.map(item => {
+                    const isSelected = selectedLabels.includes(item);
+                    return (
+                      <div
+                        key={item}
+                        className={cn(
+                          "flex items-center justify-between gap-2 p-1.5 rounded cursor-pointer border transition-colors text-xs min-w-0",
+                          isSelected ? `${colors.selected}` : "hover:bg-gray-50 border-transparent hover:border-gray-100 text-gray-700"
+                        )}
+                        onClick={() => onToggle(item)}
+                        data-testid={`${type}-option-${item}`}
+                      >
+                        <span className="truncate min-w-0">{item}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isSelected && <PriorityMini label={item} selected={isSelected} />}
+                          {isSelected && <KeyMini label={item} selected={isSelected} />}
+                          {isSelected ? <Check className={cn("w-3.5 h-3.5", colors.icon)} /> : <Plus className="w-3.5 h-3.5 text-gray-300" />}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function CompactTagRow({
+  aims,
+  practices,
+  supports,
+  onToggleAim,
+  onSetAimLevel,
+  getAimLevel,
+  onRemoveAim,
+  onTogglePractice,
+  onRemovePractice,
+  onToggleSupport,
+  onRemoveSupport,
+}: {
+  aims: Tag[];
+  practices: Tag[];
+  supports: Tag[];
+  onToggleAim: (label: string, type: TagType) => void;
+  onSetAimLevel?: (label: string, type: "outcome" | "leap", level: TagLevel) => void;
+  getAimLevel?: (label: string, type: "outcome" | "leap") => TagLevel | undefined;
+  onRemoveAim: (id: string) => void;
+  onTogglePractice: (label: string) => void;
+  onRemovePractice: (id: string) => void;
+  onToggleSupport: (label: string) => void;
+  onRemoveSupport: (id: string) => void;
+}) {
+  const aimLabels = aims.map(a => a.label);
+  const practiceLabels = practices.map(p => p.label);
+  const supportLabels = supports.map(s => s.label);
+
+  return (
+    <div className="space-y-2.5">
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 min-w-[70px]">
+            <Target className="w-3 h-3 text-emerald-600" />
+            <span className="text-[10px] font-semibold uppercase text-gray-500">Aims</span>
+          </div>
+          <div className="flex flex-wrap gap-1 flex-1">
+            {aims.map(tag => (
+              <Chip key={tag.id} type={tag.type} label={tag.label} isPrimary={tag.isPrimary} onRemove={() => onRemoveAim(tag.id)} />
+            ))}
+            <SchemaPickerSheet
+              title="Select Outcomes"
+              description="Choose outcome aims for this subcomponent."
+              schema={OUTCOME_SCHEMA}
+              selectedLabels={aimLabels}
+              onToggle={(label) => onToggleAim(label, "outcome")}
+              getLevel={getAimLevel ? (label) => getAimLevel(label, "outcome") : undefined}
+              onSetLevel={onSetAimLevel ? (label, level) => onSetAimLevel(label, "outcome", level) : undefined}
+              type="outcome"
+              triggerLabel="Outcomes"
+              triggerIcon={Target}
+            />
+            <SchemaPickerSheet
+              title="Select Leaps"
+              description="Choose leap aims for this subcomponent."
+              schema={LEAP_SCHEMA}
+              selectedLabels={aimLabels}
+              onToggle={(label) => onToggleAim(label, "leap")}
+              getLevel={getAimLevel ? (label) => getAimLevel(label, "leap") : undefined}
+              onSetLevel={onSetAimLevel ? (label, level) => onSetAimLevel(label, "leap", level) : undefined}
+              type="leap"
+              triggerLabel="Leaps"
+              triggerIcon={Sparkles}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 min-w-[70px]">
+            <RotateCw className="w-3 h-3 text-orange-600" />
+            <span className="text-[10px] font-semibold uppercase text-gray-500">Practices</span>
+          </div>
+          <div className="flex flex-wrap gap-1 flex-1">
+            {practices.map(tag => (
+              <Chip key={tag.id} type="practice" label={tag.label} onRemove={() => onRemovePractice(tag.id)} />
+            ))}
+            <SchemaPickerSheet
+              title="Select Practices"
+              description="Choose instructional practices for this subcomponent."
+              schema={PRACTICE_SCHEMA}
+              selectedLabels={practiceLabels}
+              onToggle={onTogglePractice}
+              type="practice"
+              triggerLabel="Practices"
+              triggerIcon={RotateCw}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 min-w-[70px]">
+            <Wrench className="w-3 h-3 text-sky-600" />
+            <span className="text-[10px] font-semibold uppercase text-gray-500">Supports</span>
+          </div>
+          <div className="flex flex-wrap gap-1 flex-1">
+            {supports.map(tag => (
+              <Chip key={tag.id} type="support" label={tag.label} onRemove={() => onRemoveSupport(tag.id)} />
+            ))}
+            <SchemaPickerSheet
+              title="Select Supports"
+              description="Choose supports and resources for this subcomponent."
+              schema={SUPPORT_SCHEMA}
+              selectedLabels={supportLabels}
+              onToggle={onToggleSupport}
+              type="support"
+              triggerLabel="Supports"
+              triggerIcon={Wrench}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SubcomponentCard({ 
+  sub, 
+  onUpdate, 
+  onDelete, 
+  onOpen 
+}: { 
+  sub: DESubcomponent; 
+  onUpdate: (updated: DESubcomponent) => void; 
+  onDelete: () => void;
+  onOpen: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [nameVal, setNameVal] = useState(sub.name);
+  const [descVal, setDescVal] = useState(sub.description);
+
+  useEffect(() => {
+    setNameVal(sub.name);
+    setDescVal(sub.description);
+  }, [sub.name, sub.description]);
+
+  const toggleAim = (label: string, type: TagType) => {
+    const existing = sub.aims.find(a => a.label === label);
+    if (existing) {
+      onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== existing.id) });
+    } else {
+      onUpdate({ ...sub, aims: [...sub.aims, { id: generateId(), type, label, level: "Medium" }] });
+    }
+  };
+
+  const togglePractice = (label: string) => {
+    const existing = sub.practices.find(p => p.label === label);
+    if (existing) {
+      onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== existing.id) });
+    } else {
+      onUpdate({ ...sub, practices: [...sub.practices, { id: generateId(), type: "practice", label }] });
+    }
+  };
+
+  const toggleSupport = (label: string) => {
+    const existing = sub.supports.find(s => s.label === label);
+    if (existing) {
+      onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== existing.id) });
+    } else {
+      onUpdate({ ...sub, supports: [...sub.supports, { id: generateId(), type: "support", label }] });
+    }
+  };
+
+  const saveName = () => {
+    if (nameVal.trim()) {
+      onUpdate({ ...sub, name: nameVal.trim() });
+    }
+    setEditingName(false);
+  };
+
+  const saveDesc = () => {
+    onUpdate({ ...sub, description: descVal });
+    setEditingDesc(false);
+  };
+
+  return (
+    <motion.div 
+      initial={false}
+      className={cn(
+        "border rounded-lg bg-white transition-all duration-200 overflow-hidden", 
+        isOpen ? "shadow-sm ring-1 ring-black/5 border-gray-300" : "border-gray-200 hover:border-gray-300",
+      )}
+      data-testid={`card-subcomponent-${sub.id}`}
+    >
+      <div className="px-4 py-3 cursor-pointer select-none" onClick={() => setIsOpen(!isOpen)}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              {editingName ? (
+                <div className="flex items-center gap-1.5 flex-1" onClick={(e) => e.stopPropagation()}>
+                  <Input 
+                    value={nameVal} 
+                    onChange={(e) => setNameVal(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setNameVal(sub.name); setEditingName(false); } }}
+                    className="h-7 text-sm font-semibold"
+                    autoFocus
+                    data-testid={`input-subcomponent-name-${sub.id}`}
+                  />
+                  <Button size="sm" className="h-7 text-xs px-2" onClick={saveName}>Save</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 group/name">
+                  <h4 className="font-semibold text-sm text-gray-900" data-testid={`text-subcomponent-name-${sub.id}`}>{sub.name}</h4>
+                  <button
+                    className="opacity-0 group-hover/name:opacity-100 transition-opacity p-0.5"
+                    onClick={(e) => { e.stopPropagation(); setEditingName(true); }}
+                    data-testid={`button-edit-name-${sub.id}`}
+                  >
+                    <Pencil className="w-3 h-3 text-gray-400 hover:text-gray-600" />
+                  </button>
+                </div>
+              )}
+            </div>
+            {!isOpen && (
+              <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
+                <span>{sub.aims.length} aims</span>
+                <span>·</span>
+                <span>{sub.practices.length} practices</span>
+                <span>·</span>
+                <span>{sub.supports.length} supports</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-6 text-[11px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
+              onClick={(e) => { e.stopPropagation(); onOpen(); }}
+              data-testid={`button-open-subcomponent-${sub.id}`}
+            >
+              Open
+            </Button>
+            <ChevronDown className={cn("w-4 h-4 text-gray-400 transition-transform duration-200", isOpen && "rotate-180")} />
+          </div>
+        </div>
+      </div>
+
+      <Collapsible open={isOpen}>
+        <CollapsibleContent>
+          <div className="px-4 pb-3 pt-0 space-y-3">
+            <Separator className="mb-2" />
+            
+            <div onClick={(e) => e.stopPropagation()}>
+              {editingDesc ? (
+                <div className="space-y-1.5">
+                  <Textarea 
+                    value={descVal} 
+                    onChange={(e) => setDescVal(e.target.value)}
+                    className="text-xs min-h-[50px] resize-none"
+                    placeholder="Describe this subcomponent..."
+                    autoFocus
+                    data-testid={`input-subcomponent-desc-${sub.id}`}
+                  />
+                  <div className="flex justify-end gap-1">
+                    <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => { setDescVal(sub.description); setEditingDesc(false); }}>Cancel</Button>
+                    <Button size="sm" className="h-6 text-[11px]" onClick={saveDesc}>Save</Button>
+                  </div>
+                </div>
+              ) : (
+                <p 
+                  className="text-xs text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded p-1 -m-1 transition-colors"
+                  onClick={() => setEditingDesc(true)}
+                  data-testid={`text-subcomponent-desc-${sub.id}`}
+                >
+                  {sub.description || <span className="italic text-gray-400">Click to add description...</span>}
+                </p>
+              )}
+            </div>
+
+            <div onClick={(e) => e.stopPropagation()}>
+              <CompactTagRow
+                aims={sub.aims}
+                practices={sub.practices}
+                supports={sub.supports}
+                onToggleAim={toggleAim}
+                getAimLevel={(label, type) => sub.aims.find(a => a.type === type && a.label === label)?.level}
+                onSetAimLevel={(label, type, level) =>
+                  onUpdate({ ...sub, aims: sub.aims.map(a => (a.type === type && a.label === label ? { ...a, level } : a)) })
+                }
+                onRemoveAim={(id) => onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== id) })}
+                onTogglePractice={togglePractice}
+                onRemovePractice={(id) => onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== id) })}
+                onToggleSupport={toggleSupport}
+                onRemoveSupport={(id) => onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== id) })}
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-[11px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1 h-6 px-2"
+                onClick={(e) => { e.stopPropagation(); onOpen(); }}
+                data-testid={`button-view-full-${sub.id}`}
+              >
+                View full page <ChevronRight className="w-3 h-3" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-[11px] text-red-500 hover:text-red-700 hover:bg-red-50 gap-1 h-6 px-2"
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                data-testid={`button-delete-subcomponent-${sub.id}`}
+              >
+                <Trash2 className="w-3 h-3" /> Remove
+              </Button>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </motion.div>
+  );
+}
+
+function SubcomponentDetailPage({ 
+  sub, 
+  parentTitle, 
+  onBack, 
+  onUpdate 
+}: { 
+  sub: DESubcomponent; 
+  parentTitle: string; 
+  onBack: () => void; 
+  onUpdate: (updated: DESubcomponent) => void;
+}) {
+  const [editingName, setEditingName] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [nameVal, setNameVal] = useState(sub.name);
+  const [descVal, setDescVal] = useState(sub.description);
+
+  useEffect(() => {
+    setNameVal(sub.name);
+    setDescVal(sub.description);
+  }, [sub.name, sub.description]);
+
+  const toggleAim = (label: string, type: TagType) => {
+    const existing = sub.aims.find(a => a.label === label);
+    if (existing) {
+      onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== existing.id) });
+    } else {
+      onUpdate({ ...sub, aims: [...sub.aims, { id: generateId(), type, label, level: "Medium" }] });
+    }
+  };
+
+  const togglePractice = (label: string) => {
+    const existing = sub.practices.find(p => p.label === label);
+    if (existing) {
+      onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== existing.id) });
+    } else {
+      onUpdate({ ...sub, practices: [...sub.practices, { id: generateId(), type: "practice", label }] });
+    }
+  };
+
+  const toggleSupport = (label: string) => {
+    const existing = sub.supports.find(s => s.label === label);
+    if (existing) {
+      onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== existing.id) });
+    } else {
+      onUpdate({ ...sub, supports: [...sub.supports, { id: generateId(), type: "support", label }] });
+    }
+  };
+
+  const saveName = () => {
+    if (nameVal.trim()) onUpdate({ ...sub, name: nameVal.trim() });
+    setEditingName(false);
+  };
+
+  const saveDesc = () => {
+    onUpdate({ ...sub, description: descVal });
+    setEditingDesc(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-white">
+      <div className="max-w-7xl mx-auto px-6 md:px-10 space-y-8 pb-24 pt-6">
+        <section className="space-y-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              {editingName ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <Input 
+                    value={nameVal} 
+                    onChange={(e) => setNameVal(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setNameVal(sub.name); setEditingName(false); } }}
+                    className="h-10 text-xl font-serif font-bold max-w-md"
+                    autoFocus
+                    data-testid="input-subcomponent-detail-name"
+                  />
+                  <Button size="sm" onClick={saveName}>Save</Button>
+                  <Button size="sm" variant="outline" onClick={() => { setNameVal(sub.name); setEditingName(false); }}>Cancel</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 group">
+                  <h2 className="text-2xl font-serif font-bold text-gray-900" data-testid="text-subcomponent-detail-name">{sub.name}</h2>
+                  <Button variant="ghost" size="sm" className="h-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setEditingName(true)}>
+                    <Pencil className="w-3 h-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+            {editingDesc ? (
+              <div className="space-y-2 max-w-2xl">
+                <Textarea 
+                  value={descVal} 
+                  onChange={(e) => setDescVal(e.target.value)}
+                  className="text-sm min-h-[80px]"
+                  autoFocus
+                  data-testid="input-subcomponent-detail-desc"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={saveDesc}>Save</Button>
+                  <Button size="sm" variant="outline" onClick={() => { setDescVal(sub.description); setEditingDesc(false); }}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="group flex items-start gap-2 max-w-2xl">
+                <p className="text-gray-600 leading-relaxed" data-testid="text-subcomponent-detail-desc">
+                  {sub.description || <span className="italic text-gray-400">Click to add a description...</span>}
+                </p>
+                <Button variant="ghost" size="sm" className="h-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={() => setEditingDesc(true)}>
+                  <Pencil className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <SectionHeader title="Featured Artifacts" />
+          <ScrollArea className="w-full whitespace-nowrap pb-4">
+            <div className="flex gap-4">
+              {FEATURED_ARTIFACTS.slice(0, 2).map(artifact => (
+                <ArtifactCard key={artifact.id} artifact={artifact} />
+              ))}
+              <div className="flex flex-col w-[160px] group cursor-pointer">
+                <div className="relative aspect-[4/3] bg-gray-50 rounded-md border border-dashed border-gray-300 flex items-center justify-center transition-colors group-hover:bg-gray-100 group-hover:border-gray-400">
+                  <div className="flex flex-col items-center gap-1 text-gray-400">
+                    <Plus className="w-6 h-6" />
+                    <span className="text-[10px] font-medium">Add Artifact</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <ScrollBar orientation="horizontal" />
+          </ScrollArea>
+        </section>
+
+        <section className="space-y-6">
+          <SectionHeader title="Key Design Elements" />
+          <CompactTagRow
+            aims={sub.aims}
+            practices={sub.practices}
+            supports={sub.supports}
+            onToggleAim={toggleAim}
+            getAimLevel={(label, type) => sub.aims.find(a => a.type === type && a.label === label)?.level}
+            onSetAimLevel={(label, type, level) =>
+              onUpdate({ ...sub, aims: sub.aims.map(a => (a.type === type && a.label === label ? { ...a, level } : a)) })
+            }
+            onRemoveAim={(id) => onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== id) })}
+            onTogglePractice={togglePractice}
+            onRemovePractice={(id) => onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== id) })}
+            onToggleSupport={toggleSupport}
+            onRemoveSupport={(id) => onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== id) })}
+          />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function KeyDesignElementsSummary({
+  elements,
+  onChange,
+  onViewOutcomes,
+  onOpenOutcome,
+}: {
+  elements: KeyDesignElements;
+  onChange: (updated: KeyDesignElements) => void;
+  onViewOutcomes?: () => void;
+  onOpenOutcome?: (label: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+
+  const aims = elements?.aims || [];
+  const practices = elements?.practices || [];
+  const supports = elements?.supports || [];
+  const outcomes = aims.filter(a => a.type === "outcome");
+  const leaps = aims.filter(a => a.type === "leap");
+  const keyPractices = practices.filter(p => !!p.isKey);
+  const keySupports = supports.filter(s => !!s.isKey);
+
+  const aimLabels = aims.map(a => a.label);
+  const practiceLabels = practices.map(p => p.label);
+  const supportLabels = supports.map(s => s.label);
+
+  const current = { aims, practices, supports };
+
+  const getAimLevel = (label: string, type: "outcome" | "leap") => {
+    return aims.find(a => a.type === type && a.label === label)?.level;
+  };
+
+  const setAimLevel = (label: string, type: "outcome" | "leap", level: TagLevel) => {
+    onChange({
+      ...current,
+      aims: aims.map(a => (a.type === type && a.label === label ? { ...a, level } : a)),
+    });
+  };
+
+  const toggleAim = (label: string, type: TagType) => {
+    const exists = aims.some(a => a.label === label);
+    if (exists) {
+      onChange({ ...current, aims: aims.filter(a => a.label !== label) });
+    } else {
+      onChange({ ...current, aims: [...aims, { id: generateId(), type, label, level: "Medium" }] });
+    }
+  };
+
+  const removeAim = (label: string) => {
+    onChange({ ...current, aims: aims.filter(a => a.label !== label) });
+  };
+
+  const togglePractice = (label: string) => {
+    const exists = practices.some(p => p.label === label);
+    if (exists) {
+      onChange({ ...current, practices: practices.filter(p => p.label !== label) });
+    } else {
+      onChange({ ...current, practices: [...practices, { id: generateId(), type: "practice" as TagType, label }] });
+    }
+  };
+
+  const removePractice = (label: string) => {
+    onChange({ ...current, practices: practices.filter(p => p.label !== label) });
+  };
+
+  const toggleSupport = (label: string) => {
+    const exists = supports.some(s => s.label === label);
+    if (exists) {
+      onChange({ ...current, supports: supports.filter(s => s.label !== label) });
+    } else {
+      onChange({ ...current, supports: [...supports, { id: generateId(), type: "support" as TagType, label }] });
+    }
+  };
+
+  const removeSupport = (label: string) => {
+    onChange({ ...current, supports: supports.filter(s => s.label !== label) });
+  };
+
+  const getIsKeyPractice = (label: string) => {
+    return practices.find(p => p.label === label)?.isKey ?? false;
+  };
+
+  const setIsKeyPractice = (label: string, isKey: boolean) => {
+    onChange({
+      ...current,
+      practices: practices.map(p => (p.label === label ? { ...p, isKey } : p)),
+    });
+  };
+
+  const getIsKeySupport = (label: string) => {
+    return supports.find(s => s.label === label)?.isKey ?? false;
+  };
+
+  const setIsKeySupport = (label: string, isKey: boolean) => {
+    onChange({
+      ...current,
+      supports: supports.map(s => (s.label === label ? { ...s, isKey } : s)),
+    });
+  };
+
+  return (
+    <section className="space-y-4" data-testid="section-key-design-elements">
+      <div className="flex items-center justify-between">
+        <SectionHeader title="Key Design Elements" />
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={() => setIsOpen(!isOpen)}
+          className="text-xs text-gray-500 hover:text-gray-900"
+          data-testid="button-toggle-key-elements"
+        >
+          {isOpen ? (
+            <>
+              <ChevronDown className="w-3 h-3 mr-1" /> Collapse
+            </>
+          ) : (
+            <>
+              <ChevronRight className="w-3 h-3 mr-1" /> Expand
+            </>
+          )}
+        </Button>
+      </div>
+
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="border rounded-xl bg-gray-50/50 p-3 flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-1.5 text-xs uppercase tracking-wide">
+                  <Target className="w-3.5 h-3.5 text-emerald-600" /> Aims
+                  <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full ml-1.5">{aims.length}</span>
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[10px] text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 px-2 rounded-full border border-emerald-100"
+                  onClick={onViewOutcomes}
+                  disabled={!onViewOutcomes}
+                >
+                  View more detail
+                </Button>
+              </div>
+              <ScrollArea className="max-h-[280px]">
+                <div className="space-y-2">
+                  {outcomes.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Outcomes</span>
+                      <div className="flex flex-wrap gap-1">
+                        {outcomes.map(aim => (
+                          <Chip
+                            key={aim.id}
+                            type="outcome"
+                            label={aim.label}
+                            meta={levelToHml(aim.level)}
+                            isPrimary={aim.isPrimary}
+                            onClick={onOpenOutcome ? () => onOpenOutcome(aim.label) : undefined}
+                            onRemove={() => removeAim(aim.label)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {leaps.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Leaps</span>
+                      <div className="flex flex-wrap gap-1">
+                        {leaps.map(aim => (
+                          <Chip key={aim.id} type="leap" label={aim.label} onRemove={() => removeAim(aim.label)} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {aims.length === 0 && (
+                    <p className="text-xs text-gray-400 italic">No aims defined yet</p>
+                  )}
+                </div>
+              </ScrollArea>
+              <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
+                <SchemaPickerSheet
+                  title="Select Outcomes"
+                  description="Add or remove outcome aims for this component."
+                  schema={OUTCOME_SCHEMA}
+                  selectedLabels={aimLabels}
+                  onToggle={(label) => toggleAim(label, "outcome")}
+                  getLevel={(label) => getAimLevel(label, "outcome")}
+                  onSetLevel={(label, level) => setAimLevel(label, "outcome", level)}
+                  type="outcome"
+                  triggerLabel="Outcomes"
+                  triggerIcon={Target}
+                />
+                <SchemaPickerSheet
+                  title="Select Leaps"
+                  description="Add or remove leap aims for this component."
+                  schema={LEAP_SCHEMA}
+                  selectedLabels={aimLabels}
+                  onToggle={(label) => toggleAim(label, "leap")}
+                  getLevel={(label) => getAimLevel(label, "leap")}
+                  onSetLevel={(label, level) => setAimLevel(label, "leap", level)}
+                  type="leap"
+                  triggerLabel="Leaps"
+                  triggerIcon={Sparkles}
+                />
+              </div>
+            </div>
+
+            <div className="border rounded-xl bg-gray-50/50 p-3 flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-1.5 text-xs uppercase tracking-wide">
+                  <RotateCw className="w-3.5 h-3.5 text-orange-600" /> Practices
+                  <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full ml-1.5">
+                    {keyPractices.length}{keyPractices.length !== practices.length ? `/${practices.length}` : ""}
+                  </span>
+                </h3>
+                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50 px-2 rounded-full border border-orange-100">
+                  View All Selected
+                </Button>
+              </div>
+              <ScrollArea className="max-h-[280px]">
+                <div className="flex flex-wrap gap-1">
+                  {keyPractices.map(p => (
+                    <Chip key={p.id} type="practice" label={p.label} onRemove={() => removePractice(p.label)} />
+                  ))}
+                  {keyPractices.length === 0 && (
+                    <p className="text-xs text-gray-400 italic">No key practices yet</p>
+                  )}
+                </div>
+              </ScrollArea>
+              <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
+                <SchemaPickerSheet
+                  title="Select Practices"
+                  description="Add or remove practices for this component."
+                  schema={PRACTICE_SCHEMA}
+                  selectedLabels={practiceLabels}
+                  onToggle={togglePractice}
+                  getIsKey={getIsKeyPractice}
+                  onSetIsKey={setIsKeyPractice}
+                  type="practice"
+                  triggerLabel="Practices"
+                  triggerIcon={RotateCw}
+                />
+              </div>
+            </div>
+
+            <div className="border rounded-xl bg-gray-50/50 p-3 flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-1.5 text-xs uppercase tracking-wide">
+                  <Wrench className="w-3.5 h-3.5 text-sky-600" /> Supports
+                  <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full ml-1.5">
+                    {keySupports.length}{keySupports.length !== supports.length ? `/${supports.length}` : ""}
+                  </span>
+                </h3>
+                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-sky-600 hover:text-sky-700 hover:bg-sky-50 px-2 rounded-full border border-sky-100">
+                  View All Selected
+                </Button>
+              </div>
+              <ScrollArea className="max-h-[280px]">
+                <div className="flex flex-wrap gap-1">
+                  {keySupports.map(s => (
+                    <Chip key={s.id} type="support" label={s.label} onRemove={() => removeSupport(s.label)} />
+                  ))}
+                  {keySupports.length === 0 && (
+                    <p className="text-xs text-gray-400 italic">No key supports yet</p>
+                  )}
+                </div>
+              </ScrollArea>
+              <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
+                <SchemaPickerSheet
+                  title="Select Supports"
+                  description="Add or remove supports for this component."
+                  schema={SUPPORT_SCHEMA}
+                  selectedLabels={supportLabels}
+                  onToggle={toggleSupport}
+                  getIsKey={getIsKeySupport}
+                  onSetIsKey={setIsKeySupport}
+                  type="support"
+                  triggerLabel="Supports"
+                  triggerIcon={Wrench}
+                />
+              </div>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </section>
+  );
+}
+
+export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void }) {
+  const [description, setDescription] = useState("");
+  const [keyDesignElements, setKeyDesignElements] = useState<KeyDesignElements>({ aims: [], practices: [], supports: [] });
+  const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
+  const [localOpenSubId, setLocalOpenSubId] = useState<string | null>(null);
+  const [addingSubcomponent, setAddingSubcomponent] = useState(false);
+  const [newSubName, setNewSubName] = useState("");
+  const [showOutcomeSummary, setShowOutcomeSummary] = useState(false);
+  const [showOutcomeScore, setShowOutcomeScore] = useState(false);
+  const [selectedOutcomeLabel, setSelectedOutcomeLabel] = useState<string | null>(null);
+
+  const activeSubId = openSubId !== undefined ? openSubId : localOpenSubId;
+  const setActiveSubId = (id: string | null) => {
+    if (onOpenSubIdChange) onOpenSubIdChange(id);
+    else setLocalOpenSubId(id);
+  };
+
+  const { data: componentData } = useQuery(componentQueries.byNodeId(nodeId || ""));
+  const updateMutation = useUpdateComponent();
+
+  useEffect(() => {
+    if (componentData) {
+      const de: DesignedExperienceData = componentData.designedExperienceData || {};
+      setDescription(de.description || "");
+      setKeyDesignElements(de.keyDesignElements || { aims: [], practices: [], supports: [] });
+      setSubcomponents((de.subcomponents || []).map((s: any) => ({
+        ...s,
+        id: s.id || generateId(),
+        aims: s.aims || [],
+        practices: s.practices || [],
+        supports: s.supports || [],
+      })));
+    }
+  }, [componentData]);
+
+  useEffect(() => {
+    if (initialSubId && subcomponents.length > 0) {
+      const found = subcomponents.find(s => s.id === initialSubId);
+      if (found) {
+        setActiveSubId(initialSubId);
+        onSubIdConsumed?.();
+      }
+    }
+  }, [initialSubId, subcomponents]);
+
+  const saveData = useCallback(() => {
+    if (!nodeId) return;
+    const designedExperienceData: DesignedExperienceData = {
+      description,
+      keyDesignElements,
+      subcomponents,
+    };
+    updateMutation.mutate({ nodeId, data: { designedExperienceData } });
+  }, [nodeId, description, keyDesignElements, subcomponents]);
+
+  useEffect(() => {
+    if (!nodeId || !componentData) return;
+    const timer = setTimeout(() => {
+      saveData();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [description, keyDesignElements, subcomponents]);
+
+  const addSubcomponent = () => {
+    if (!newSubName.trim()) return;
+    const newSub: DESubcomponent = {
+      id: generateId(),
+      name: newSubName.trim(),
+      description: "",
+      aims: [],
+      practices: [],
+      supports: [],
+    };
+    setSubcomponents(prev => [...prev, newSub]);
+    setNewSubName("");
+    setAddingSubcomponent(false);
+  };
+
+  const updateSubcomponent = (updated: DESubcomponent) => {
+    setSubcomponents(prev => prev.map(s => s.id === updated.id ? updated : s));
+  };
+
+  const deleteSubcomponent = (id: string) => {
+    setSubcomponents(prev => prev.filter(s => s.id !== id));
+    if (activeSubId === id) setActiveSubId(null);
+  };
+
+  const openSub = activeSubId ? subcomponents.find(s => s.id === activeSubId) : null;
+
+  if (showOutcomeScore) {
+    return <OutcomeScoreView nodeId={nodeId} title={title} onBack={() => setShowOutcomeScore(false)} />;
+  }
+
+  if (selectedOutcomeLabel) {
+    return (
+      <OutcomeDetailView
+        nodeId={nodeId}
+        title={title}
+        outcomeLabel={selectedOutcomeLabel}
+        onBack={() => setSelectedOutcomeLabel(null)}
+        onOpenOutcomeScore={() => setShowOutcomeScore(true)}
+      />
+    );
+  }
+
+  if (showOutcomeSummary) {
+    return (
+      <OutcomeSummaryView
+        nodeId={nodeId}
+        title={title}
+        onBack={() => setShowOutcomeSummary(false)}
+        onOpenOutcomeScore={() => setShowOutcomeScore(true)}
+      />
+    );
+  }
+
+  if (openSub) {
+    return (
+      <SubcomponentDetailPage
+        sub={openSub}
+        parentTitle={title || "Component"}
+        onBack={() => setActiveSubId(null)}
+        onUpdate={(updated) => updateSubcomponent(updated)}
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-white">
+      <div className="max-w-7xl mx-auto px-6 md:px-10 space-y-8 pb-24 pt-6">
+        
+        <section className="space-y-4">
+          <Textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the designed experience for this component..."
+            className="text-sm text-gray-700 leading-relaxed border-gray-200 focus:border-blue-300 min-h-[80px] resize-none bg-gray-50/50"
+            data-testid="input-de-description"
+          />
+        </section>
+
+        <section>
+          <SectionHeader title="Featured Artifacts" onAdd={() => {}}>
+            <Button variant="link" size="sm" className="text-xs text-gray-500 h-auto p-0 hover:text-gray-900">View all</Button>
+          </SectionHeader>
+          <ScrollArea className="w-full whitespace-nowrap pb-4">
+            <div className="flex gap-4">
+              {FEATURED_ARTIFACTS.map(artifact => (
+                <ArtifactCard key={artifact.id} artifact={artifact} />
+              ))}
+              <div className="flex flex-col w-[160px] group cursor-pointer">
+                <div className="relative aspect-[4/3] bg-gray-50 rounded-md border border-dashed border-gray-300 flex items-center justify-center transition-colors group-hover:bg-gray-100 group-hover:border-gray-400">
+                  <div className="flex flex-col items-center gap-1 text-gray-400">
+                    <Plus className="w-6 h-6" />
+                    <span className="text-[10px] font-medium">Add Artifact</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <ScrollBar orientation="horizontal" />
+          </ScrollArea>
+        </section>
+
+        <KeyDesignElementsSummary
+          elements={keyDesignElements}
+          onChange={setKeyDesignElements}
+          onViewOutcomes={() => setShowOutcomeSummary(true)}
+          onOpenOutcome={(label) => setSelectedOutcomeLabel(label)}
+        />
+
+        <section className="mb-6">
+          <SectionHeader 
+            title="Subcomponents" 
+            count={subcomponents.length} 
+            onAdd={() => setAddingSubcomponent(true)} 
+          />
+          
+          <AnimatePresence>
+            {addingSubcomponent && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }} 
+                animate={{ opacity: 1, height: "auto" }} 
+                exit={{ opacity: 0, height: 0 }}
+                className="mb-4 overflow-hidden"
+              >
+                <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <Input
+                    value={newSubName}
+                    onChange={(e) => setNewSubName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addSubcomponent();
+                      if (e.key === "Escape") { setNewSubName(""); setAddingSubcomponent(false); }
+                    }}
+                    placeholder="Subcomponent name..."
+                    className="flex-1 h-8 text-sm"
+                    autoFocus
+                    data-testid="input-new-subcomponent-name"
+                  />
+                  <Button size="sm" className="h-8" onClick={addSubcomponent} data-testid="button-confirm-add-subcomponent">Add</Button>
+                  <Button size="sm" variant="ghost" className="h-8" onClick={() => { setNewSubName(""); setAddingSubcomponent(false); }}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {subcomponents.length === 0 && !addingSubcomponent && (
+            <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
+              <div className="text-gray-400 mb-3">
+                <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm font-medium">No subcomponents yet</p>
+                <p className="text-xs mt-1">Add subcomponents to define the detailed experiences within this component.</p>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="text-xs gap-1"
+                onClick={() => setAddingSubcomponent(true)}
+              >
+                <Plus className="w-3 h-3" /> Add First Subcomponent
+              </Button>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {subcomponents.map(sub => (
+              <SubcomponentCard 
+                key={sub.id} 
+                sub={sub} 
+                onUpdate={updateSubcomponent}
+                onDelete={() => deleteSubcomponent(sub.id)}
+                onOpen={() => setActiveSubId(sub.id)}
+              />
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}

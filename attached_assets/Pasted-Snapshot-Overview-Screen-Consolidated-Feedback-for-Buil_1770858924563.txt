@@ -1,0 +1,148 @@
+Snapshot / Overview Screen — Consolidated Feedback for Build
+1) Make the Snapshot feel like a true snapshot (core principle)
+
+Right now the screen reads like a long running list with weak structural cohesion. The Snapshot should feel like:
+
+a condensed summary view
+
+with clear groupings
+
+that a user can glance at quickly and understand the component
+
+Implications
+
+Reduce vertical sprawl
+
+Use compact layouts (rows, cards, two-column blocks, pills)
+
+Avoid repeating labels and bulky controls
+
+Keep the main content “scannable”
+
+2) Don’t repeat the “type” and “level” selections in multiple places
+
+User should select Component Type (and Level when relevant) once.
+
+After that, those values should not be re-displayed elsewhere redundantly (no “Type: X” “Level: Y” repeated in other sections).
+
+The screen should simply render the appropriate fields once the selection is made.
+
+3) Top section should be one cohesive “Definition & Purpose” block (not a separate “configuration” section)
+
+The top of Snapshot should be a tight, cohesive block that includes:
+
+Component Name (most prominent)
+
+Component Description (very prominent; close to the name)
+
+Component Type selector should be visually integrated near the name/description (e.g., next to name or directly under it)
+
+If STEM/Humanities: Level selector (Course vs Subject) appears in the same top block (not elsewhere)
+
+Primary Outcomes appear directly under the Component Type/Level within this same block
+
+Primary Outcomes interaction + style
+
+Display selected Primary Outcomes as pills (matching Design Experience tab style)
+
+Include a pill: “+ Add outcome”
+
+Clicking opens a side panel to choose outcomes
+
+Do not show “L2/L3” anywhere—just “Primary Outcomes”
+
+The STEM taxonomy stays behind the scenes (STEM → Math → Algebra), but the UI just shows selected outcome pills.
+
+4) High-Level Structure (Course template)
+What’s included
+
+For Course: include subcomponents here (e.g., Algebra I, Geometry, Algebra II)
+
+Provide a compact “+ Add subcomponent” pill/button
+
+Render subcomponents as chips or compact rows (not a tall list)
+
+Course Sequence
+
+Do not make it a visual diagram
+
+Make it a single written field describing progression
+
+Time Model at a Glance
+
+Keep Daily vs Block
+
+Include Term length here too (should exist for Course AND Subject)
+
+Editable fields:
+
+Term length
+
+Days per week
+
+Minutes per class
+
+Do not show “Total minutes/week” (can be computed silently)
+
+5) High-Level Structure (Subject template)
+“What’s included” + Universal/Elective + AP/IB should be compact
+
+Universal vs Elective should live in High-Level Structure (not “Who it serves”)
+
+AP/IB offered should stay, but must be much smaller / less prominent
+
+Avoid a big radio-button block
+
+Prefer a compact toggle or small inline yes/no
+
+If “Yes,” optionally show a small “AP/IB details” field (also compact)
+
+Time Model at a Glance (Subject)
+
+Keep:
+
+Daily vs Block
+
+Term length
+
+Days/week
+
+Minutes/class
+
+Omit total minutes/week from UI
+
+6) Who it serves (Course + Subject)
+
+Keep Grades served and Targeted student groups as compact chips/controls
+
+For Subject: “Typical on-level grade band” needs a better input pattern than a dropdown
+
+(TBD) but keep it compact (e.g., grade multi-select or a flexible range picker)
+
+7) Participation / Reach
+
+Keep as manual entry for now
+
+Keep compact and scannable
+
+Optional lightweight visualization that reflects manual breakdowns is okay
+
+8) Non-traditional components (Wayfinding / Well-being / Cross-cutting)
+
+Same cohesive top Definition & Purpose block:
+
+Name + Description + Type + Primary Outcomes pills (+ Add outcome side panel)
+
+Remove “Statement of purpose / intent” (belongs in Description)
+
+Reduce section bloat:
+
+“Where it shows up” should not be a huge radio list—make it compact and/or combine into High-Level Structure
+
+Remove “Structure type”
+
+Keep Cadence dropdown
+
+Remove Infrastructure Requirements and Infrastructure Elements for now
+
+Combine “Who it serves” + “Participation/Reach” into one compact block (grades + participation model + # + %)

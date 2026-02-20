@@ -1,0 +1,310 @@
+🎯 Ring Component – Outcome Score (O Score)
+
+Implementation Plan
+
+1. Conceptual Model
+
+Each Ring Component can be scored in one of two modes:
+
+Targeted Outcome Mode
+
+Overall Component Mode
+
+Targeted Outcome Mode
+
+The component contains 0–N Targeted Outcomes.
+
+Each Outcome has:
+
+A priority for the component (H | M | L)
+
+1–N Measures
+
+Each Measure has:
+
+Applies-to group
+
+Priority (H | M | L)
+
+Rigor Path (thin | medium | thick)
+
+Final 1–5 Rating
+
+The system calculates:
+
+Outcome-level scores
+
+Then Component-level O Score
+
+Overall Component Mode
+
+Skip outcome selection.
+
+Attach measures directly to the component.
+
+Compute score directly from measures.
+
+2. Data Model (Minimal Schema)
+RingComponent
+id: string
+name: string
+outcomeScoringMode: "targeted" | "overall"
+overallMeasures?: Measure[]
+targetedOutcomes?: TargetedOutcome[]
+finalOutcomeScore: number | null
+
+TargetedOutcome
+id: string
+outcomeId: string
+priority: "H" | "M" | "L"
+rigorPath: "thin" | "medium" | "thick"
+measures: Measure[]
+calculatedScore: number | null
+
+Measure
+id: string
+name: string
+appliesTo: string
+priority: "H" | "M" | "L"
+rating: number | null        // 1–5
+justification?: string       // required if medium/thick
+definedRubric?: {
+  five: string
+  three: string
+  one: string
+}
+uploadedEvidence?: string[]  // thick only
+systemSuggestedRating?: number
+skipped: boolean
+
+3. User Flow
+Step 1 – Select Scoring Mode
+
+User chooses:
+
+Score by Targeted Outcomes
+
+Score Overall Component
+
+If overall:
+
+Skip outcome selection
+
+Move directly to adding measures
+
+If targeted:
+
+Select targeted outcomes
+
+Assign priority (H | M | L) to each outcome
+
+Step 2 – Add Measures
+
+For each outcome (or overall):
+
+User must:
+
+Add at least one measure
+
+Define:
+
+Measure name
+
+Applies-to group (e.g., all students, subgroup)
+
+Priority (H | M | L)
+
+Optional future enhancements:
+
+Suggested measure library
+
+“Leader perception” toggle measure (default OFF)
+
+Step 3 – Choose Rigor Path (Per Outcome)
+
+Rigor Path applies at the Outcome level.
+
+Thin Path
+
+User inputs 1–5 rating directly.
+
+Medium Path
+
+User must:
+
+Define what a 5 looks like
+
+Define what a 3 looks like
+
+Define what a 1 looks like
+
+Provide justification
+
+Provide rating
+
+Thick Path
+
+User must:
+
+Define 5/3/1 rubric
+
+Upload evidence
+
+System generates suggested rating
+
+User may override with justification
+
+4. Required Reflection (All Paths)
+
+For every measure, user must respond to:
+
+Average achievement
+
+Variability across students
+
+This applies even in Thin mode.
+
+5. Weight Mapping
+
+Priority weights:
+
+H = 6
+M = 3
+L = 1
+
+
+Rules:
+
+Only L priority measures or outcomes may be skipped.
+
+Skipped items are excluded from calculations entirely.
+
+6. Calculation Logic
+6.1 Outcome Score Calculation
+
+For a given outcome:
+
+Outcome Score =
+SUM(measureRating × measureWeight)
+-----------------------------------
+SUM(measureWeight)
+
+
+Where:
+
+measureWeight = 6 | 3 | 1
+
+Exclude skipped measures
+
+If totalWeight = 0 → Outcome Score = null
+
+6.2 Component O Score (Targeted Mode)
+Component O Score =
+SUM(outcomeScore × outcomeWeight)
+-----------------------------------
+SUM(outcomeWeight)
+
+
+Where:
+
+outcomeWeight = 6 | 3 | 1
+
+Exclude skipped outcomes
+
+Only outcomes with non-null score included
+
+If totalWeight = 0 → Component O Score = null
+
+6.3 Component O Score (Overall Mode)
+
+Same formula as outcome-level, but applied directly to measures.
+
+7. Skip Logic Rules
+
+Only items with priority L may be skipped.
+
+If skipped:
+
+Exclude from numerator
+
+Exclude from denominator
+
+If all items excluded → return null
+
+8. Recalculation Triggers
+
+Recalculate instantly when:
+
+Rating changes
+
+Priority changes
+
+Skip toggle changes
+
+Outcome added/deleted
+
+Measure added/deleted
+
+Rigor path changed
+
+9. Validation Rules
+
+Must have ≥ 1 non-skipped measure per outcome.
+
+Cannot skip H or M.
+
+Medium requires rubric + justification.
+
+Thick requires rubric + evidence upload.
+
+Rating must be integer between 1 and 5.
+
+10. Core Calculation Function (Pseudocode)
+function weightedAverage(items) {
+  let totalWeight = 0;
+  let totalScore = 0;
+
+  for (const item of items) {
+    if (!item.skipped && item.rating !== null) {
+      totalWeight += item.weight;
+      totalScore += item.rating * item.weight;
+    }
+  }
+
+  if (totalWeight === 0) return null;
+
+  return totalScore / totalWeight;
+}
+
+11. Phased Build Recommendation
+Phase 1 – Functional MVP
+
+Thin path only
+
+H/M/L weighting
+
+Skip logic
+
+Live recalculation
+
+Phase 2 – Medium Rigor
+
+5/3/1 rubric fields
+
+Justification enforcement
+
+Phase 3 – Thick Rigor
+
+File upload
+
+AI suggested rating
+
+Override tracking
+
+12. Final Definition
+
+The Ring Component Outcome Score is:
+
+A weighted average of weighted averages,
+where weights reflect declared priority
+and rigor determines evidentiary strength.

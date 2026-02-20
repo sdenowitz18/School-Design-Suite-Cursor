@@ -1,0 +1,259 @@
+🎯 Ring Component – Experience Score (E Score)
+
+Consolidated Implementation Plan (Updated)
+
+Source: Experience Score for Ring Component slide 
+
+Experience Score for Ring Compo…
+
+ plus your clarifications (no per-leap score; Leaps weighting based on # of Leaps added to component).
+
+1) What We’re Building
+
+For each Ring Component, compute an Experience Score (E Score) on a 1–5 scale (or blank/null when not enough information).
+
+The E Score is a weighted composite of three dimensions:
+
+Leaps / Design Principles
+
+Mental & Physical Health
+
+Behavior, Attendance & Engagement
+
+Thin/Medium/Thick measure-rating mechanics are reused from Outcomes.
+
+2) Inputs and Data Model (Experience)
+2.1 Leaps / Design Principles (Required Dimension)
+
+For each component:
+
+User adds 1–6 Leaps (or DPs) to the component
+
+For each Leap/DP:
+
+targetPriority: H | M | L
+
+0–N measures (from a restricted list for now)
+
+Allowed measure types for Leaps (v1): 
+
+Experience Score for Ring Compo…
+
+Student self-report survey (about the component)
+
+Leaps look-for observation (for the component)
+
+Teacher perception survey (about the component)
+
+Each measure also has:
+
+applies-to group
+
+measure priority H | M | L
+
+rating 1–5 (Thin/Med/Thick)
+
+2.2 Mental & Physical Health (Optional)
+
+User can enter:
+
+measures
+
+applies-to
+
+H/M/L for measure importance
+
+rating 1–5
+
+2.3 Behavior, Attendance & Engagement (Optional)
+
+Same as Mental & Physical Health.
+
+3) Dimension Weights (Base Weights)
+3.1 Leaps Dimension Weight (based on # of Leaps added to the component)
+
+Count = number of Leaps/DPs added/targeted on the component (not scored count).
+
+If 1–2 Leaps → Leaps weight = 0.40
+
+If 3–4 Leaps → Leaps weight = 0.50
+
+If 5–6 Leaps → Leaps weight = 0.60
+
+3.2 Remaining Weight Split
+
+The remaining weight is split evenly across the other two dimensions:
+
+remaining = 1.00 - leapsWeight
+healthWeightBase = remaining / 2
+behaviorWeightBase = remaining / 2
+
+
+Examples:
+
+2 Leaps → 0.40 / 0.30 / 0.30
+
+4 Leaps → 0.50 / 0.25 / 0.25
+
+6 Leaps → 0.60 / 0.20 / 0.20
+
+4) Dimension Score Computation (No Per-Leap Score Output)
+4.1 Leaps Dimension Score (single output)
+
+We do not compute/store an “individual leap score” as a product requirement.
+
+Instead compute one leapsDimensionScore using a two-level weighted aggregation:
+
+Within each Leap: aggregate its measures (measure H/M/L weights) → produces a Leap contribution (can be computed on the fly; no need to persist)
+
+Across Leaps: aggregate Leap contributions using Leap targetPriority weights (H/M/L)
+
+Output:
+
+leapsDimensionScore: 1–5 | null
+
+Missing data rule (hard):
+
+If there are zero rated measures across all Leaps, then:
+
+leapsDimensionScore = null
+
+E Score must be null (do not compute, do not redistribute)
+
+This matches “If Leaps data is missing; the E score is left blank…” 
+
+Experience Score for Ring Compo…
+
+4.2 Health Dimension Score
+
+Compute healthDimensionScore as weighted average of its measures (H/M/L at measure level).
+
+If no rated measures → score = null
+
+4.3 Behavior Dimension Score
+
+Same as Health.
+
+5) When a Dimension Counts as “Missing”
+5.1 Leaps Dimension Missing
+
+Leaps is missing if:
+
+No rated measures exist across all Leaps
+
+If missing → E Score = null (stop).
+
+5.2 Health / Behavior Missing
+
+Health or Behavior is missing if either:
+
+No rated measures exist OR
+
+User explicitly selects: “Don’t consider this dimension until there’s more robust data” (per slide) 
+
+Experience Score for Ring Compo…
+
+(You can optionally also auto-suggest this when all measures are L, but keep the explicit toggle as the source of truth.)
+
+6) Weight Redistribution Rules (Hard Rule)
+
+If Leaps score exists, compute final weights like this:
+
+Start with base weights:
+
+wL = leapsWeightBase
+
+wH = healthWeightBase
+
+wB = behaviorWeightBase
+
+Identify missing optional dimensions among Health/Behavior:
+
+If Health missing → redistribute wH evenly to remaining non-missing dimensions
+
+If Behavior missing → redistribute wB evenly to remaining non-missing dimensions
+
+Rules:
+
+If exactly one of Health/Behavior is missing:
+
+Add its weight to the other two non-missing dimensions proportionally by equal split across the remaining dims.
+
+If both Health and Behavior missing:
+
+Leaps becomes 100% (wL = 1.00)
+
+Important: Do not redistribute if Leaps is missing (Leaps missing → E Score null).
+
+7) Final E Score Computation
+
+If leapsDimensionScore is null → experienceScore = null.
+
+Else:
+
+experienceScore =
+(leapsDimensionScore   * wL_adj) +
+(healthDimensionScore  * wH_adj if not missing) +
+(behaviorDimensionScore* wB_adj if not missing)
+
+
+Return:
+
+experienceScore (1–5) or null
+
+8) UI / UX Requirements
+8.1 Leaps Measures Input
+
+For each Leap: user selects from the allowed measure types (v1 list)
+
+Each measure: applies-to, H/M/L importance, rating path (thin/med/thick)
+
+8.2 Optional Dimension “Exclude Until Robust” Toggle
+
+For Health and Behavior:
+
+Add a toggle that marks the dimension as “not considered”
+
+When toggled on:
+
+Dimension becomes missing
+
+Weight redistributes immediately
+
+8.3 “Not Enough Information”
+
+If Leaps has no rated measures:
+
+Show E Score as blank/null with a message:
+
+“Not enough information to calculate Experience Score (Leaps measures missing).”
+
+9) Recalculation Triggers
+
+Recompute dimension scores, weights, and final E Score when:
+
+Leap added/removed
+
+Leap targetPriority changed
+
+Any measure added/removed
+
+Measure priority changed
+
+Measure rating created/changed/cleared
+
+Health/Behavior exclude toggle changed
+
+10) Build Order (Recommended)
+
+Data model + UI scaffolding for three dimensions
+
+Leaps base weight (by # of Leaps added) + base split
+
+Leaps dimension score (single output) + “Leaps missing → E null” gate
+
+Health & Behavior dimension scoring
+
+Exclude toggle + redistribution engine
+
+Full E Score computation + QA test cases

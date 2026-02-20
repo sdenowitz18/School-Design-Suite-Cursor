@@ -1,0 +1,112 @@
+Got it — here is only the “additional feedback from this point in time” (i.e., everything you added after the earlier consolidated notes), formatted for Replit.
+
+Snapshot / Overview Screen — Additional Feedback (Replit Notes Only)
+A) Top section ordering + density
+
+Do not re-list the component name redundantly in the top section.
+
+Component Description must appear at the top, directly under the component name, above:
+
+Component Type / Level
+
+Primary Outcomes
+
+Cadence / Where it shows up
+
+Reduce white space globally; make the whole screen denser and more “snapshot-like.”
+
+B) Course template (STEM/Humanities) — edits
+High-Level Structure
+
+Course Sequence should be an editable multiline description field explaining how the structure/progression works (not visual).
+
+Reduce white space within High-Level Structure.
+
+Time Model at a Glance
+
+Keep the current structure and Term Length.
+
+Add missing field:
+
+Days per week / Classes per week (include one; days/week is fine)
+
+Keep Minutes per class editable.
+
+Who it serves / reach
+
+Current structure is good for Course.
+
+C) Subject template (STEM/Humanities) — edits
+
+Same top-section rule: Description goes above type/level/outcomes.
+
+Reduce white space; keep compact.
+
+AP/IB control should be small/compact and should only set yes/no.
+
+Do not auto-populate anything (e.g., “AP Calc AB”) or generate extra details automatically.
+
+D) Non-traditional (Wayfinding / Well-being / Cross-cutting) — edits
+D1) Where it shows up (only 3 options)
+
+“Where it shows up” should be a compact selection control (not a tall radio list). For now, only show:
+
+Embedded in classes
+
+Block schedule
+
+Other
+
+Conditional behavior
+
+If Embedded in classes:
+
+Show “Embedded in which components/subcomponents?” and allow selection from an existing list.
+
+If Block schedule:
+
+Show Time Model fields (same pattern as STEM/Humanities):
+
+Term length (Semester / Full Year)
+
+Classes per week
+
+Minutes per class
+
+Do not use “dosage” language.
+
+If Other:
+
+Show open text field describing where it shows up.
+
+Also: move “Where it shows up” so it sits above Cadence.
+
+D2) Key Experiences (add subcomponent-like items)
+
+Add a compact Key Experiences module for Wayfinding/Well-being/Cross-cutting.
+
+Provide “+ Add key experience”.
+
+Added experiences render as chips/compact rows.
+
+Keep lightweight (title + optional short description is enough).
+
+D3) Grades served (K–12)
+
+Grades served must support K–12.
+
+Use a multi-select picker (K, 1, 2, … 12) or compact grade-band picker.
+
+D4) Participation model conditional
+
+If Participation model = Targeted subset:
+
+Show open text field to describe the subset.
+
+D5) Remove “Primary Owner”
+
+Remove Primary Owner from non-traditional Snapshot for now.
+
+D6) Participation / Reach consistency
+
+Participation/Reach for non-traditional should match the look/feel of STEM/Humanities participation estimates (same layout pattern, compact, scannable).
