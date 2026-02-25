@@ -1,4 +1,8 @@
-import { storage } from "../server/storage";
+import { getPool } from "./_db";
+
+export const config = {
+  runtime: "nodejs20.x",
+};
 
 export default async function handler(req: any, res: any) {
   const method = String(req?.method || "POST").toUpperCase();
@@ -8,10 +12,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const existing = await storage.getComponents();
-    if (existing.length > 0) {
+    const pool = getPool();
+    const existing = await pool.query("select node_id from components limit 1");
+    if ((existing.rows || []).length > 0) {
       res.setHeader("Content-Type", "application/json");
-      return res.end(JSON.stringify({ message: "Already seeded", components: existing }));
+      const all = await pool.query("select * from components");
+      return res.end(JSON.stringify({ message: "Already seeded", components: all.rows || [] }));
     }
 
     const defaults = [
@@ -160,8 +166,22 @@ export default async function handler(req: any, res: any) {
 
     const created = [];
     for (const comp of defaults) {
-      const c = await storage.createComponent(comp as any);
-      created.push(c);
+      const q =
+        "insert into components (node_id,title,subtitle,color,canvas_x,canvas_y,snapshot_data,designed_experience_data,health_data) " +
+        "values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb) returning *";
+      const values = [
+        String((comp as any).nodeId),
+        String((comp as any).title),
+        String((comp as any).subtitle || ""),
+        String((comp as any).color || "bg-emerald-100"),
+        Number((comp as any).canvasX || 0),
+        Number((comp as any).canvasY || 0),
+        JSON.stringify((comp as any).snapshotData || {}),
+        JSON.stringify((comp as any).designedExperienceData || {}),
+        JSON.stringify((comp as any).healthData || {}),
+      ];
+      const r = await pool.query(q, values);
+      created.push(r.rows?.[0]);
     }
 
     res.statusCode = 201;

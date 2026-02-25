@@ -1,4 +1,8 @@
-import { storage } from "../../server/storage";
+import { getPool, readJsonBody } from "../_db";
+
+export const config = {
+  runtime: "nodejs20.x",
+};
 
 export default async function handler(req: any, res: any) {
   const method = String(req?.method || "GET").toUpperCase();
@@ -12,7 +16,9 @@ export default async function handler(req: any, res: any) {
 
   try {
     if (method === "GET") {
-      const component = await storage.getComponentByNodeId(nodeId);
+      const pool = getPool();
+      const r = await pool.query("select * from components where node_id = $1 limit 1", [nodeId]);
+      const component = r.rows?.[0];
       if (!component) {
         res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
@@ -23,7 +29,53 @@ export default async function handler(req: any, res: any) {
     }
 
     if (method === "PATCH") {
-      const updated = await storage.updateComponent(nodeId, req.body);
+      const body = (await readJsonBody(req)) || {};
+      const data = body || {};
+      const pool = getPool();
+
+      const sets: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      const setText = (col: string, val: any) => {
+        sets.push(`${col} = $${idx++}`);
+        values.push(val);
+      };
+      const setJsonb = (col: string, val: any) => {
+        sets.push(`${col} = $${idx++}::jsonb`);
+        values.push(JSON.stringify(val ?? {}));
+      };
+      const setInt = (col: string, val: any) => {
+        sets.push(`${col} = $${idx++}`);
+        values.push(Number(val ?? 0));
+      };
+
+      if ("title" in data) setText("title", String(data.title ?? ""));
+      if ("subtitle" in data) setText("subtitle", String(data.subtitle ?? ""));
+      if ("color" in data) setText("color", String(data.color ?? ""));
+      if ("canvasX" in data) setInt("canvas_x", data.canvasX);
+      if ("canvasY" in data) setInt("canvas_y", data.canvasY);
+      if ("snapshotData" in data) setJsonb("snapshot_data", data.snapshotData);
+      if ("designedExperienceData" in data) setJsonb("designed_experience_data", data.designedExperienceData);
+      if ("healthData" in data) setJsonb("health_data", data.healthData);
+
+      if (sets.length === 0) {
+        // no-op update, return current row
+        const r0 = await pool.query("select * from components where node_id = $1 limit 1", [nodeId]);
+        const current = r0.rows?.[0];
+        if (!current) {
+          res.statusCode = 404;
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify({ message: "Component not found" }));
+        }
+        res.setHeader("Content-Type", "application/json");
+        return res.end(JSON.stringify(current));
+      }
+
+      values.push(nodeId);
+      const q = `update components set ${sets.join(", ")} where node_id = $${idx} returning *`;
+      const updatedRow = await pool.query(q, values);
+      const updated = updatedRow.rows?.[0];
       if (!updated) {
         res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
@@ -34,7 +86,9 @@ export default async function handler(req: any, res: any) {
     }
 
     if (method === "DELETE") {
-      const deleted = await storage.deleteComponent(nodeId);
+      const pool = getPool();
+      const r = await pool.query("delete from components where node_id = $1 returning node_id", [nodeId]);
+      const deleted = (r.rows || []).length > 0;
       if (!deleted) {
         res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
