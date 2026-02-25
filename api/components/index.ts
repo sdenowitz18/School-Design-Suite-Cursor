@@ -1,8 +1,49 @@
-import { getPool, readJsonBody } from "../_db";
-
 export const config = {
   runtime: "nodejs",
 };
+
+async function getPool() {
+  const connectionString =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.NEON_DATABASE_URL ||
+    process.env.DRIZZLE_DATABASE_URL;
+  if (!connectionString) throw new Error("Missing database env var (DATABASE_URL or POSTGRES_URL).");
+  const sslMode = process.env.PGSSLMODE || process.env.POSTGRES_SSLMODE;
+  const wantsSsl =
+    String(sslMode || "").toLowerCase() === "require" ||
+    String(sslMode || "").toLowerCase() === "prefer" ||
+    /sslmode=/i.test(connectionString) ||
+    /neon\.tech/i.test(connectionString);
+  const pgMod: any = await import("pg");
+  const PoolCtor = pgMod?.Pool;
+  if (!PoolCtor) throw new Error("Failed to load pg Pool.");
+  return new PoolCtor({
+    connectionString,
+    ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
+  });
+}
+
+async function readJsonBody(req: any): Promise<any> {
+  const method = String(req?.method || "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") return undefined;
+  if (req?.body && typeof req.body === "object") return req.body;
+  const chunks: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => resolve());
+    req.on("error", (e: any) => reject(e));
+  });
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
 
 export default async function handler(req: any, res: any) {
   const method = String(req?.method || "GET").toUpperCase();

@@ -1,8 +1,30 @@
-import { getPool } from "./_db";
-
 export const config = {
   runtime: "nodejs",
 };
+
+async function getPool() {
+  const connectionString =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.NEON_DATABASE_URL ||
+    process.env.DRIZZLE_DATABASE_URL;
+  if (!connectionString) throw new Error("Missing database env var (DATABASE_URL or POSTGRES_URL).");
+  const sslMode = process.env.PGSSLMODE || process.env.POSTGRES_SSLMODE;
+  const wantsSsl =
+    String(sslMode || "").toLowerCase() === "require" ||
+    String(sslMode || "").toLowerCase() === "prefer" ||
+    /sslmode=/i.test(connectionString) ||
+    /neon\.tech/i.test(connectionString);
+  const pgMod: any = await import("pg");
+  const PoolCtor = pgMod?.Pool;
+  if (!PoolCtor) throw new Error("Failed to load pg Pool.");
+  return new PoolCtor({
+    connectionString,
+    ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
+  });
+}
 
 export default async function handler(req: any, res: any) {
   const method = String(req?.method || "POST").toUpperCase();
