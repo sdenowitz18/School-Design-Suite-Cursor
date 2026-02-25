@@ -1,4 +1,4 @@
-import { type Component, type InsertComponent, components } from "@shared/schema";
+import { type Component, type InsertComponent, components } from "../shared/schema";
 import { getDb } from "./db";
 import { eq } from "drizzle-orm";
 
