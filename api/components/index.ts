@@ -1,9 +1,5 @@
 import { getPool, readJsonBody } from "../_db";
 
-export const config = {
-  runtime: "nodejs20.x",
-};
-
 export default async function handler(req: any, res: any) {
   const method = String(req?.method || "GET").toUpperCase();
 
