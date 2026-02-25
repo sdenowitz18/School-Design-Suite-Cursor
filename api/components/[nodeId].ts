@@ -1,5 +1,9 @@
 import { getPool, readJsonBody } from "../_db";
 
+export const config = {
+  runtime: "nodejs",
+};
+
 export default async function handler(req: any, res: any) {
   const method = String(req?.method || "GET").toUpperCase();
   const nodeId = String(req?.query?.nodeId || req?.query?.["nodeId"] || "").trim();

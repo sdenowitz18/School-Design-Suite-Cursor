@@ -1,5 +1,9 @@
 import { getPool } from "./_db";
 
+export const config = {
+  runtime: "nodejs",
+};
+
 export default async function handler(req: any, res: any) {
   const method = String(req?.method || "POST").toUpperCase();
   if (method !== "POST") {
