@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronDown, Info } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronDown, Info, Layers, Package, Target } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,16 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 import { calculateRingDesignDimensionScores, calculateRingDesignScore } from "@shared/ring-design-score";
-import type { RingDesignScoreData } from "@shared/schema";
-import { Textarea } from "@/components/ui/textarea";
+import type { RingDesignScoreData, ScoreFilter, ScoreInstance } from "@shared/schema";
+import { listSelectableYearKeys } from "@shared/marking-period";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import ScoreFilterBar from "./score-filter-bar";
+import ScoreInstancesInlineEditor from "./score-instances-inline-editor";
+import { effectiveFromInstances } from "@shared/score-instances";
+import { useGlobalActors } from "@/lib/actors-store";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import ScoreFlags from "./score-flags";
 
 const DESIGN_BLUEPRINT_OPTIONS = ["Baseline", "Aspirational", "Journey: Early Stage", "Journey: Late Stage"] as const;
 type WeightLabel = "H" | "M" | "L";
@@ -31,40 +38,6 @@ function normalizeScore(value: unknown): number | null {
   const i = Math.round(n);
   if (i < 1 || i > 5) return null;
   return i;
-}
-
-function ScoreButtons({
-  value,
-  onChange,
-}: {
-  value: number | null;
-  onChange: (v: number | null) => void;
-}) {
-  return (
-    <div className="flex gap-1.5 items-center" data-testid="design-score-buttons">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onChange(value === n ? null : n)}
-          className={cn(
-            "w-9 h-9 rounded-lg text-sm font-bold transition-all border",
-            value === n
-              ? n >= 4
-                ? "bg-emerald-500 text-white border-emerald-600 shadow-md scale-110"
-                : n === 3
-                  ? "bg-yellow-500 text-white border-yellow-600 shadow-md scale-110"
-                  : "bg-red-500 text-white border-red-600 shadow-md scale-110"
-              : "bg-white text-gray-500 border-gray-200 hover:border-gray-400 hover:bg-gray-50"
-          )}
-          aria-pressed={value === n}
-          data-testid={`design-score-${n}`}
-        >
-          {n}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function WeightPicker({
@@ -130,7 +103,7 @@ function ScoreChip({ score, size = "md" }: { score: number | null; size?: "sm" |
       </div>
     );
 
-  const rounded = Math.round(score * 10) / 10;
+  const rounded = Math.max(1, Math.min(5, Math.round(score)));
   const color =
     rounded >= 4
       ? "bg-emerald-100 text-emerald-700 border-emerald-200"
@@ -156,14 +129,35 @@ interface RingDesignScoreViewProps {
   nodeId?: string;
   title?: string;
   onBack: () => void;
+  sourceFilter?: ScoreFilter;
+  onFilterChange?: (next: ScoreFilter) => void;
 }
 
-export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesignScoreViewProps) {
+export default function RingDesignScoreView({ nodeId, title, onBack, sourceFilter, onFilterChange }: RingDesignScoreViewProps) {
+  const { actors: globalActors, addActor: addGlobalActor, mergeActors: mergeGlobalActors } = useGlobalActors();
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [designScoringMode, setDesignScoringMode] = useState<RingDesignScoreData["designScoringMode"]>("overall");
+  const [activeDimTab, setActiveDimTab] = useState<"aims" | "experience" | "resources">("aims");
+  const [localFilter, setLocalFilter] = useState<ScoreFilter>({
+    mode: "year",
+    yearKey: listSelectableYearKeys(new Date(), 5)[0],
+    aggregation: "singleLatest",
+  } as any);
+  const filter = sourceFilter || localFilter;
+  const setFilter = useCallback(
+    (next: ScoreFilter) => {
+      onFilterChange?.(next);
+      setLocalFilter(next);
+    },
+    [onFilterChange],
+  );
+  useEffect(() => {
+    if (sourceFilter) setLocalFilter(sourceFilter);
+  }, [sourceFilter]);
+  const [overallInstances, setOverallInstances] = useState<ScoreInstance[]>([]);
   const [overallDesignScore, setOverallDesignScore] = useState<number | null>(null);
   const [overallDesignRationale, setOverallDesignRationale] = useState<string>("");
   const [overallDesignConfidence, setOverallDesignConfidence] = useState<WeightLabel>("M");
@@ -173,12 +167,15 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
     resourcesWeight: "M",
   });
   const [subDimensions, setSubDimensions] = useState<RingDesignScoreData["subDimensions"]>({
-    aims: { leapsScore: null, outcomesScore: null, leapsConfidence: "M", outcomesConfidence: "M" } as any,
+    aims: { leapsScore: null, outcomesScore: null, leapsInstances: [], outcomesInstances: [], leapsConfidence: "M", outcomesConfidence: "M" } as any,
     studentExperience: {
       thoroughnessScore: null,
+      thoroughnessInstances: [],
       thoroughnessWeight: "L",
       leapinessScore: null,
+      leapinessInstances: [],
       coherenceScore: null,
+      coherenceInstances: [],
       coherenceWeight: "L",
       thoroughnessConfidence: "M",
       leapinessConfidence: "M",
@@ -186,10 +183,13 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
     } as any,
     supportingResources: {
       thoroughnessScore: null,
+      thoroughnessInstances: [],
       thoroughnessWeight: "M",
       qualityScore: null,
+      qualityInstances: [],
       qualityWeight: "M",
       coherenceScore: null,
+      coherenceInstances: [],
       coherenceWeight: "M",
       thoroughnessConfidence: "M",
       qualityConfidence: "M",
@@ -197,7 +197,10 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
     } as any,
   });
   const [initialized, setInitialized] = useState(false);
-  const [rationaleOpen, setRationaleOpen] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (designScoringMode !== "overall") setActiveDimTab("aims");
+  }, [designScoringMode]);
 
   useEffect(() => {
     if (!comp || initialized) return;
@@ -205,6 +208,19 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
     const rsd: Partial<RingDesignScoreData> = hd.ringDesignScoreData || {};
 
     setDesignScoringMode(rsd.designScoringMode || "overall");
+    const saved: any = (rsd as any).filter || {};
+    const initial: ScoreFilter =
+      (sourceFilter as any) ||
+      (saved?.mode
+        ? (saved as any)
+        : ({
+            mode: "year",
+            yearKey: listSelectableYearKeys(new Date(), 5)[0],
+            aggregation: saved?.aggregation || "singleLatest",
+            actorKey: saved?.actorKey,
+          } as any));
+    setLocalFilter(initial as any);
+    setOverallInstances((Array.isArray((rsd as any).overallInstances) ? ((rsd as any).overallInstances as any[]) : []) as any);
     setOverallDesignScore(normalizeScore(rsd.overallDesignScore));
     setOverallDesignRationale(rsd.overallDesignRationale || "");
     setOverallDesignConfidence(normalizeWeightLabel((rsd as any).overallDesignConfidence ?? "M"));
@@ -216,47 +232,95 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
     setSubDimensions({
       aims: {
         leapsScore: normalizeScore((rsd as any).subDimensions?.aims?.leapsScore),
+        leapsInstances: (rsd as any).subDimensions?.aims?.leapsInstances || [],
         leapsRationale: (rsd as any).subDimensions?.aims?.leapsRationale,
         leapsConfidence: normalizeWeightLabel((rsd as any).subDimensions?.aims?.leapsConfidence ?? "M"),
         outcomesScore: normalizeScore((rsd as any).subDimensions?.aims?.outcomesScore),
+        outcomesInstances: (rsd as any).subDimensions?.aims?.outcomesInstances || [],
         outcomesRationale: (rsd as any).subDimensions?.aims?.outcomesRationale,
         outcomesConfidence: normalizeWeightLabel((rsd as any).subDimensions?.aims?.outcomesConfidence ?? "M"),
       },
       studentExperience: {
         thoroughnessScore: normalizeScore((rsd as any).subDimensions?.studentExperience?.thoroughnessScore),
+        thoroughnessInstances: (rsd as any).subDimensions?.studentExperience?.thoroughnessInstances || [],
         thoroughnessRationale: (rsd as any).subDimensions?.studentExperience?.thoroughnessRationale,
         thoroughnessConfidence: normalizeWeightLabel((rsd as any).subDimensions?.studentExperience?.thoroughnessConfidence ?? "M"),
         thoroughnessWeight: normalizeWeightLabel((rsd as any).subDimensions?.studentExperience?.thoroughnessWeight ?? "L"),
         leapinessScore: normalizeScore((rsd as any).subDimensions?.studentExperience?.leapinessScore),
+        leapinessInstances: (rsd as any).subDimensions?.studentExperience?.leapinessInstances || [],
         leapinessRationale: (rsd as any).subDimensions?.studentExperience?.leapinessRationale,
         leapinessConfidence: normalizeWeightLabel((rsd as any).subDimensions?.studentExperience?.leapinessConfidence ?? "M"),
         coherenceScore: normalizeScore((rsd as any).subDimensions?.studentExperience?.coherenceScore),
+        coherenceInstances: (rsd as any).subDimensions?.studentExperience?.coherenceInstances || [],
         coherenceRationale: (rsd as any).subDimensions?.studentExperience?.coherenceRationale,
         coherenceConfidence: normalizeWeightLabel((rsd as any).subDimensions?.studentExperience?.coherenceConfidence ?? "M"),
         coherenceWeight: normalizeWeightLabel((rsd as any).subDimensions?.studentExperience?.coherenceWeight ?? "L"),
       },
       supportingResources: {
         thoroughnessScore: normalizeScore((rsd as any).subDimensions?.supportingResources?.thoroughnessScore),
+        thoroughnessInstances: (rsd as any).subDimensions?.supportingResources?.thoroughnessInstances || [],
         thoroughnessRationale: (rsd as any).subDimensions?.supportingResources?.thoroughnessRationale,
         thoroughnessConfidence: normalizeWeightLabel((rsd as any).subDimensions?.supportingResources?.thoroughnessConfidence ?? "M"),
         thoroughnessWeight: normalizeWeightLabel((rsd as any).subDimensions?.supportingResources?.thoroughnessWeight ?? "M"),
         qualityScore: normalizeScore((rsd as any).subDimensions?.supportingResources?.qualityScore),
+        qualityInstances: (rsd as any).subDimensions?.supportingResources?.qualityInstances || [],
         qualityRationale: (rsd as any).subDimensions?.supportingResources?.qualityRationale,
         qualityConfidence: normalizeWeightLabel((rsd as any).subDimensions?.supportingResources?.qualityConfidence ?? "M"),
         qualityWeight: normalizeWeightLabel((rsd as any).subDimensions?.supportingResources?.qualityWeight ?? "M"),
         coherenceScore: normalizeScore((rsd as any).subDimensions?.supportingResources?.coherenceScore),
+        coherenceInstances: (rsd as any).subDimensions?.supportingResources?.coherenceInstances || [],
         coherenceRationale: (rsd as any).subDimensions?.supportingResources?.coherenceRationale,
         coherenceConfidence: normalizeWeightLabel((rsd as any).subDimensions?.supportingResources?.coherenceConfidence ?? "M"),
         coherenceWeight: normalizeWeightLabel((rsd as any).subDimensions?.supportingResources?.coherenceWeight ?? "M"),
       },
     } as any);
     setInitialized(true);
-  }, [comp, initialized]);
+  }, [comp, initialized, sourceFilter]);
+
+  const actorOptions = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const add = (a: unknown) => {
+      const clean = String(a ?? "").trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(clean);
+    };
+
+    for (const a of Array.isArray(globalActors) ? globalActors : []) add(a);
+    for (const inst of Array.isArray(overallInstances) ? overallInstances : []) add((inst as any)?.actor);
+
+    const aims: any = (subDimensions as any)?.aims || {};
+    for (const inst of Array.isArray(aims?.leapsInstances) ? aims.leapsInstances : []) add((inst as any)?.actor);
+    for (const inst of Array.isArray(aims?.outcomesInstances) ? aims.outcomesInstances : []) add((inst as any)?.actor);
+
+    const se: any = (subDimensions as any)?.studentExperience || {};
+    for (const inst of Array.isArray(se?.thoroughnessInstances) ? se.thoroughnessInstances : []) add((inst as any)?.actor);
+    for (const inst of Array.isArray(se?.leapinessInstances) ? se.leapinessInstances : []) add((inst as any)?.actor);
+    for (const inst of Array.isArray(se?.coherenceInstances) ? se.coherenceInstances : []) add((inst as any)?.actor);
+
+    const sr: any = (subDimensions as any)?.supportingResources || {};
+    for (const inst of Array.isArray(sr?.thoroughnessInstances) ? sr.thoroughnessInstances : []) add((inst as any)?.actor);
+    for (const inst of Array.isArray(sr?.qualityInstances) ? sr.qualityInstances : []) add((inst as any)?.actor);
+    for (const inst of Array.isArray(sr?.coherenceInstances) ? sr.coherenceInstances : []) add((inst as any)?.actor);
+
+    out.sort((a, b) => a.localeCompare(b));
+    return out;
+  }, [globalActors, overallInstances, subDimensions]);
+
+  useEffect(() => {
+    if (actorOptions.length > 0) mergeGlobalActors(actorOptions);
+  }, [actorOptions, mergeGlobalActors]);
 
   const dimensionScores = useMemo(() => {
     const rsd: RingDesignScoreData = {
       designScoringMode,
+      actors: actorOptions,
+      filter,
       overallDesignScore,
+      overallInstances,
       overallDesignRationale,
       overallDesignConfidence,
       designDimensions: { aimsScore: null, experienceScore: null, resourcesScore: null },
@@ -265,12 +329,15 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
       finalDesignScore: null,
     };
     return calculateRingDesignDimensionScores(rsd);
-  }, [designScoringMode, designWeights, overallDesignRationale, overallDesignScore, subDimensions]);
+  }, [actorOptions, designScoringMode, designWeights, filter, overallDesignRationale, overallDesignScore, overallInstances, subDimensions]);
 
   const finalScore = useMemo(() => {
     const rsd: RingDesignScoreData = {
       designScoringMode,
+      actors: actorOptions,
+      filter,
       overallDesignScore,
+      overallInstances,
       overallDesignRationale,
       overallDesignConfidence,
       designDimensions: dimensionScores,
@@ -279,7 +346,27 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
       finalDesignScore: null,
     };
     return calculateRingDesignScore({ healthData: { ringDesignScoreData: rsd } });
-  }, [designScoringMode, designWeights, dimensionScores, overallDesignRationale, overallDesignScore, subDimensions]);
+  }, [actorOptions, designScoringMode, designWeights, dimensionScores, filter, overallDesignRationale, overallDesignScore, overallInstances, subDimensions]);
+
+  const dimTiles = useMemo(() => {
+    return [
+      { key: "aims", label: "Aims", icon: Target, score: (dimensionScores as any)?.aimsScore ?? null, weight: (designWeights as any)?.aimsWeight ?? "M" },
+      {
+        key: "experience",
+        label: "Student experience",
+        icon: Layers,
+        score: (dimensionScores as any)?.experienceScore ?? null,
+        weight: (designWeights as any)?.experienceWeight ?? "M",
+      },
+      {
+        key: "resources",
+        label: "Supporting resources",
+        icon: Package,
+        score: (dimensionScores as any)?.resourcesScore ?? null,
+        weight: (designWeights as any)?.resourcesWeight ?? "M",
+      },
+    ] as const;
+  }, [designWeights, dimensionScores]);
 
   const doSave = useCallback(
     (rsd: RingDesignScoreData, computed: number | null) => {
@@ -308,7 +395,10 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
     if (!initialized) return;
     const rsd: RingDesignScoreData = {
       designScoringMode,
+      actors: actorOptions,
+      filter,
       overallDesignScore,
+      overallInstances,
       overallDesignRationale,
       overallDesignConfidence,
       designDimensions: dimensionScores,
@@ -317,11 +407,21 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
       finalDesignScore: finalScore,
     };
     doSave(rsd, finalScore);
-  }, [designScoringMode, designWeights, doSave, finalScore, initialized, overallDesignScore, overallDesignRationale, subDimensions, dimensionScores]);
-
-  const toggleRationale = (key: string) => {
-    setRationaleOpen((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  }, [
+    actorOptions,
+    designScoringMode,
+    designWeights,
+    doSave,
+    finalScore,
+    filter,
+    initialized,
+    overallDesignConfidence,
+    overallDesignRationale,
+    overallDesignScore,
+    overallInstances,
+    subDimensions,
+    dimensionScores,
+  ]);
 
   return (
     <div className="space-y-6 pb-12 max-w-5xl mx-auto p-6" data-testid="ring-design-score-view">
@@ -333,6 +433,8 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
         <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
         Back to Status &amp; Health
       </button>
+
+      <ScoreFilterBar filter={filter as any} onChange={setFilter as any} actors={actorOptions} />
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="score-dashboard">
         <div className="px-5 py-4 border-b border-gray-100">
@@ -347,6 +449,25 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
           </div>
         </div>
 
+        {designScoringMode === "multi" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4" data-testid="dimension-tiles">
+            {dimTiles.map((t) => (
+              <div key={t.key} className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-2 cursor-default" data-testid={`dimension-tile-${t.key}`}>
+                <div className="flex items-center gap-1.5">
+                  <t.icon className="w-3.5 h-3.5 text-gray-600" />
+                  <span className="text-xs font-semibold text-gray-700 truncate">{t.label}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <ScoreChip score={t.score} size="sm" />
+                  <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
+                    W: {String(t.weight || "M")}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <div className="px-4 pb-4 pt-4">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
             <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
@@ -358,9 +479,25 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
           </div>
         </div>
 
-        <div className="px-4 pb-3 flex items-center justify-between text-[10px] text-gray-400">
-          <span>{designScoringMode === "overall" ? "Mode: Overall" : "Mode: Dimensions"}</span>
-          <span>Weighted: H=4, M=2, L=1</span>
+        <div className="px-4 pb-4" data-testid="flags-section">
+          <ScoreFlags
+            overallScore={finalScore}
+            items={[
+              { key: "aims", label: "Aims for Learners", score: dimensionScores.aimsScore ?? null },
+              { key: "experience", label: "Student Experience", score: dimensionScores.experienceScore ?? null },
+              { key: "resources", label: "Supporting Resources & Routines", score: dimensionScores.resourcesScore ?? null },
+            ]}
+            threshold={2}
+            defaultOpen={false}
+            testId="design-flags"
+          />
+        </div>
+
+        <div className="px-4 pb-4">
+          <div className="flex items-center justify-between text-[10px] text-gray-400">
+            <span>{designScoringMode === "overall" ? "Mode: Overall" : "Mode: Dimensions"}</span>
+            <span>Weighted: H=4, M=2, L=1</span>
+          </div>
         </div>
       </div>
 
@@ -401,29 +538,6 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
         <p className="text-[10px] text-gray-400">Switching modes does not delete saved values.</p>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="design-blueprint-card">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-gray-900">Blueprint (Representative)</h3>
-          <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
-            Placeholder
-          </Badge>
-        </div>
-        <div className="p-4 space-y-2">
-          <Label className="text-xs text-gray-700">Blueprint</Label>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled
-            className="h-8 text-xs font-medium border-gray-300 bg-white justify-between w-full"
-            data-testid="design-blueprint-dropdown-disabled"
-          >
-            {DESIGN_BLUEPRINT_OPTIONS[0]}
-            <ChevronDown className="w-3 h-3 ml-2 text-gray-400" />
-          </Button>
-          <p className="text-[10px] text-gray-400">Blueprint switching is placeholder-only for now.</p>
-        </div>
-      </div>
-
       {designScoringMode === "overall" ? (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="design-overall-section">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -432,32 +546,23 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
               1–5
             </Badge>
           </div>
-          <div className="p-4 space-y-3">
-            <ScoreButtons value={overallDesignScore} onChange={setOverallDesignScore} />
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => toggleRationale("overall")}
-                className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
-                data-testid="toggle-overall-rationale"
-              >
-                {rationaleOpen.overall ? "Hide rationale" : overallDesignRationale ? "Edit rationale" : "Add rationale"}
-              </button>
-              {rationaleOpen.overall && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-gray-500">Confidence</span>
-                    <ConfidenceSelect value={overallDesignConfidence} onChange={setOverallDesignConfidence} />
-                  </div>
-                  <Textarea
-                    value={overallDesignRationale}
-                    onChange={(e) => setOverallDesignRationale(e.currentTarget.value)}
-                    placeholder="Add rationale for the overall score…"
-                    className="text-xs min-h-[70px]"
-                    data-testid="overall-rationale"
-                  />
-                </div>
-              )}
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold text-gray-700">Instances</div>
+              <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
+                Score {effectiveFromInstances(overallInstances || [], filter).score ?? "—"}
+              </Badge>
+            </div>
+            <ScoreInstancesInlineEditor
+              instances={overallInstances as any}
+              onChange={setOverallInstances as any}
+              actors={actorOptions}
+              onAddActor={(label) => addGlobalActor(label)}
+              testIdPrefix="design-overall"
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-gray-500">Overall confidence (optional)</span>
+              <ConfidenceSelect value={overallDesignConfidence} onChange={setOverallDesignConfidence} />
             </div>
           </div>
         </div>
@@ -470,103 +575,108 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
             </Badge>
           </div>
           <div className="p-4 space-y-3">
+            <div className="bg-white border border-gray-200 rounded-lg p-3" data-testid="design-dimension-tabs">
+              <Tabs value={activeDimTab} onValueChange={(v) => setActiveDimTab(v as any)} className="w-full">
+                <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-gray-200 gap-6">
+                  {(
+                    [
+                      { key: "aims" as const, label: "Aims for Learners", score: dimensionScores.aimsScore ?? null },
+                      { key: "experience" as const, label: "Student Experience", score: dimensionScores.experienceScore ?? null },
+                      { key: "resources" as const, label: "Supporting Resources & Routines", score: dimensionScores.resourcesScore ?? null },
+                    ] as const
+                  ).map((t) => (
+                    <TabsTrigger
+                      key={t.key}
+                      value={t.key}
+                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-900 data-[state=active]:shadow-none px-0 py-2 text-gray-500 hover:text-gray-700 bg-transparent flex items-center gap-2"
+                      data-testid={`design-dim-tab-${t.key}`}
+                    >
+                      <span className="truncate max-w-[260px]">{t.label}</span>
+                      <ScoreChip score={t.score} size="sm" />
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
+
             {/* Aims */}
-            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-3" data-testid="design-dimension-aims">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-gray-900 truncate">Aims for Learners</div>
-                    <div className="text-[10px] text-gray-500">2 sub-dimensions (Leaps, Outcomes). Weights are fixed.</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">Score {dimensionScores.aimsScore ?? "—"}</Badge>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-semibold text-gray-500">Wt</span>
-                      <WeightPicker
-                        value={normalizeWeightLabel(designWeights.aimsWeight)}
-                        onChange={(v) => setDesignWeights((prev) => ({ ...prev, aimsWeight: v }))}
-                      />
-                    </div>
+            {activeDimTab === "aims" ? (
+              <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-3" data-testid="design-dimension-aims">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-[10px] text-gray-500">2 sub-dimensions (Leaps, Outcomes). Weights are fixed.</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-gray-500">Dimension weight</span>
+                    <WeightPicker value={normalizeWeightLabel(designWeights.aimsWeight)} onChange={(v) => setDesignWeights((prev) => ({ ...prev, aimsWeight: v }))} />
                   </div>
                 </div>
 
                 {(
                   [
-                    { key: "leapsScore", label: "Leaps", rationaleKey: "leapsRationale" },
-                    { key: "outcomesScore", label: "Outcomes", rationaleKey: "outcomesRationale" },
+                    { key: "leapsScore", instancesKey: "leapsInstances", label: "Leaps" },
+                    { key: "outcomesScore", instancesKey: "outcomesInstances", label: "Outcomes" },
                   ] as const
                 ).map((row) => {
-                  const score = subDimensions.aims[row.key];
-                  const rationale = (subDimensions.aims as any)[row.rationaleKey] as string | undefined;
-                  const ratKey = `aims.${row.key}`;
+                  const instances = ((subDimensions as any).aims as any)?.[row.instancesKey] as any[];
+                  const instCount = Array.isArray(instances) ? instances.length : 0;
+                  const score = effectiveFromInstances((Array.isArray(instances) ? instances : []) as any, filter).score;
                   return (
-                    <div key={row.key} className="bg-white rounded-md border border-gray-200 p-3 space-y-2" data-testid={`aims-sub-${row.key}`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-semibold text-gray-800">{row.label}</div>
-                        <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">Wt M (locked)</Badge>
-                      </div>
-                      <ScoreButtons
-                        value={score}
-                        onChange={(v) => setSubDimensions((prev) => ({ ...prev, aims: { ...prev.aims, [row.key]: v } }))}
-                      />
-                      <div className="space-y-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleRationale(ratKey)}
-                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
-                          data-testid={`toggle-rationale-${ratKey}`}
-                        >
-                          {rationaleOpen[ratKey] ? "Hide rationale" : rationale ? "Edit rationale" : "Add rationale"}
-                        </button>
-                        {rationaleOpen[ratKey] && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-semibold text-gray-500">Confidence</span>
-                              <ConfidenceSelect
-                                value={normalizeWeightLabel((subDimensions.aims as any)[`${row.key.replace("Score", "")}Confidence`] ?? "M")}
-                                onChange={(v) =>
-                                  setSubDimensions((prev) => ({
-                                    ...prev,
-                                    aims: { ...(prev.aims as any), [`${row.key.replace("Score", "")}Confidence`]: v },
-                                  }))
-                                }
-                              />
+                    <Collapsible key={row.key} defaultOpen={false}>
+                      <div className="bg-white rounded-md border border-gray-200" data-testid={`aims-sub-${row.key}`}>
+                        <div className="p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <CollapsibleTrigger asChild>
+                              <button type="button" className="flex items-center gap-2 min-w-0 text-left">
+                                <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-gray-800 truncate">{row.label}</div>
+                                  <div className="text-[10px] text-gray-500">{instCount} instance{instCount === 1 ? "" : "s"}</div>
+                                </div>
+                              </button>
+                            </CollapsibleTrigger>
+                            <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
+                                Wt M (locked)
+                              </Badge>
+                              <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
+                                Score {score ?? "—"}
+                              </Badge>
                             </div>
-                            <Textarea
-                              value={rationale || ""}
-                              onChange={(e) =>
+                          </div>
+                        </div>
+                        <CollapsibleContent>
+                          <div className="px-3 pb-3">
+                            <ScoreInstancesInlineEditor
+                              instances={(Array.isArray(instances) ? instances : []) as any}
+                              onChange={(next) =>
                                 setSubDimensions((prev) => ({
                                   ...prev,
-                                  aims: { ...(prev.aims as any), [row.rationaleKey]: e.currentTarget.value },
+                                  aims: { ...(prev.aims as any), [row.instancesKey]: next },
                                 }))
                               }
-                              placeholder="Add rationale…"
-                              className="text-xs min-h-[70px]"
-                              data-testid={`rationale-${ratKey}`}
+                              actors={actorOptions}
+                              onAddActor={(label) => addGlobalActor(label)}
+                              testIdPrefix={`aims-${row.key}`}
                             />
                           </div>
-                        )}
+                        </CollapsibleContent>
                       </div>
-                    </div>
+                    </Collapsible>
                   );
                 })}
               </div>
+            ) : null}
 
               {/* Student Experience */}
+            {activeDimTab === "experience" ? (
               <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-3" data-testid="design-dimension-experience">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-gray-900 truncate">Student Experience</div>
-                    <div className="text-[10px] text-gray-500">3 sub-dimensions. Leapiness weight is fixed.</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">Score {dimensionScores.experienceScore ?? "—"}</Badge>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-semibold text-gray-500">Wt</span>
-                      <WeightPicker
-                        value={normalizeWeightLabel(designWeights.experienceWeight)}
-                        onChange={(v) => setDesignWeights((prev) => ({ ...prev, experienceWeight: v }))}
-                      />
-                    </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-[10px] text-gray-500">3 sub-dimensions. Leapiness weight is fixed.</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-gray-500">Dimension weight</span>
+                    <WeightPicker
+                      value={normalizeWeightLabel(designWeights.experienceWeight)}
+                      onChange={(v) => setDesignWeights((prev) => ({ ...prev, experienceWeight: v }))}
+                    />
                   </div>
                 </div>
 
@@ -596,103 +706,90 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
                     },
                   ] as const
                 ).map((row) => {
-                  const score = (subDimensions.studentExperience as any)[row.key] as number | null;
-                  const rationale = (subDimensions.studentExperience as any)[row.rationaleKey] as string | undefined;
-                  const ratKey = `studentExperience.${row.key}`;
+                  const instances = (subDimensions.studentExperience as any)?.[`${String(row.key).replace("Score", "")}Instances`] as any[];
                   const weight =
                     row.weightLocked
                       ? row.lockedWeight
                       : normalizeWeightLabel((subDimensions.studentExperience as any)[row.weightKey as any]);
+                  const instCount = Array.isArray(instances) ? instances.length : 0;
+                  const score = effectiveFromInstances((Array.isArray(instances) ? instances : []) as any, filter).score;
 
                   return (
-                    <div key={row.key} className="bg-white rounded-md border border-gray-200 p-3 space-y-2" data-testid={`se-sub-${row.key}`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-semibold text-gray-800">{row.label}</div>
-                        {row.weightLocked ? (
-                          <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">Wt {weight} (locked)</Badge>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-semibold text-gray-500">Wt</span>
-                            <WeightPicker
-                              value={weight}
-                              onChange={(v) =>
-                                setSubDimensions((prev) => ({
-                                  ...prev,
-                                  studentExperience: { ...(prev.studentExperience as any), [row.weightKey as any]: v },
-                                }))
-                              }
-                            />
-                          </div>
-                        )}
-                      </div>
-                      <ScoreButtons
-                        value={score}
-                        onChange={(v) =>
-                          setSubDimensions((prev) => ({
-                            ...prev,
-                            studentExperience: { ...(prev.studentExperience as any), [row.key]: v },
-                          }))
-                        }
-                      />
-                      <div className="space-y-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleRationale(ratKey)}
-                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
-                          data-testid={`toggle-rationale-${ratKey}`}
-                        >
-                          {rationaleOpen[ratKey] ? "Hide rationale" : rationale ? "Edit rationale" : "Add rationale"}
-                        </button>
-                        {rationaleOpen[ratKey] && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-semibold text-gray-500">Confidence</span>
-                              <ConfidenceSelect
-                                value={normalizeWeightLabel((subDimensions.studentExperience as any)[`${row.key.replace("Score", "")}Confidence`] ?? "M")}
-                                onChange={(v) =>
-                                  setSubDimensions((prev) => ({
-                                    ...prev,
-                                    studentExperience: { ...(prev.studentExperience as any), [`${row.key.replace("Score", "")}Confidence`]: v },
-                                  }))
-                                }
-                              />
+                    <Collapsible key={row.key} defaultOpen={false}>
+                      <div className="bg-white rounded-md border border-gray-200" data-testid={`se-sub-${row.key}`}>
+                        <div className="p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <CollapsibleTrigger asChild>
+                              <button type="button" className="flex items-center gap-2 min-w-0 text-left">
+                                <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-gray-800 truncate">{row.label}</div>
+                                  <div className="text-[10px] text-gray-500">{instCount} instance{instCount === 1 ? "" : "s"}</div>
+                                </div>
+                              </button>
+                            </CollapsibleTrigger>
+                            <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              {row.weightLocked ? (
+                                <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
+                                  Wt {weight} (locked)
+                                </Badge>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-500">Wt</span>
+                                  <WeightPicker
+                                    value={weight}
+                                    onChange={(v) =>
+                                      setSubDimensions((prev) => ({
+                                        ...prev,
+                                        studentExperience: { ...(prev.studentExperience as any), [row.weightKey as any]: v },
+                                      }))
+                                    }
+                                  />
+                                </div>
+                              )}
+                              <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
+                                Score {score ?? "—"}
+                              </Badge>
                             </div>
-                            <Textarea
-                              value={rationale || ""}
-                              onChange={(e) =>
+                          </div>
+                        </div>
+                        <CollapsibleContent>
+                          <div className="px-3 pb-3">
+                            <ScoreInstancesInlineEditor
+                              instances={(Array.isArray(instances) ? instances : []) as any}
+                              onChange={(next) =>
                                 setSubDimensions((prev) => ({
                                   ...prev,
-                                  studentExperience: { ...(prev.studentExperience as any), [row.rationaleKey]: e.currentTarget.value },
+                                  studentExperience: {
+                                    ...(prev.studentExperience as any),
+                                    [`${String(row.key).replace("Score", "")}Instances`]: next,
+                                  },
                                 }))
                               }
-                              placeholder="Add rationale…"
-                              className="text-xs min-h-[70px]"
-                              data-testid={`rationale-${ratKey}`}
+                              actors={actorOptions}
+                              onAddActor={(label) => addGlobalActor(label)}
+                              testIdPrefix={`se-${row.key}`}
                             />
                           </div>
-                        )}
+                        </CollapsibleContent>
                       </div>
-                    </div>
+                    </Collapsible>
                   );
                 })}
               </div>
+            ) : null}
 
               {/* Supporting Resources & Routines */}
+            {activeDimTab === "resources" ? (
               <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-3" data-testid="design-dimension-resources">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-gray-900 truncate">Supporting Resources & Routines</div>
-                    <div className="text-[10px] text-gray-500">3 sub-dimensions.</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">Score {dimensionScores.resourcesScore ?? "—"}</Badge>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-semibold text-gray-500">Wt</span>
-                      <WeightPicker
-                        value={normalizeWeightLabel(designWeights.resourcesWeight)}
-                        onChange={(v) => setDesignWeights((prev) => ({ ...prev, resourcesWeight: v }))}
-                      />
-                    </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-[10px] text-gray-500">3 sub-dimensions.</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-gray-500">Dimension weight</span>
+                    <WeightPicker
+                      value={normalizeWeightLabel(designWeights.resourcesWeight)}
+                      onChange={(v) => setDesignWeights((prev) => ({ ...prev, resourcesWeight: v }))}
+                    />
                   </div>
                 </div>
 
@@ -703,78 +800,68 @@ export default function RingDesignScoreView({ nodeId, title, onBack }: RingDesig
                     { key: "coherenceScore", label: "Coherence", weightKey: "coherenceWeight", rationaleKey: "coherenceRationale" },
                   ] as const
                 ).map((row) => {
-                  const score = (subDimensions.supportingResources as any)[row.key] as number | null;
-                  const rationale = (subDimensions.supportingResources as any)[row.rationaleKey] as string | undefined;
                   const weight = normalizeWeightLabel((subDimensions.supportingResources as any)[row.weightKey]);
-                  const ratKey = `supportingResources.${row.key}`;
+                  const instances = (subDimensions.supportingResources as any)?.[`${String(row.key).replace("Score", "")}Instances`] as any[];
+                  const instCount = Array.isArray(instances) ? instances.length : 0;
+                  const score = effectiveFromInstances((Array.isArray(instances) ? instances : []) as any, filter).score;
                   return (
-                    <div key={row.key} className="bg-white rounded-md border border-gray-200 p-3 space-y-2" data-testid={`sr-sub-${row.key}`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-semibold text-gray-800">{row.label}</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-semibold text-gray-500">Wt</span>
-                          <WeightPicker
-                            value={weight}
-                            onChange={(v) =>
-                              setSubDimensions((prev) => ({
-                                ...prev,
-                                supportingResources: { ...(prev.supportingResources as any), [row.weightKey]: v },
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-                      <ScoreButtons
-                        value={score}
-                        onChange={(v) =>
-                          setSubDimensions((prev) => ({
-                            ...prev,
-                            supportingResources: { ...(prev.supportingResources as any), [row.key]: v },
-                          }))
-                        }
-                      />
-                      <div className="space-y-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleRationale(ratKey)}
-                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
-                          data-testid={`toggle-rationale-${ratKey}`}
-                        >
-                          {rationaleOpen[ratKey] ? "Hide rationale" : rationale ? "Edit rationale" : "Add rationale"}
-                        </button>
-                        {rationaleOpen[ratKey] && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-semibold text-gray-500">Confidence</span>
-                              <ConfidenceSelect
-                                value={normalizeWeightLabel((subDimensions.supportingResources as any)[`${row.key.replace("Score", "")}Confidence`] ?? "M")}
-                                onChange={(v) =>
-                                  setSubDimensions((prev) => ({
-                                    ...prev,
-                                    supportingResources: { ...(prev.supportingResources as any), [`${row.key.replace("Score", "")}Confidence`]: v },
-                                  }))
-                                }
-                              />
+                    <Collapsible key={row.key} defaultOpen={false}>
+                      <div className="bg-white rounded-md border border-gray-200" data-testid={`sr-sub-${row.key}`}>
+                        <div className="p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <CollapsibleTrigger asChild>
+                              <button type="button" className="flex items-center gap-2 min-w-0 text-left">
+                                <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-gray-800 truncate">{row.label}</div>
+                                  <div className="text-[10px] text-gray-500">{instCount} instance{instCount === 1 ? "" : "s"}</div>
+                                </div>
+                              </button>
+                            </CollapsibleTrigger>
+                            <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-semibold text-gray-500">Wt</span>
+                                <WeightPicker
+                                  value={weight}
+                                  onChange={(v) =>
+                                    setSubDimensions((prev) => ({
+                                      ...prev,
+                                      supportingResources: { ...(prev.supportingResources as any), [row.weightKey]: v },
+                                    }))
+                                  }
+                                />
+                              </div>
+                              <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
+                                Score {score ?? "—"}
+                              </Badge>
                             </div>
-                            <Textarea
-                              value={rationale || ""}
-                              onChange={(e) =>
+                          </div>
+                        </div>
+                        <CollapsibleContent>
+                          <div className="px-3 pb-3">
+                            <ScoreInstancesInlineEditor
+                              instances={(Array.isArray(instances) ? instances : []) as any}
+                              onChange={(next) =>
                                 setSubDimensions((prev) => ({
                                   ...prev,
-                                  supportingResources: { ...(prev.supportingResources as any), [row.rationaleKey]: e.currentTarget.value },
+                                  supportingResources: {
+                                    ...(prev.supportingResources as any),
+                                    [`${String(row.key).replace("Score", "")}Instances`]: next,
+                                  },
                                 }))
                               }
-                              placeholder="Add rationale…"
-                              className="text-xs min-h-[70px]"
-                              data-testid={`rationale-${ratKey}`}
+                              actors={actorOptions}
+                              onAddActor={(label) => addGlobalActor(label)}
+                              testIdPrefix={`sr-${row.key}`}
                             />
                           </div>
-                        )}
+                        </CollapsibleContent>
                       </div>
-                    </div>
+                    </Collapsible>
                   );
                 })}
               </div>
+            ) : null}
           </div>
         </div>
       )}

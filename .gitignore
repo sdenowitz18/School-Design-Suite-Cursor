@@ -2,6 +2,11 @@ node_modules
 dist
 .DS_Store
 .env
+.env.rtf
 server/public
 vite.config.ts.*
 *.tar.gz
+*_REPORT.md
+*_TEST_REPORT.md
+*_TEST_RESULTS.md
+TESTING_SUMMARY.md

@@ -1,25 +1,19 @@
-import React, { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Bot, Plus, X, Maximize2, ChevronDown, Check } from "lucide-react";
+import { Bot } from "lucide-react";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-  DropdownMenuLabel
-} from "@/components/ui/dropdown-menu";
-import { componentQueries, useSeedComponents, useUpdateComponent } from "@/lib/api";
-import DesignedExperienceView from "./designed-experience-view";
-import type { DESubcomponent } from "./designed-experience-view";
-import SnapshotView from "./snapshot-view";
-import ComponentHealthView from "./component-health-view";
-import SubcomponentSnapshotView from "./subcomponent-snapshot-view";
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { componentQueries, useSeedComponents } from "@/lib/api";
+import ComponentWorkingPanel from "./component-working-panel";
+import ComponentWorkingSpaceOverlay from "./component-working-space-overlay";
+import OctagonCard from "./octagon-card";
 
 interface CanvasNode {
   id: string;
@@ -29,6 +23,11 @@ interface CanvasNode {
   x: number;
   y: number;
   color: string;
+  overviewContextPreview?: {
+    schoolName?: string;
+    studentCount?: string;
+    mission?: string;
+  };
   stats: {
     left: number;
     right: number;
@@ -39,6 +38,9 @@ interface CanvasNode {
 
 function componentToCanvasNode(comp: any): CanvasNode {
   const snap = comp.snapshotData || {};
+  const ocd: any = (snap as any).overviewContextData || {};
+  const studentCount = ocd?.studentCount ?? ocd?.students ?? undefined;
+  const mission = ocd?.mission ?? "";
   return {
     id: comp.id,
     nodeId: comp.nodeId,
@@ -47,6 +49,14 @@ function componentToCanvasNode(comp: any): CanvasNode {
     x: comp.canvasX,
     y: comp.canvasY,
     color: comp.color,
+    overviewContextPreview:
+      comp.nodeId === "overall"
+        ? {
+            schoolName: String(ocd?.schoolName || comp.title || ""),
+            studentCount: studentCount !== undefined && studentCount !== null ? String(studentCount) : "",
+            mission: String(mission || ""),
+          }
+        : undefined,
     stats: {
       left: (snap.subcomponents || []).length,
       right: (snap.primaryOutcomes || []).length,
@@ -60,61 +70,527 @@ const FALLBACK_NODES: CanvasNode[] = [
   { id: "1", nodeId: "algebra", title: "Algebra", subtitle: "STEM Component", x: 600, y: 100, color: "bg-emerald-100", stats: { left: 3, right: 2, leftLabel: "Experiences", rightLabel: "Outcomes" } },
   { id: "2", nodeId: "math", title: "Math", subtitle: "STEM Component", x: 300, y: 450, color: "bg-emerald-100", stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" } },
   { id: "3", nodeId: "college_exposure", title: "College Exposure", subtitle: "Access & Opportunity", x: 900, y: 450, color: "bg-blue-100", stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" } },
-  { id: "4", nodeId: "overall", title: "Overall School", subtitle: "Key Levers", x: 600, y: 300, color: "bg-white", stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" } },
+  { id: "4", nodeId: "overall", title: "Overall School", subtitle: "", x: 600, y: 300, color: "bg-white", stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" } },
 ];
 
-const OctagonNode = ({ node, onClick }: { node: CanvasNode; onClick: () => void }) => {
+type OverallCenterMode = "overview" | "designed" | "status";
+
+type OverallNavTarget =
+  | { level: "L1" }
+  | { level: "L2"; section: "mission" | "contextOverview" | "enrollment" | "publicAcademic" | "communityReviews" | "stakeholderMap" }
+  | {
+      level: "L3";
+      section:
+        | "contextOverview.communityOverview"
+        | "contextOverview.policyConsiderations"
+        | "contextOverview.historyOfChangeEfforts"
+        | "contextOverview.otherContext"
+        | "enrollment.studentDemographics"
+        | "enrollment.enrollmentComposition"
+        | "publicAcademic.collegePrep"
+        | "publicAcademic.collegeSuccess"
+        | "publicAcademic.advancedCourses"
+        | "publicAcademic.testScores"
+        | "publicAcademic.raceEthnicity"
+        | "publicAcademic.lowIncomeStudents"
+        | "publicAcademic.studentsWithDisabilities"
+        | "stakeholder.students"
+        | "stakeholder.families"
+        | "stakeholder.educatorsStaff"
+        | "stakeholder.administration"
+        | "stakeholder.otherCommunityLeaders";
+    };
+
+type OverallCardRoute = OverallNavTarget;
+
+const OctagonNode = ({
+  node,
+  onClick,
+  overallCenterMode,
+  onSetOverallCenterMode,
+  onNavigateOverall,
+  onOpenOverallTab,
+  overallCardRoute,
+  onSetOverallCardRoute,
+}: {
+  node: CanvasNode;
+  onClick: () => void;
+  overallCenterMode: OverallCenterMode;
+  onSetOverallCenterMode: (mode: OverallCenterMode) => void;
+  onNavigateOverall: (target: OverallNavTarget) => void;
+  onOpenOverallTab: (tab: "overview-and-context" | "designed-experience" | "status-and-health") => void;
+  overallCardRoute: OverallCardRoute;
+  onSetOverallCardRoute: (route: OverallCardRoute) => void;
+}) => {
   const isOverall = node.nodeId === "overall";
 
   if (isOverall) {
+     const mode = overallCenterMode;
+     const preview = node.overviewContextPreview || {};
+     const missionSnippet = (preview.mission || "").trim();
+     const missionShort =
+       missionSnippet.length > 70 ? `${missionSnippet.slice(0, 70).trim()}…` : missionSnippet;
+
+     const modeStyleFor = (m: OverallCenterMode) =>
+       m === "overview"
+         ? { border: "border-orange-200", bg: "bg-orange-50/70", pill: "bg-orange-100 text-orange-800 border-orange-200" }
+         : m === "designed"
+           ? { border: "border-blue-200", bg: "bg-blue-50/60", pill: "bg-blue-100 text-blue-800 border-blue-200" }
+           : { border: "border-emerald-200", bg: "bg-emerald-50/60", pill: "bg-emerald-100 text-emerald-800 border-emerald-200" };
+
+     const modeStyles = modeStyleFor(mode);
+     const otherModes = (["overview", "designed", "status"] as OverallCenterMode[]).filter((m) => m !== mode);
+
+     const route = overallCardRoute || { level: "L1" };
+     const setRoute = onSetOverallCardRoute;
+
+     const titleForRoute = () => {
+       if (route.level === "L1") return "Overview & Context";
+       if (route.level === "L2") {
+         return route.section === "mission"
+           ? "Mission"
+           : route.section === "contextOverview"
+             ? "Context & Overview"
+             : route.section === "enrollment"
+               ? "Enrollment & Composition"
+               : route.section === "publicAcademic"
+                 ? "Public Academic Profile"
+                 : route.section === "communityReviews"
+                   ? "Community Reviews"
+                   : "Stakeholder Map";
+       }
+       const s = route.section;
+       if (s.startsWith("contextOverview.")) return "Context & Overview";
+       if (s.startsWith("enrollment.")) return "Enrollment & Composition";
+       if (s.startsWith("publicAcademic.")) return "Public Academic Profile";
+       if (s.startsWith("stakeholder.")) return "Stakeholder Map";
+       return "Overview & Context";
+     };
+
+     const showBack = route.level !== "L1";
+
+     const drillToL2 = (section: OverallNavTarget extends any ? any : never) => {
+       setRoute({ level: "L2", section } as any);
+     };
+
+     const drillToL3 = (section: any) => {
+       setRoute({ level: "L3", section } as any);
+     };
+
      return (
-        <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            whileHover={{ scale: 1.02 }}
-            className="absolute cursor-pointer flex flex-col items-center justify-center w-[300px] h-[220px] bg-white rounded-xl shadow-lg border-2 border-gray-200 p-4 z-20"
-            style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
-            onClick={onClick}
-            data-testid={`node-${node.nodeId}`}
+        <div
+          className="absolute w-[320px] h-[255px] z-30"
+          style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
+          data-testid={`node-${node.nodeId}`}
         >
-            <div className="flex flex-col items-center w-full h-full justify-between">
-                <div className="text-center space-y-1">
-                    <div className="flex gap-1 justify-center mb-1">
-                        {[...Array(6)].map((_, i) => (
-                            <div key={i} className="w-1 h-1 rounded-full bg-gray-300" />
-                        ))}
-                    </div>
-                    <h3 className="font-bold text-gray-800 text-lg">{node.title}</h3>
-                    <p className="text-xs text-gray-500 uppercase tracking-wider">{node.subtitle}</p>
-                </div>
+          {/* Two cards behind (clickable to switch back) */}
+          {(() => {
+            const back2 = otherModes[1];
+            const back1 = otherModes[0];
+            const s2 = back2 ? modeStyleFor(back2) : null;
+            const s1 = back1 ? modeStyleFor(back1) : null;
+            return (
+              <>
+                {back2 && s2 && (
+                  <button
+                    type="button"
+                    className={cn(
+                      "absolute inset-x-0 top-0 h-[220px] rounded-xl border-2 shadow-md translate-x-3 translate-y-3",
+                      s2.border,
+                      s2.bg,
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetOverallCenterMode(back2);
+                      onOpenOverallTab(back2 === "overview" ? "overview-and-context" : back2 === "designed" ? "designed-experience" : "status-and-health");
+                    }}
+                    aria-label={`Switch to ${back2}`}
+                  />
+                )}
+                {back1 && s1 && (
+                  <button
+                    type="button"
+                    className={cn(
+                      "absolute inset-x-0 top-0 h-[220px] rounded-xl border-2 shadow-md translate-x-1.5 translate-y-1.5",
+                      s1.border,
+                      s1.bg,
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetOverallCenterMode(back1);
+                      onOpenOverallTab(back1 === "overview" ? "overview-and-context" : back1 === "designed" ? "designed-experience" : "status-and-health");
+                    }}
+                    aria-label={`Switch to ${back1}`}
+                  />
+                )}
+              </>
+            );
+          })()}
 
-                <div className="relative w-full flex-1 flex items-center justify-center my-2">
-                     <div className="w-[80%] h-[60px] rounded-[50%] border border-gray-300 flex items-center justify-center bg-gray-50 relative overflow-hidden">
-                        <div className="absolute inset-0 flex items-center justify-center opacity-20">
-                           <div className="w-full h-px bg-gray-400 rotate-45 absolute" />
-                           <div className="w-full h-px bg-gray-400 -rotate-45 absolute" />
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <motion.div
+                initial={{ scale: 0.98, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                whileHover={{ scale: 1.01 }}
+                className={cn(
+                  "relative cursor-pointer flex flex-col items-center justify-center w-full h-[220px] rounded-xl shadow-lg border-2 px-4 pt-4 pb-3 transition-colors",
+                  "bg-white",
+                  modeStyles.border,
+                  modeStyles.bg,
+                )}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSetOverallCenterMode("overview");
+                }}
+              >
+            <div className="flex flex-col w-full h-full justify-between">
+              <div className="space-y-2">
+                {mode === "overview" ? (
+                  <div className="relative text-center space-y-1">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        className={cn(
+                          "text-xs font-semibold text-gray-500 hover:text-gray-800 flex items-center gap-1",
+                          !showBack && "opacity-0 pointer-events-none",
+                        )}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRoute({ level: "L1" });
+                        }}
+                        data-testid="overall-card-back"
+                      >
+                        Back
+                      </button>
+                      <div className="text-base font-extrabold text-gray-900">{titleForRoute()}</div>
+                      <div className="w-12 flex justify-end">
+                        <div className={cn("shrink-0 w-7 h-7 rounded-lg border flex items-center justify-center", modeStyles.pill)}>
+                          <Bot className="w-3.5 h-3.5" />
                         </div>
-                        <span className="text-xs text-gray-400 font-medium z-10">Implementation</span>
-                     </div>
-                </div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      {preview.studentCount ? `${preview.studentCount} student school` : "— student school"}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative text-center space-y-1">
+                    <div className="text-base font-extrabold text-gray-900">
+                      {mode === "designed" ? "Designed Experience" : "Performance & Status"}
+                    </div>
+                    <div className="text-[11px] text-gray-500">{preview.schoolName || node.title}</div>
+                    <div className="absolute right-0 top-0">
+                      <div className={cn("shrink-0 w-7 h-7 rounded-lg border flex items-center justify-center", modeStyles.pill)}>
+                        <Bot className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                <div className="flex w-full justify-between items-center px-4 border-t border-gray-100 pt-3">
-                     <div className="flex flex-col items-center">
-                        <span className="text-[10px] text-gray-400 mb-0.5">{node.stats.leftLabel}</span>
-                        <div className="bg-gray-100 text-gray-600 font-bold px-3 py-1 rounded text-sm min-w-[30px] text-center">{node.stats.left}</div>
-                     </div>
-                     <span className="text-xs text-gray-300 tracking-widest">••• Performance •••</span>
-                     <div className="flex flex-col items-center">
-                        <span className="text-[10px] text-gray-400 mb-0.5">{node.stats.rightLabel}</span>
-                        <div className="bg-gray-100 text-gray-600 font-bold px-3 py-1 rounded text-sm min-w-[30px] text-center">{node.stats.right}</div>
-                     </div>
-                </div>
+                {mode === "overview" ? (
+                  <div className="bg-white/70 border border-gray-200 rounded-lg overflow-hidden flex-1 min-h-0">
+                    <div className="max-h-[150px] overflow-y-auto">
+                      {route.level === "L1" && (
+                        <>
+                          {[
+                            { key: "mission", label: "Mission", section: "mission" as const },
+                            { key: "context", label: "Context & Overview", section: "contextOverview" as const },
+                            { key: "enrollment", label: "Enrollment & Composition", section: "enrollment" as const },
+                            { key: "profile", label: "Public Academic Profile", section: "publicAcademic" as const },
+                            { key: "reviews", label: "Community Reviews", section: "communityReviews" as const },
+                            { key: "stakeholders", label: "Stakeholder Map", section: "stakeholderMap" as const },
+                          ].map((row, idx) => (
+                            <ContextMenu key={row.key}>
+                              <ContextMenuTrigger asChild>
+                                <div
+                                  className={cn(
+                                    "px-3 py-2 flex items-center justify-center hover:bg-gray-50/70",
+                                    idx !== 0 && "border-t border-gray-100",
+                                  )}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    drillToL2(row.section);
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                  data-testid={`overall-l1-${row.key}`}
+                                >
+                                  <div className="text-[13px] font-semibold text-purple-700">{row.label}</div>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault();
+                                    onNavigateOverall({ level: "L2", section: row.section } as any);
+                                  }}
+                                >
+                                  Navigate
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          ))}
+                        </>
+                      )}
+
+                      {route.level === "L2" && route.section === "mission" && (
+                        <ContextMenu>
+                          <ContextMenuTrigger asChild>
+                            <div className="p-4 text-sm text-gray-700 min-h-[120px] whitespace-pre-wrap">
+                              {missionShort || ""}
+                            </div>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuItem
+                              onSelect={(e) => {
+                                e.preventDefault();
+                                onNavigateOverall({ level: "L2", section: "mission" });
+                              }}
+                            >
+                              Navigate
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      )}
+
+                      {route.level === "L2" && route.section === "contextOverview" && (
+                        <>
+                          {[
+                            { key: "community", label: "Community overview", section: "contextOverview.communityOverview" as const },
+                            { key: "policy", label: "Policy considerations", section: "contextOverview.policyConsiderations" as const },
+                            { key: "history", label: "History of change efforts", section: "contextOverview.historyOfChangeEfforts" as const },
+                            { key: "other", label: "Other context", section: "contextOverview.otherContext" as const },
+                          ].map((row, idx) => (
+                            <ContextMenu key={row.key}>
+                              <ContextMenuTrigger asChild>
+                                <div
+                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    drillToL3(row.section);
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault();
+                                    onNavigateOverall({ level: "L3", section: row.section } as any);
+                                  }}
+                                >
+                                  Navigate
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          ))}
+                        </>
+                      )}
+
+                      {route.level === "L2" && route.section === "enrollment" && (
+                        <>
+                          {[
+                            { key: "demo", label: "Student demographics", section: "enrollment.studentDemographics" as const },
+                            { key: "comp", label: "Enrollment & composition", section: "enrollment.enrollmentComposition" as const },
+                          ].map((row, idx) => (
+                            <ContextMenu key={row.key}>
+                              <ContextMenuTrigger asChild>
+                                <div
+                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    drillToL3(row.section);
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault();
+                                    onNavigateOverall({ level: "L3", section: row.section } as any);
+                                  }}
+                                >
+                                  Navigate
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          ))}
+                        </>
+                      )}
+
+                      {route.level === "L2" && route.section === "publicAcademic" && (
+                        <>
+                          {[
+                            { key: "prep", label: "College Prep", section: "publicAcademic.collegePrep" as const },
+                            { key: "succ", label: "College Success", section: "publicAcademic.collegeSuccess" as const },
+                            { key: "adv", label: "Advanced Courses", section: "publicAcademic.advancedCourses" as const },
+                            { key: "test", label: "Test Scores", section: "publicAcademic.testScores" as const },
+                            { key: "race", label: "Race & Ethnicity", section: "publicAcademic.raceEthnicity" as const },
+                            { key: "low", label: "Low Income Students", section: "publicAcademic.lowIncomeStudents" as const },
+                            { key: "dis", label: "Students with Disabilities", section: "publicAcademic.studentsWithDisabilities" as const },
+                          ].map((row, idx) => (
+                            <ContextMenu key={row.key}>
+                              <ContextMenuTrigger asChild>
+                                <div
+                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    drillToL3(row.section);
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault();
+                                    onNavigateOverall({ level: "L3", section: row.section } as any);
+                                  }}
+                                >
+                                  Navigate
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          ))}
+                        </>
+                      )}
+
+                      {route.level === "L2" && route.section === "communityReviews" && (
+                        <ContextMenu>
+                          <ContextMenuTrigger asChild>
+                            <div className="p-4 text-sm text-gray-500 min-h-[120px]">Populated with GreatSchools data</div>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuItem
+                              onSelect={(e) => {
+                                e.preventDefault();
+                                onNavigateOverall({ level: "L2", section: "communityReviews" });
+                              }}
+                            >
+                              Navigate
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      )}
+
+                      {route.level === "L2" && route.section === "stakeholderMap" && (
+                        <>
+                          {[
+                            { key: "students", label: "Students", section: "stakeholder.students" as const },
+                            { key: "families", label: "Families", section: "stakeholder.families" as const },
+                            { key: "staff", label: "Educators & Staff", section: "stakeholder.educatorsStaff" as const },
+                            { key: "admin", label: "Administration", section: "stakeholder.administration" as const },
+                            { key: "other", label: "Other Community Leaders", section: "stakeholder.otherCommunityLeaders" as const },
+                          ].map((row, idx) => (
+                            <ContextMenu key={row.key}>
+                              <ContextMenuTrigger asChild>
+                                <div
+                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    drillToL3(row.section);
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault();
+                                    onNavigateOverall({ level: "L3", section: row.section } as any);
+                                  }}
+                                >
+                                  Navigate
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : mode === "designed" ? (
+                  <div className="bg-white/70 border border-gray-200 rounded-lg p-3">
+                    <div className="text-xs font-bold text-gray-800">Jump into Designed Experience</div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">Key aims, practices & supports for the whole school.</div>
+                  </div>
+                ) : (
+                  <div className="bg-white/70 border border-gray-200 rounded-lg p-3">
+                    <div className="text-xs font-bold text-gray-800">Jump into Status & Health</div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">View performance, design, implementation, and conditions summaries.</div>
+                  </div>
+                )}
+              </div>
+
             </div>
-            
-            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gray-200 text-gray-600 text-xs font-bold px-6 py-1 rounded-full shadow-sm">
-                Journey
-            </div>
-        </motion.div>
+              </motion.div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem
+                onSelect={(e) => {
+                  e.preventDefault();
+                  onNavigateOverall({ level: "L1" });
+                }}
+              >
+                Navigate
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+
+          {/* Bottom bar (attached): show the *other* two cards so you can get back */}
+          <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-gray-200 text-gray-700 text-[11px] font-semibold px-6 py-1 rounded-full shadow-sm border border-gray-300 flex items-center gap-3">
+            {(() => {
+              const left = otherModes[0];
+              const right = otherModes[1];
+              const label = (m: OverallCenterMode) => (m === "overview" ? "Overview & Context" : m === "designed" ? "Designed Experience" : "Performance Status");
+              const color = (m: OverallCenterMode) => (m === "overview" ? "text-orange-700" : m === "designed" ? "text-blue-700" : "text-emerald-700");
+              const toTab = (m: OverallCenterMode) => (m === "overview" ? "overview-and-context" : m === "designed" ? "designed-experience" : "status-and-health");
+              return (
+                <>
+                  <button
+                    type="button"
+                    className={cn(color(left), "hover:underline")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetOverallCenterMode(left);
+                      onOpenOverallTab(toTab(left));
+                    }}
+                    data-testid={`overall-bottom-${left}`}
+                  >
+                    {label(left)}
+                  </button>
+                  <span className="text-gray-400">|</span>
+                  <button
+                    type="button"
+                    className={cn(color(right), "hover:underline")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetOverallCenterMode(right);
+                      onOpenOverallTab(toTab(right));
+                    }}
+                    data-testid={`overall-bottom-${right}`}
+                  >
+                    {label(right)}
+                  </button>
+                </>
+              );
+            })()}
+          </div>
+        </div>
      );
   }
 
@@ -125,56 +601,17 @@ const OctagonNode = ({ node, onClick }: { node: CanvasNode; onClick: () => void 
       whileHover={{ scale: 1.05 }}
       className="absolute cursor-pointer flex flex-col items-center justify-center w-[220px] h-[220px] transition-all"
       style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
-      onClick={onClick}
       data-testid={`node-${node.nodeId}`}
     >
-      <div 
-        className={cn(
-            "w-full h-full flex flex-col items-center justify-between p-6 shadow-md transition-colors",
-            node.color
-        )}
-        style={{ 
-            clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)",
-            border: "1px solid #000"
-        }}
-      >
-        <div className="text-center space-y-1 mt-2">
-            <div className="flex gap-1 justify-center mb-1">
-                {[...Array(6)].map((_, i) => (
-                    <div key={i} className="w-1 h-1 rounded-full bg-gray-400/50" />
-                ))}
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm leading-tight px-2">{node.title}</h3>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">{node.subtitle}</p>
-        </div>
-
-        <div className="flex-1 w-full flex items-center justify-center">
-             <div className="w-[80%] h-[40px] rounded-[50%] bg-blue-900/10 flex items-center justify-center">
-                <span className="text-[9px] text-gray-400">{node.stats.left > 0 ? `${node.stats.left} subcomponents` : "No subcomponents"}</span>
-             </div>
-        </div>
-
-        <div className="flex w-full justify-between items-end gap-2 mb-2">
-             <div className="flex flex-col items-center flex-1">
-                <span className="text-[9px] text-blue-600 font-medium mb-0.5">{node.stats.leftLabel}</span>
-                <div className="bg-yellow-300 text-yellow-900 font-bold px-2 py-0.5 rounded text-sm w-full text-center shadow-sm border border-yellow-400/30">{node.stats.left}</div>
-             </div>
-             <div className="flex flex-col items-center flex-1">
-                <span className="text-[9px] text-blue-600 font-medium mb-0.5">{node.stats.rightLabel}</span>
-                <div className="bg-red-300 text-red-900 font-bold px-2 py-0.5 rounded text-sm w-full text-center shadow-sm border border-red-400/30">{node.stats.right}</div>
-             </div>
-        </div>
-        
-        <div className="text-[9px] text-gray-500 font-medium -mt-1">
-          {node.subtitle.includes("STEM") ? "STEM capacities" : node.subtitle}
-        </div>
-      </div>
-      
-      <div 
-        className="absolute inset-0 pointer-events-none border-2 border-gray-800/20"
-        style={{ 
-            clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)"
-        }}
+      <OctagonCard
+        title={node.title}
+        subtitle={node.subtitle}
+        centerVariant="pill"
+        centerText={node.stats.left > 0 ? `${node.stats.left} subcomponents` : "No subcomponents"}
+        bgClassName={node.color}
+        leftStat={{ label: node.stats.leftLabel, value: String(node.stats.left) }}
+        rightStat={{ label: node.stats.rightLabel, value: String(node.stats.right) }}
+        onClick={onClick}
       />
     </motion.div>
   );
@@ -185,20 +622,62 @@ export default function CanvasView() {
   const [activeTab, setActiveTab] = useState("snapshot");
   const [initialSubId, setInitialSubId] = useState<string | null>(null);
   const [openSubId, setOpenSubId] = useState<string | null>(null);
+  const [isExpandedWorkingSpace, setIsExpandedWorkingSpace] = useState(false);
+  const [overallCenterMode, setOverallCenterMode] = useState<OverallCenterMode>("overview");
+  const [overallNavTarget, setOverallNavTarget] = useState<OverallNavTarget | null>(null);
+  const [overallCardRoute, setOverallCardRoute] = useState<OverallCardRoute>({ level: "L1" });
   
   const { data: componentsRaw, isLoading } = useQuery(componentQueries.all);
   const seedMutation = useSeedComponents();
-  const updateMutation = useUpdateComponent();
 
   const nodes: CanvasNode[] = componentsRaw && Array.isArray(componentsRaw) && componentsRaw.length > 0
     ? componentsRaw.map(componentToCanvasNode)
     : FALLBACK_NODES;
+
+  const derivedNodes: CanvasNode[] = useMemo(() => {
+    const list = [...nodes];
+    const overallIdx = list.findIndex((n) => n.nodeId === "overall");
+    const others = list.filter((n) => n.nodeId !== "overall");
+    if (overallIdx >= 0 && others.length > 0) {
+      const centerX = others.reduce((s, n) => s + n.x, 0) / others.length;
+      const centerY = others.reduce((s, n) => s + n.y, 0) / others.length;
+
+      // Keep overall in the true center.
+      list[overallIdx] = { ...list[overallIdx], x: centerX, y: centerY };
+
+      // Push outer components outward to ensure nothing overlaps the center card.
+      const EXPAND = 1.22;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].nodeId === "overall") continue;
+        const dx = list[i].x - centerX;
+        const dy = list[i].y - centerY;
+        list[i] = { ...list[i], x: centerX + dx * EXPAND, y: centerY + dy * EXPAND };
+      }
+    }
+    // Render overall last so it never gets covered.
+    list.sort((a, b) => (a.nodeId === "overall" ? 1 : 0) - (b.nodeId === "overall" ? 1 : 0));
+    return list;
+  }, [nodes]);
 
   useEffect(() => {
     if (componentsRaw && Array.isArray(componentsRaw) && componentsRaw.length === 0) {
       seedMutation.mutate();
     }
   }, [componentsRaw]);
+
+  useEffect(() => {
+    if (selectedNode?.nodeId === "overall") {
+      // Default to Overview & Context tab for the center component.
+      if (activeTab === "snapshot") setActiveTab("overview-and-context");
+    }
+  }, [activeTab, selectedNode?.nodeId]);
+
+  useEffect(() => {
+    if (selectedNode?.nodeId !== "overall") return;
+    if (activeTab === "overview-and-context") setOverallCenterMode("overview");
+    if (activeTab === "designed-experience") setOverallCenterMode("designed");
+    if (activeTab === "status-and-health") setOverallCenterMode("status");
+  }, [activeTab, selectedNode?.nodeId]);
 
   return (
     <div className="w-full h-screen bg-[#F8F9FA] relative overflow-hidden font-sans">
@@ -227,8 +706,33 @@ export default function CanvasView() {
       </div>
 
       <div className="absolute inset-0 flex items-center justify-center transform scale-90 origin-center">
-         {nodes.map(node => (
-            <OctagonNode key={node.nodeId} node={node} onClick={() => setSelectedNode(node)} />
+         {derivedNodes.map(node => (
+            <OctagonNode
+              key={node.nodeId}
+              node={node}
+              onClick={() => {
+                // For center card, clicks drill down within the card. Working space is opened via right-click Navigate.
+                if (node.nodeId === "overall") return;
+                setSelectedNode(node);
+              }}
+              overallCenterMode={overallCenterMode}
+              onSetOverallCenterMode={setOverallCenterMode}
+              onNavigateOverall={(target) => {
+                const overallNode = derivedNodes.find((n) => n.nodeId === "overall") || node;
+                setSelectedNode(overallNode);
+                setOpenSubId(null);
+                setActiveTab("overview-and-context");
+                setOverallNavTarget(target);
+              }}
+              onOpenOverallTab={(tab) => {
+                const overallNode = derivedNodes.find((n) => n.nodeId === "overall") || node;
+                setSelectedNode(overallNode);
+                setOpenSubId(null);
+                setActiveTab(tab);
+              }}
+              overallCardRoute={overallCardRoute}
+              onSetOverallCardRoute={setOverallCardRoute}
+            />
          ))}
       </div>
 
@@ -242,128 +746,53 @@ export default function CanvasView() {
           <Bot className="w-5 h-5" />
       </div>
 
-      <Sheet open={!!selectedNode} onOpenChange={(open) => { if (!open) { setSelectedNode(null); setOpenSubId(null); } }}>
+      <Sheet
+        open={!!selectedNode && !isExpandedWorkingSpace}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedNode(null);
+            setOpenSubId(null);
+            setIsExpandedWorkingSpace(false);
+          }
+        }}
+      >
         <SheetContent className="w-full sm:max-w-[800px] p-0 border-l border-gray-200 shadow-2xl flex flex-col bg-white" side="right">
-           {(() => {
-              const comp = componentsRaw?.find((c: any) => c.nodeId === selectedNode?.nodeId);
-              const subs: any[] = comp?.designedExperienceData?.subcomponents || [];
-              const activeSub = openSubId ? subs.find((s: any) => s.id === openSubId) : null;
-              const dropdownTitle = activeSub ? activeSub.name : selectedNode?.title;
-
-              return (
-                <>
-                  <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100 bg-white shrink-0">
-                    <div className="flex items-center gap-3 flex-1">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="flex items-center gap-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded-md transition-all group focus:outline-none focus:ring-2 focus:ring-blue-500/20 active:scale-95" data-testid="dropdown-component-switcher">
-                            <h2 className="text-lg font-bold text-gray-900">{dropdownTitle}</h2>
-                            <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-[280px] bg-white z-50">
-                          <DropdownMenuItem
-                            className="font-medium cursor-pointer py-2"
-                            onClick={() => { setOpenSubId(null); }}
-                            data-testid="switch-to-component"
-                          >
-                            <div className="w-6 h-6 rounded bg-blue-50 text-blue-600 flex items-center justify-center mr-2 border border-blue-100">
-                              <Maximize2 className="w-3.5 h-3.5" />
-                            </div>
-                            <span>{selectedNode?.title}</span>
-                            {!openSubId && <Check className="w-4 h-4 ml-auto text-blue-600" />}
-                          </DropdownMenuItem>
-                          
-                          {subs.length > 0 && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuLabel className="text-xs text-gray-500 font-normal uppercase tracking-wider px-2 py-1.5">Subcomponents</DropdownMenuLabel>
-                              {subs.map((sub: any) => (
-                                <DropdownMenuItem 
-                                  key={sub.id} 
-                                  className="cursor-pointer py-2 text-gray-600 hover:text-gray-900"
-                                  onClick={() => { setActiveTab("designed-experience"); setOpenSubId(sub.id); }}
-                                  data-testid={`switch-to-sub-${sub.id}`}
-                                >
-                                  <div className="w-6 h-6 mr-2 flex items-center justify-center">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-                                  </div>
-                                  <span>{sub.name}</span>
-                                  {openSubId === sub.id && <Check className="w-4 h-4 ml-auto text-blue-600" />}
-                                </DropdownMenuItem>
-                              ))}
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => { setSelectedNode(null); setOpenSubId(null); }} data-testid="button-close-panel">
-                        <X className="w-4 h-4 text-gray-500" />
-                      </Button>
-                    </div>
-                  </div>
-                  
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    <div className="px-6 py-3 bg-white border-b border-gray-100 shrink-0">
-                      <Tabs value={activeTab} onValueChange={(tab) => { setActiveTab(tab); }} className="w-full">
-                        <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-transparent gap-6">
-                          {["Snapshot", "Designed Experience", "Status and Health"].map(tab => (
-                            <TabsTrigger 
-                              key={tab} 
-                              value={tab.toLowerCase().replace(/ /g, "-")}
-                              className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-900 data-[state=active]:shadow-none px-0 py-2 text-gray-500 hover:text-gray-700 bg-transparent"
-                              data-testid={`tab-${tab.toLowerCase().replace(/ /g, "-")}`}
-                            >
-                              {tab}
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </Tabs>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto bg-gray-50/30">
-                      {(() => {
-                        const activeSubData: DESubcomponent | undefined = activeSub ? {
-                          ...activeSub,
-                          aims: activeSub.aims || [],
-                          practices: activeSub.practices || [],
-                          supports: activeSub.supports || [],
-                        } : undefined;
-
-                        const updateSubInComponent = (updated: DESubcomponent) => {
-                          if (!comp || !selectedNode) return;
-                          const de = comp.designedExperienceData || {};
-                          const updatedSubs = (de.subcomponents || []).map((s: any) => s.id === updated.id ? updated : s);
-                          updateMutation.mutate({ nodeId: selectedNode.nodeId, data: { designedExperienceData: { ...de, subcomponents: updatedSubs } } });
-                        };
-
-                        if (activeSubData && activeTab === "snapshot") {
-                          return <SubcomponentSnapshotView sub={activeSubData} parentTitle={selectedNode?.title || "Component"} onUpdate={updateSubInComponent} />;
-                        }
-                        if (activeTab === "snapshot") {
-                          return <SnapshotView nodeId={selectedNode?.nodeId} title={selectedNode?.title} color={selectedNode?.color} />;
-                        }
-                        if (activeTab === "designed-experience") {
-                          return <DesignedExperienceView nodeId={selectedNode?.nodeId} title={selectedNode?.title} initialSubId={initialSubId} onSubIdConsumed={() => setInitialSubId(null)} openSubId={openSubId} onOpenSubIdChange={setOpenSubId} />;
-                        }
-                        if (activeTab === "status-and-health") {
-                          return <ComponentHealthView nodeId={selectedNode?.nodeId} title={selectedNode?.title} />;
-                        }
-                        return null;
-                      })()}
-                    </div>
-                    
-                    <div className="p-4 border-t border-gray-100 bg-white flex justify-end gap-2 shrink-0">
-                      <Button variant="outline" onClick={() => setSelectedNode(null)} data-testid="button-back">Back</Button>
-                      <Button className="bg-blue-900 hover:bg-blue-800" data-testid="button-save">Save Changes</Button>
-                    </div>
-                  </div>
-                </>
-              );
-           })()}
+          <ComponentWorkingPanel
+            selectedNode={selectedNode ? { nodeId: selectedNode.nodeId, title: selectedNode.title, color: selectedNode.color } : null}
+            componentsRaw={componentsRaw}
+            activeTab={activeTab}
+            onActiveTabChange={(tab) => setActiveTab(tab)}
+            initialSubId={initialSubId}
+            onInitialSubIdConsumed={() => setInitialSubId(null)}
+            openSubId={openSubId}
+            onOpenSubIdChange={setOpenSubId}
+            overallNavTarget={overallNavTarget}
+            onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
+            onClose={() => {
+              setSelectedNode(null);
+              setOpenSubId(null);
+              setIsExpandedWorkingSpace(false);
+            }}
+            onExpand={() => setIsExpandedWorkingSpace(true)}
+            showExpandButton
+          />
         </SheetContent>
       </Sheet>
+
+      <ComponentWorkingSpaceOverlay
+        open={!!selectedNode && isExpandedWorkingSpace}
+        onOpenChange={(open) => setIsExpandedWorkingSpace(open)}
+        selectedNode={selectedNode ? { nodeId: selectedNode.nodeId, title: selectedNode.title, color: selectedNode.color } : null}
+        componentsRaw={componentsRaw}
+        activeTab={activeTab}
+        onActiveTabChange={(tab) => setActiveTab(tab)}
+        initialSubId={initialSubId}
+        onInitialSubIdConsumed={() => setInitialSubId(null)}
+        openSubId={openSubId}
+        onOpenSubIdChange={setOpenSubId}
+        overallNavTarget={overallNavTarget}
+        onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
+      />
     </div>
   );
 }

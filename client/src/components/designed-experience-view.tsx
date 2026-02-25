@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { 
   Target, 
@@ -42,6 +42,16 @@ import { componentQueries, useUpdateComponent } from "@/lib/api";
 import OutcomeSummaryView from "./outcome-summary-view";
 import OutcomeDetailView from "./outcome-detail-view";
 import OutcomeScoreView from "./outcome-score-view";
+import { SchemaPickerSheet } from "./de-schema-picker-sheet";
+import { LEAP_SCHEMA, OUTCOME_SCHEMA, PRACTICE_SCHEMA, SUPPORT_SCHEMA } from "./designed-experience-schemas";
+import SupportGroupsHubView from "./support-groups-hub-view";
+import SupportGroupDetailView from "./support-group-detail-view";
+import SupportDetailView from "./support-detail-view";
+import type { SupportGroupKey } from "./support-groups-config";
+import PogHubView from "./pog/pog-hub-view";
+import PogAttributeDetailView from "./pog/pog-attribute-detail-view";
+import type { PortraitOfGraduate } from "./pog/pog-types";
+import { normalizePortrait, syncKeyAimsOutcomesFromPortrait, normKey as normPogKey } from "./pog/pog-utils";
 
 import artifactDoc from "@/assets/images/artifact-doc.png";
 import artifactSlide from "@/assets/images/artifact-slide.png";
@@ -58,6 +68,7 @@ export interface Tag {
   isPrimary?: boolean;
   isKey?: boolean;
   level?: TagLevel;
+  source?: string;
 }
 
 export interface DESubcomponent {
@@ -79,6 +90,9 @@ export interface DesignedExperienceData {
   description?: string;
   keyDesignElements?: KeyDesignElements;
   subcomponents?: DESubcomponent[];
+  // Additional nested pages may store extra fields here (e.g. support group workflow).
+  // This view must preserve unknown fields when saving.
+  [key: string]: any;
 }
 
 
@@ -96,55 +110,6 @@ const FEATURED_ARTIFACTS: Artifact[] = [
   { id: "3", title: "Grade 7 Reasoning Task", type: "doc", thumbnail: artifactDoc, tags: [{ id: "t3", type: "outcome", label: "Geometry" }] },
   { id: "4", title: "Student Self-Assessment", type: "doc", thumbnail: artifactRubric, tags: [{ id: "t4", type: "support", label: "Rubric" }] },
 ];
-
-export const OUTCOME_SCHEMA: Record<string, Record<string, string[]>> = {
-  "STEM": {
-    "Mathematics": ["Algebra", "Geometry", "Calculus"],
-    "Natural sciences": ["Physics", "Chemistry", "Biology"],
-    "Digital & AI literacies": ["Computer science", "AI literacy", "Robotics"]
-  },
-  "Humanities": {
-    "English language arts": ["Reading", "Writing", "Literature"],
-    "Social studies & civics": ["US history", "World history", "Civics"],
-    "World languages": ["Mandarin", "French"],
-    "Performing & visual arts": ["Visual art", "Music", "Drama"]
-  },
-  "Cross-cutting": {
-    "Higher-order thinking skills": ["Critical thinking", "Systems thinking", "Creativity"],
-    "Learning strategies & habits": ["Goal-setting", "Note-taking"],
-    "Collaboration & communication skills": ["Collaboration", "Communication", "Leadership & followership"]
-  },
-  "Well-being": {
-    "Social emotional capacities": ["Identity & purpose", "Mindsets & self-regulation", "Relationship skills"],
-    "Physical capacities": ["Athletics", "Healthy habits"],
-    "Mental & physical health": ["Emotional well-being & mood", "Stress & resilience", "Anxiety/depressive symptoms"],
-    "Behavior, attendance, & engagement": ["Attendance", "Positive & negative behavioral incidents", "Participation"]
-  },
-  "Wayfinding": {
-    "Practical, professional, & continuing education capacities": ["Practical knowledge & life skills", "Professional knowledge & skills", "Continuing-education / post-secondary knowledge & exposure"],
-    "Postsecondary assets": ["Industry-recognized credentials", "Early college coursework", "Postsecondary plan"],
-    "Transitional milestones": ["Promotion / graduation", "Postsecondary enrollment", "Successful career transition"]
-  }
-};
-
-export const LEAP_SCHEMA: Record<string, string[]> = {
-  "Level 1": ["Whole-child focus", "Connection & community", "High expectations with rigorous learning", "Relevance", "Customization", "Agency"],
-};
-
-export const PRACTICE_SCHEMA: Record<string, string[]> = {
-  "Instructional Strategies": ["Direct instruction", "Problem-based instruction", "Project-based learning", "Inquiry-based learning", "Socratic seminar", "Flipped classroom", "Lecture", "Modeling"],
-  "Student Engagement": ["Discourse", "Collaborative learning", "Peer tutoring", "Student-led discussion", "Think-pair-share", "Gallery walk", "Jigsaw"],
-  "Assessment Practices": ["Formative assessment", "Fluency practice", "Exit tickets", "Self-assessment", "Peer review", "Portfolio assessment", "Standards-based grading"],
-  "Differentiation": ["Scaffolding", "Tiered assignments", "Flexible grouping", "Choice boards", "Learning stations", "Accommodations & modifications"],
-};
-
-export const SUPPORT_SCHEMA: Record<string, string[]> = {
-  "Curriculum & Materials": ["High-quality aligned curriculum", "Supplemental materials", "Digital resources", "Manipulatives & tools", "Textbook adoption"],
-  "Assessment Tools": ["Common unit assessments", "Interim assessments", "Diagnostic assessments", "Benchmark assessments", "Rubrics & scoring guides"],
-  "Professional Development": ["Coaching cycles", "PLC collaboration", "Instructional rounds", "Content-area training", "Data literacy training"],
-  "Student Support Structures": ["Tutoring program", "Intervention block", "Office hours", "Study groups", "Mentoring program"],
-  "Technology & Infrastructure": ["Learning management system", "Student devices", "Assessment platform", "Data dashboard", "Communication tools"],
-};
 
 let deIdCounter = 0;
 const generateId = () => `de_${Date.now()}_${++deIdCounter}`;
@@ -255,229 +220,6 @@ const ArtifactCard = ({ artifact }: { artifact: Artifact }) => (
     </div>
   </div>
 );
-
-function SchemaPickerSheet({
-  title,
-  description,
-  schema,
-  selectedLabels,
-  onToggle,
-  getLevel,
-  onSetLevel,
-  getIsKey,
-  onSetIsKey,
-  type,
-  triggerLabel,
-  triggerIcon: TriggerIcon,
-  children,
-}: {
-  title: string;
-  description: string;
-  schema: Record<string, Record<string, string[]>> | Record<string, string[]>;
-  selectedLabels: string[];
-  onToggle: (label: string) => void;
-  getLevel?: (label: string) => TagLevel | undefined;
-  onSetLevel?: (label: string, level: TagLevel) => void;
-  getIsKey?: (label: string) => boolean;
-  onSetIsKey?: (label: string, isKey: boolean) => void;
-  type: TagType;
-  triggerLabel: string;
-  triggerIcon?: any;
-  children?: React.ReactNode;
-}) {
-  const [search, setSearch] = useState("");
-  const searchLower = search.toLowerCase();
-
-  const isNested = Object.values(schema).some(v => typeof v === "object" && !Array.isArray(v));
-
-  const colorMap: Record<string, { selected: string; icon: string }> = {
-    outcome: { selected: "bg-emerald-50 border-emerald-200 text-emerald-800", icon: "text-emerald-600" },
-    leap: { selected: "bg-purple-50 border-purple-200 text-purple-800", icon: "text-purple-600" },
-    practice: { selected: "bg-orange-50 border-orange-200 text-orange-800", icon: "text-orange-600" },
-    support: { selected: "bg-sky-50 border-sky-200 text-sky-800", icon: "text-sky-600" },
-    artifact: { selected: "bg-gray-50 border-gray-200 text-gray-800", icon: "text-gray-600" },
-  };
-  const colors = colorMap[type];
-
-  const isPriorityEnabled = (type === "outcome" || type === "leap") && !!onSetLevel;
-  const isKeyEnabled = (type === "practice" || type === "support") && !!onSetIsKey;
-  const levelToHml = (level: TagLevel | undefined): "H" | "M" | "L" => {
-    if (level === "High") return "H";
-    if (level === "Low") return "L";
-    return "M";
-  };
-  const hmlToLevel = (hml: "H" | "M" | "L"): TagLevel => (hml === "H" ? "High" : hml === "L" ? "Low" : "Medium");
-
-  const PriorityMini = ({ label, selected }: { label: string; selected: boolean }) => {
-    if (!isPriorityEnabled) return null;
-    if (!selected) return null;
-    const current = levelToHml(getLevel?.(label));
-    return (
-      <div
-        className="inline-flex rounded-md border border-gray-200 overflow-hidden bg-white"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {(["H", "M", "L"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            className={cn(
-              "px-1.5 py-0.5 text-[10px] font-bold transition-colors",
-              k !== "H" && "border-l border-gray-100",
-              current === k ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:text-gray-800",
-            )}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSetLevel?.(label, hmlToLevel(k));
-            }}
-            data-testid={`${type}-priority-${label}-${k}`}
-          >
-            {k}
-          </button>
-        ))}
-      </div>
-    );
-  };
-
-  const KeyMini = ({ label, selected }: { label: string; selected: boolean }) => {
-    if (!isKeyEnabled) return null;
-    if (!selected) return null;
-    const current = !!getIsKey?.(label);
-    return (
-      <button
-        type="button"
-        className={cn(
-          "px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors",
-          current ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-500 border-gray-200 hover:text-gray-800",
-        )}
-        onClick={(e) => {
-          e.stopPropagation();
-          onSetIsKey?.(label, !current);
-        }}
-        data-testid={`${type}-key-${label}`}
-      >
-        Key
-      </button>
-    );
-  };
-
-  return (
-    <Sheet>
-      <SheetTrigger asChild>
-        {children || (
-          <button
-            className={cn(
-              "flex items-center gap-1 text-[11px] font-medium border border-dashed rounded-full px-2 py-0.5 transition-colors",
-              type === "outcome" ? "text-emerald-500 border-emerald-300 hover:text-emerald-700 hover:border-emerald-400" :
-              type === "leap" ? "text-purple-500 border-purple-300 hover:text-purple-700 hover:border-purple-400" :
-              type === "practice" ? "text-orange-500 border-orange-300 hover:text-orange-700 hover:border-orange-400" :
-              "text-sky-500 border-sky-300 hover:text-sky-700 hover:border-sky-400"
-            )}
-            data-testid={`button-add-${type}`}
-          >
-            {TriggerIcon && <TriggerIcon className="w-3 h-3" />}
-            <Plus className="w-3 h-3" />
-            {triggerLabel}
-          </button>
-        )}
-      </SheetTrigger>
-      <SheetContent className="overflow-y-auto bg-white">
-        <SheetHeader>
-          <SheetTitle>{title}</SheetTitle>
-          <SheetDescription>{description}</SheetDescription>
-        </SheetHeader>
-        <div className="mt-4 space-y-4">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
-            <Input
-              placeholder={`Search ${title.toLowerCase()}...`}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-9 text-sm"
-              data-testid={`input-search-${type}`}
-            />
-          </div>
-          {isNested ? (
-            Object.entries(schema as Record<string, Record<string, string[]>>).map(([category, subcategories]) => {
-              const hasMatch = !search || Object.values(subcategories).some(items =>
-                items.some(item => item.toLowerCase().includes(searchLower))
-              );
-              if (!hasMatch) return null;
-              return (
-                <div key={category} className="space-y-2">
-                  <h4 className="text-xs font-bold text-gray-900 border-b pb-1">{category}</h4>
-                  <div className="space-y-3 pl-1">
-                    {Object.entries(subcategories).map(([subcategory, items]) => {
-                      const filtered = search ? items.filter(i => i.toLowerCase().includes(searchLower)) : items;
-                      if (filtered.length === 0) return null;
-                      return (
-                        <div key={subcategory} className="space-y-1">
-                          <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">{subcategory}</h5>
-                          {filtered.map(item => {
-                            const isSelected = selectedLabels.includes(item);
-                            return (
-                              <div
-                                key={item}
-                                className={cn(
-                                  "flex items-center justify-between gap-2 p-1.5 rounded cursor-pointer border transition-colors text-xs min-w-0",
-                                  isSelected ? `${colors.selected}` : "hover:bg-gray-50 border-transparent hover:border-gray-100 text-gray-700"
-                                )}
-                                onClick={() => onToggle(item)}
-                                data-testid={`${type}-option-${item}`}
-                              >
-                                <span className="truncate min-w-0">{item}</span>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {isSelected && <PriorityMini label={item} selected={isSelected} />}
-                                  {isSelected && <KeyMini label={item} selected={isSelected} />}
-                                  {isSelected ? <Check className={cn("w-3.5 h-3.5", colors.icon)} /> : <Plus className="w-3.5 h-3.5 text-gray-300" />}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            Object.entries(schema as Record<string, string[]>).map(([category, items]) => {
-              const filtered = search ? items.filter(i => i.toLowerCase().includes(searchLower)) : items;
-              if (filtered.length === 0) return null;
-              return (
-                <div key={category} className="space-y-1">
-                  <h4 className="text-xs font-bold text-gray-900 border-b pb-1">{category}</h4>
-                  {filtered.map(item => {
-                    const isSelected = selectedLabels.includes(item);
-                    return (
-                      <div
-                        key={item}
-                        className={cn(
-                          "flex items-center justify-between gap-2 p-1.5 rounded cursor-pointer border transition-colors text-xs min-w-0",
-                          isSelected ? `${colors.selected}` : "hover:bg-gray-50 border-transparent hover:border-gray-100 text-gray-700"
-                        )}
-                        onClick={() => onToggle(item)}
-                        data-testid={`${type}-option-${item}`}
-                      >
-                        <span className="truncate min-w-0">{item}</span>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {isSelected && <PriorityMini label={item} selected={isSelected} />}
-                          {isSelected && <KeyMini label={item} selected={isSelected} />}
-                          {isSelected ? <Check className={cn("w-3.5 h-3.5", colors.icon)} /> : <Plus className="w-3.5 h-3.5 text-gray-300" />}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
-}
 
 function CompactTagRow({
   aims,
@@ -959,11 +701,13 @@ function KeyDesignElementsSummary({
   onChange,
   onViewOutcomes,
   onOpenOutcome,
+  onViewSupports,
 }: {
   elements: KeyDesignElements;
   onChange: (updated: KeyDesignElements) => void;
   onViewOutcomes?: () => void;
   onOpenOutcome?: (label: string) => void;
+  onViewSupports?: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -1204,7 +948,14 @@ function KeyDesignElementsSummary({
                     {keySupports.length}{keySupports.length !== supports.length ? `/${supports.length}` : ""}
                   </span>
                 </h3>
-                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-sky-600 hover:text-sky-700 hover:bg-sky-50 px-2 rounded-full border border-sky-100">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[10px] text-sky-600 hover:text-sky-700 hover:bg-sky-50 px-2 rounded-full border border-sky-100"
+                  onClick={onViewSupports}
+                  disabled={!onViewSupports}
+                  data-testid="button-view-all-selected-supports"
+                >
                   View All Selected
                 </Button>
               </div>
@@ -1244,12 +995,21 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   const [description, setDescription] = useState("");
   const [keyDesignElements, setKeyDesignElements] = useState<KeyDesignElements>({ aims: [], practices: [], supports: [] });
   const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
+  const [portraitOfGraduate, setPortraitOfGraduate] = useState<PortraitOfGraduate>({ attributes: [], linksByAttributeId: {} });
+  const [pogNav, setPogNav] = useState<{ mode: "hub" } | { mode: "detail"; attributeId: string }>({ mode: "hub" });
+  const [loadedNodeId, setLoadedNodeId] = useState<string | null>(null);
   const [localOpenSubId, setLocalOpenSubId] = useState<string | null>(null);
   const [addingSubcomponent, setAddingSubcomponent] = useState(false);
   const [newSubName, setNewSubName] = useState("");
   const [showOutcomeSummary, setShowOutcomeSummary] = useState(false);
   const [showOutcomeScore, setShowOutcomeScore] = useState(false);
   const [selectedOutcomeLabel, setSelectedOutcomeLabel] = useState<string | null>(null);
+  const [supportNav, setSupportNav] = useState<
+    | { mode: "none" }
+    | { mode: "hub" }
+    | { mode: "group"; groupKey: SupportGroupKey }
+    | { mode: "detail"; groupKey: SupportGroupKey; label: string; backTo: "hub" | "group" }
+  >({ mode: "none" });
 
   const activeSubId = openSubId !== undefined ? openSubId : localOpenSubId;
   const setActiveSubId = (id: string | null) => {
@@ -1259,21 +1019,53 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
 
   const { data: componentData } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
+  const deRef = useRef<DesignedExperienceData>({});
+  const isOverall = String(nodeId || "") === "overall" || String((componentData as any)?.nodeId || "") === "overall";
 
   useEffect(() => {
-    if (componentData) {
-      const de: DesignedExperienceData = componentData.designedExperienceData || {};
-      setDescription(de.description || "");
-      setKeyDesignElements(de.keyDesignElements || { aims: [], practices: [], supports: [] });
-      setSubcomponents((de.subcomponents || []).map((s: any) => ({
-        ...s,
-        id: s.id || generateId(),
-        aims: s.aims || [],
-        practices: s.practices || [],
-        supports: s.supports || [],
-      })));
-    }
+    deRef.current = (componentData as any)?.designedExperienceData || {};
   }, [componentData]);
+
+  useEffect(() => {
+    if (!nodeId || !componentData) return;
+    // Only hydrate local state once per nodeId; otherwise refetches from our own PATCHes
+    // will overwrite local state and can cause save/refetch loops.
+    if (loadedNodeId === nodeId) return;
+    const de: DesignedExperienceData = (componentData as any).designedExperienceData || {};
+    setDescription(de.description || "");
+    setKeyDesignElements(de.keyDesignElements || { aims: [], practices: [], supports: [] });
+    setSubcomponents((de.subcomponents || []).map((s: any) => ({
+      ...s,
+      id: s.id || generateId(),
+      aims: s.aims || [],
+      practices: s.practices || [],
+      supports: s.supports || [],
+    })));
+    setPortraitOfGraduate(normalizePortrait((de as any)?.portraitOfGraduate));
+    setPogNav({ mode: "hub" });
+    setLoadedNodeId(nodeId);
+  }, [componentData, loadedNodeId, nodeId]);
+
+  useEffect(() => {
+    if (!isOverall) return;
+    const synced = syncKeyAimsOutcomesFromPortrait({ keyDesignElements }, portraitOfGraduate);
+    const nextAims: any[] = (synced as any)?.keyDesignElements?.aims || [];
+    const curAims: any[] = (keyDesignElements as any)?.aims || [];
+
+    const keyOf = (t: any) =>
+      `${t?.type || ""}:${normPogKey(t?.label)}:${String(t?.source || "")}:${String(t?.level || "")}:${t?.isPrimary ? "1" : "0"}`;
+
+    if (curAims.length !== nextAims.length) {
+      setKeyDesignElements((prev) => ({ ...prev, aims: nextAims as any }));
+      return;
+    }
+    for (let i = 0; i < curAims.length; i++) {
+      if (keyOf(curAims[i]) !== keyOf(nextAims[i])) {
+        setKeyDesignElements((prev) => ({ ...prev, aims: nextAims as any }));
+        return;
+      }
+    }
+  }, [isOverall, keyDesignElements, portraitOfGraduate]);
 
   useEffect(() => {
     if (initialSubId && subcomponents.length > 0) {
@@ -1287,21 +1079,29 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
 
   const saveData = useCallback(() => {
     if (!nodeId) return;
+    const syncedDe = isOverall ? syncKeyAimsOutcomesFromPortrait({ keyDesignElements }, portraitOfGraduate) : { keyDesignElements };
+    const keyDesignElementsToSave = (syncedDe as any)?.keyDesignElements || keyDesignElements;
     const designedExperienceData: DesignedExperienceData = {
+      ...(deRef.current || {}),
       description,
-      keyDesignElements,
+      keyDesignElements: keyDesignElementsToSave,
       subcomponents,
+      portraitOfGraduate: isOverall ? portraitOfGraduate : (deRef.current as any)?.portraitOfGraduate,
     };
     updateMutation.mutate({ nodeId, data: { designedExperienceData } });
-  }, [nodeId, description, keyDesignElements, subcomponents]);
+  }, [nodeId, description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, updateMutation]);
 
   useEffect(() => {
     if (!nodeId || !componentData) return;
+    // While the supports workflow is open, do not autosave from this parent view.
+    // Otherwise it can overwrite supportGroups/supportDetails written by the supports pages.
+    if (supportNav.mode !== "none") return;
     const timer = setTimeout(() => {
       saveData();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [description, keyDesignElements, subcomponents]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, supportNav.mode]);
 
   const addSubcomponent = () => {
     if (!newSubName.trim()) return;
@@ -1352,6 +1152,61 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         title={title}
         onBack={() => setShowOutcomeSummary(false)}
         onOpenOutcomeScore={() => setShowOutcomeScore(true)}
+      />
+    );
+  }
+
+  if (isOverall && pogNav.mode === "detail") {
+    return (
+      <div className="p-6">
+        <PogAttributeDetailView
+          portrait={portraitOfGraduate}
+          attributeId={pogNav.attributeId}
+          onChange={setPortraitOfGraduate}
+          onBack={() => setPogNav({ mode: "hub" })}
+          outcomeSchema={OUTCOME_SCHEMA as any}
+        />
+      </div>
+    );
+  }
+
+  if (supportNav.mode === "hub") {
+    return (
+      <SupportGroupsHubView
+        nodeId={nodeId}
+        title={title}
+        onBack={() => setSupportNav({ mode: "none" })}
+        onOpenGroup={(groupKey) => setSupportNav({ mode: "group", groupKey })}
+        onOpenSupport={(groupKey, label) => setSupportNav({ mode: "detail", groupKey, label, backTo: "hub" })}
+      />
+    );
+  }
+
+  if (supportNav.mode === "group") {
+    return (
+      <SupportGroupDetailView
+        nodeId={nodeId}
+        title={title}
+        groupKey={supportNav.groupKey}
+        onBack={() => setSupportNav({ mode: "hub" })}
+        onOpenSupport={(label) => setSupportNav({ mode: "detail", groupKey: supportNav.groupKey, label, backTo: "group" })}
+      />
+    );
+  }
+
+  if (supportNav.mode === "detail") {
+    return (
+      <SupportDetailView
+        nodeId={nodeId}
+        title={title}
+        supportLabel={supportNav.label}
+        onBack={() =>
+          setSupportNav(
+            supportNav.backTo === "hub"
+              ? { mode: "hub" }
+              : { mode: "group", groupKey: supportNav.groupKey },
+          )
+        }
       />
     );
   }
@@ -1408,74 +1263,90 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           onChange={setKeyDesignElements}
           onViewOutcomes={() => setShowOutcomeSummary(true)}
           onOpenOutcome={(label) => setSelectedOutcomeLabel(label)}
+          onViewSupports={() => setSupportNav({ mode: "hub" })}
         />
 
         <section className="mb-6">
-          <SectionHeader 
-            title="Subcomponents" 
-            count={subcomponents.length} 
-            onAdd={() => setAddingSubcomponent(true)} 
-          />
-          
-          <AnimatePresence>
-            {addingSubcomponent && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }} 
-                animate={{ opacity: 1, height: "auto" }} 
-                exit={{ opacity: 0, height: 0 }}
-                className="mb-4 overflow-hidden"
-              >
-                <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <Input
-                    value={newSubName}
-                    onChange={(e) => setNewSubName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") addSubcomponent();
-                      if (e.key === "Escape") { setNewSubName(""); setAddingSubcomponent(false); }
-                    }}
-                    placeholder="Subcomponent name..."
-                    className="flex-1 h-8 text-sm"
-                    autoFocus
-                    data-testid="input-new-subcomponent-name"
-                  />
-                  <Button size="sm" className="h-8" onClick={addSubcomponent} data-testid="button-confirm-add-subcomponent">Add</Button>
-                  <Button size="sm" variant="ghost" className="h-8" onClick={() => { setNewSubName(""); setAddingSubcomponent(false); }}>
-                    <X className="w-4 h-4" />
+          {isOverall ? (
+            <PogHubView
+              portrait={portraitOfGraduate}
+              onChange={setPortraitOfGraduate}
+              onOpenAttribute={(attributeId) => setPogNav({ mode: "detail", attributeId })}
+            />
+          ) : (
+            <>
+              <SectionHeader
+                title="Subcomponents"
+                count={subcomponents.length}
+                onAdd={() => setAddingSubcomponent(true)}
+              />
+
+              <AnimatePresence>
+                {addingSubcomponent && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mb-4 overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <Input
+                        value={newSubName}
+                        onChange={(e) => setNewSubName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") addSubcomponent();
+                          if (e.key === "Escape") {
+                            setNewSubName("");
+                            setAddingSubcomponent(false);
+                          }
+                        }}
+                        placeholder="Subcomponent name..."
+                        className="flex-1 h-8 text-sm"
+                        autoFocus
+                        data-testid="input-new-subcomponent-name"
+                      />
+                      <Button size="sm" className="h-8" onClick={addSubcomponent} data-testid="button-confirm-add-subcomponent">
+                        Add
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-8" onClick={() => { setNewSubName(""); setAddingSubcomponent(false); }}>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {subcomponents.length === 0 && !addingSubcomponent && (
+                <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
+                  <div className="text-gray-400 mb-3">
+                    <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm font-medium">No subcomponents yet</p>
+                    <p className="text-xs mt-1">Add subcomponents to define the detailed experiences within this component.</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs gap-1"
+                    onClick={() => setAddingSubcomponent(true)}
+                  >
+                    <Plus className="w-3 h-3" /> Add First Subcomponent
                   </Button>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              )}
 
-          {subcomponents.length === 0 && !addingSubcomponent && (
-            <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
-              <div className="text-gray-400 mb-3">
-                <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm font-medium">No subcomponents yet</p>
-                <p className="text-xs mt-1">Add subcomponents to define the detailed experiences within this component.</p>
+              <div className="space-y-3">
+                {subcomponents.map((sub) => (
+                  <SubcomponentCard
+                    key={sub.id}
+                    sub={sub}
+                    onUpdate={updateSubcomponent}
+                    onDelete={() => deleteSubcomponent(sub.id)}
+                    onOpen={() => setActiveSubId(sub.id)}
+                  />
+                ))}
               </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="text-xs gap-1"
-                onClick={() => setAddingSubcomponent(true)}
-              >
-                <Plus className="w-3 h-3" /> Add First Subcomponent
-              </Button>
-            </div>
+            </>
           )}
-
-          <div className="space-y-3">
-            {subcomponents.map(sub => (
-              <SubcomponentCard 
-                key={sub.id} 
-                sub={sub} 
-                onUpdate={updateSubcomponent}
-                onDelete={() => deleteSubcomponent(sub.id)}
-                onOpen={() => setActiveSubId(sub.id)}
-              />
-            ))}
-          </div>
         </section>
       </div>
     </div>

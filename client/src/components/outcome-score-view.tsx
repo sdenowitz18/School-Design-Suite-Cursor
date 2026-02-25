@@ -37,7 +37,14 @@ import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 import OutcomeDetailView from "./outcome-detail-view";
-import type { Measure, TargetedOutcome, OutcomeScoreData } from "@shared/schema";
+import { effectiveFromInstances, UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
+import { listSelectableSemesterKeys, listSelectableYearKeys, minAsOfDate, toIsoDateString } from "@shared/marking-period";
+import type { Measure, ScoreFilter, ScoreInstance, TargetedOutcome, OutcomeScoreData } from "@shared/schema";
+import OutcomeScoreOverallInstancesView from "./outcome-score-overall-instances-view";
+import ScoreFilterBar from "./score-filter-bar";
+import { useGlobalActors } from "@/lib/actors-store";
+import ScoreFlags from "./score-flags";
+import { buildSubcomponentOutcomeIndex, normOutcomeKey } from "./outcomes-utils";
 
 const PRIORITY_WEIGHT: Record<string, number> = { H: 6, M: 3, L: 1 };
 
@@ -55,8 +62,19 @@ function weightedAverage(items: { rating: number | null; priority: string; skipp
   return Math.round((totalScore / totalWeight) * 100) / 100;
 }
 
-function calcOutcomeScore(measures: Measure[]): number | null {
-  return weightedAverage(measures);
+function effectiveMeasureRating(measure: Measure, filter: ScoreFilter): number | null {
+  const insts: ScoreInstance[] = Array.isArray((measure as any)?.instances) ? ((measure as any).instances as ScoreInstance[]) : [];
+  if (insts.length === 0) return null;
+  return effectiveFromInstances(insts, filter).score;
+}
+
+function calcOutcomeScore(measures: Measure[], filter: ScoreFilter): number | null {
+  const items = measures.map((m) => ({
+    rating: effectiveMeasureRating(m, filter),
+    priority: (m as any)?.priority || "M",
+    skipped: !!(m as any)?.skipped,
+  }));
+  return weightedAverage(items);
 }
 
 function calcComponentScore(outcomes: TargetedOutcome[]): number | null {
@@ -88,6 +106,7 @@ function createMeasure(name: string = ""): Measure {
     priority: "M",
     confidence: "M",
     rating: null,
+    instances: [],
     justification: "",
     reflectionAchievement: "",
     reflectionVariability: "",
@@ -102,6 +121,7 @@ function createOutcome(name: string = ""): TargetedOutcome {
     outcomeName: name,
     priority: "M",
     rigorPath: "thin",
+    instances: [],
     measures: [],
     calculatedScore: null,
     skipped: false,
@@ -118,10 +138,13 @@ function ScoreChip({ score, size = "md" }: { score: number | null; size?: "sm" |
     </div>
   );
 
-  const rounded = Math.round(score * 10) / 10;
-  const color = rounded >= 4 ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
-                rounded >= 3 ? "bg-yellow-100 text-yellow-700 border-yellow-200" :
-                "bg-red-100 text-red-700 border-red-200";
+  const rounded = Math.max(1, Math.min(5, Math.round(score)));
+  const color =
+    rounded >= 4
+      ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+      : rounded >= 3
+        ? "bg-yellow-100 text-yellow-700 border-yellow-200"
+        : "bg-red-100 text-red-700 border-red-200";
 
   return (
     <div className={cn(
@@ -201,14 +224,20 @@ function RatingInput({ value, onChange, scaleDefinitions }: { value: number | nu
   );
 }
 
-function generateAISummary(outcomes: TargetedOutcome[], overallMeasures: Measure[], scoringMode: string, finalScore: number | null): string {
+function generateAISummary(
+  outcomes: TargetedOutcome[],
+  overallMeasures: Measure[],
+  scoringMode: string,
+  finalScore: number | null,
+  filter: ScoreFilter,
+): string {
   if (scoringMode === "overall") {
-    const rated = overallMeasures.filter(m => !m.skipped && m.rating !== null);
-    if (rated.length === 0) return "No measures have been scored yet. Add and rate measures to see a summary.";
+    const rated = overallMeasures.filter((m) => !m.skipped && effectiveMeasureRating(m, filter) !== null);
+    if (rated.length === 0) return "No measures have been scored yet. Add measures and instances to see a summary.";
     const avg = finalScore;
-    const high = rated.filter(m => (m.rating || 0) >= 4);
-    const low = rated.filter(m => (m.rating || 0) <= 2);
-    let summary = `Overall component score is ${avg !== null ? (Math.round(avg * 10) / 10).toFixed(1) : "pending"} based on ${rated.length} rated measure${rated.length !== 1 ? "s" : ""}.`;
+    const high = rated.filter((m) => (effectiveMeasureRating(m, filter) || 0) >= 4);
+    const low = rated.filter((m) => (effectiveMeasureRating(m, filter) || 0) <= 2);
+    let summary = `Overall component score is ${avg !== null ? String(Math.max(1, Math.min(5, Math.round(avg)))) : "pending"} based on ${rated.length} rated measure${rated.length !== 1 ? "s" : ""}.`;
     if (high.length > 0) summary += ` Strengths include ${high.map(m => m.name).join(", ")}.`;
     if (low.length > 0) summary += ` Areas for growth: ${low.map(m => m.name).join(", ")}.`;
     return summary;
@@ -217,13 +246,13 @@ function generateAISummary(outcomes: TargetedOutcome[], overallMeasures: Measure
   const scored = outcomes.filter(o => !o.skipped && o.calculatedScore !== null);
   const unscored = outcomes.filter(o => !o.skipped && o.calculatedScore === null);
   if (scored.length === 0 && unscored.length === 0) return "No outcomes have been added yet. Add outcomes and measures to generate a summary.";
-  if (scored.length === 0) return `${unscored.length} outcome${unscored.length !== 1 ? "s" : ""} pending scoring. Add measures and ratings to see a summary.`;
+  if (scored.length === 0) return `${unscored.length} outcome${unscored.length !== 1 ? "s" : ""} pending scoring. Add measures and instances to see a summary.`;
 
   const strong = scored.filter(o => (o.calculatedScore || 0) >= 4);
   const moderate = scored.filter(o => (o.calculatedScore || 0) >= 3 && (o.calculatedScore || 0) < 4);
   const weak = scored.filter(o => (o.calculatedScore || 0) < 3);
 
-  let summary = `Component outcome score is ${finalScore !== null ? (Math.round(finalScore * 10) / 10).toFixed(1) : "pending"} across ${scored.length} scored outcome${scored.length !== 1 ? "s" : ""}.`;
+  let summary = `Component outcome score is ${finalScore !== null ? String(Math.max(1, Math.min(5, Math.round(finalScore)))) : "pending"} across ${scored.length} scored outcome${scored.length !== 1 ? "s" : ""}.`;
   if (strong.length > 0) summary += ` Strong performance in ${strong.map(o => o.outcomeName).join(", ")}.`;
   if (moderate.length > 0) summary += ` Moderate performance in ${moderate.map(o => o.outcomeName).join(", ")}.`;
   if (weak.length > 0) summary += ` Needs attention: ${weak.map(o => o.outcomeName).join(", ")}.`;
@@ -236,11 +265,17 @@ function MeasureCard({
   onUpdate,
   onDelete,
   outcomeSkipped,
+  actors,
+  onAddActor,
+  filter,
 }: {
   measure: Measure;
   onUpdate: (m: Measure) => void;
   onDelete: () => void;
   outcomeSkipped?: boolean;
+  actors: string[];
+  onAddActor?: (label: string) => void;
+  filter: ScoreFilter;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showScale, setShowScale] = useState(false);
@@ -248,11 +283,54 @@ function MeasureCard({
   const canSkip = measure.priority === "L";
   const isDisabled = measure.skipped || outcomeSkipped;
   const scaleDefs = measure.scaleDefinitions || {};
+  const minDate = useMemo(() => minAsOfDate(new Date(), 5), []);
+  const score = useMemo(() => effectiveMeasureRating(measure, filter), [filter, measure]);
+
+  const actorOptions = useMemo(() => {
+    const out: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const a of Array.isArray(actors) ? actors : []) {
+      const clean = String(a ?? "").trim();
+      if (!clean) continue;
+      const key = normActor(clean);
+      if (!key || key === UNKNOWN_ACTOR_KEY) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, label: clean });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [actors]);
+  const actorLabelByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of actorOptions) m.set(a.key, a.label);
+    return m;
+  }, [actorOptions]);
+  const ADD_NEW_KEY = "__add_new__";
+  const [addingByInstId, setAddingByInstId] = useState<Record<string, boolean>>({});
+  const [draftByInstId, setDraftByInstId] = useState<Record<string, string>>({});
+  const [openInstRationale, setOpenInstRationale] = useState<Record<string, boolean>>({});
 
   const updateScale = (n: string, val: string) => {
     const updated = { ...scaleDefs, [n]: val };
     if (!val.trim()) delete updated[n];
     onUpdate({ ...measure, scaleDefinitions: Object.keys(updated).length > 0 ? updated : undefined });
+  };
+
+  const updateInstances = (next: ScoreInstance[]) => {
+    onUpdate({ ...measure, rating: null, instances: next });
+  };
+
+  const addInstance = () => {
+    const next: ScoreInstance = {
+      id: generateId(),
+      actor: "",
+      asOfDate: toIsoDateString(new Date()),
+      score: null,
+      weight: "M",
+      rationale: "",
+    };
+    updateInstances([...(measure.instances || []), next]);
   };
 
   return (
@@ -266,13 +344,13 @@ function MeasureCard({
             <div className="flex items-center gap-2 text-left">
               <div className={cn(
                 "w-7 h-7 rounded flex items-center justify-center text-xs font-bold shrink-0",
-                measure.rating !== null
-                  ? measure.rating >= 4 ? "bg-emerald-100 text-emerald-700" :
-                    measure.rating === 3 ? "bg-yellow-100 text-yellow-700" :
+                score !== null
+                  ? score >= 4 ? "bg-emerald-100 text-emerald-700" :
+                    score === 3 ? "bg-yellow-100 text-yellow-700" :
                     "bg-red-100 text-red-700"
                   : "bg-gray-100 text-gray-400"
               )}>
-                {measure.rating !== null ? measure.rating : "—"}
+                {score !== null ? score : "—"}
               </div>
               <div className="flex-1 min-w-0">
                 <span className="text-sm font-medium text-gray-900 truncate block">{measure.name || "Untitled measure"}</span>
@@ -283,12 +361,9 @@ function MeasureCard({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                className="text-[9px] font-bold text-gray-400 bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded cursor-not-allowed uppercase tracking-wider whitespace-nowrap"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Update Score
-              </button>
+              <div className="text-[9px] font-bold text-gray-400 bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">
+                Instances {(measure.instances || []).length}
+              </div>
               <div onClick={(e) => e.stopPropagation()}>
                 <PriorityPicker value={measure.priority} onChange={(p) => onUpdate({ ...measure, priority: p, skipped: p !== "L" ? false : measure.skipped })} disabled={isDisabled} />
               </div>
@@ -349,7 +424,7 @@ function MeasureCard({
                 <Separator />
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <Label className="text-xs text-gray-500 font-semibold">Rating (1–5)</Label>
+                    <Label className="text-xs text-gray-500 font-semibold">Instances</Label>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setShowScale(!showScale)}
@@ -373,11 +448,218 @@ function MeasureCard({
                     </div>
                   </div>
 
-                  <RatingInput
-                    value={measure.rating}
-                    onChange={(r) => onUpdate({ ...measure, rating: r })}
-                    scaleDefinitions={measure.scaleDefinitions}
-                  />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-[10px] text-gray-500">
+                        Uses the marking period + aggregation filters to compute this measure’s score.
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px] gap-1"
+                        onClick={addInstance}
+                        data-testid={`measure-add-instance-${measure.id}`}
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add instance
+                      </Button>
+                    </div>
+
+                    {(measure.instances || []).length === 0 ? (
+                      <div className="text-xs text-gray-400 italic">No instances yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {(measure.instances || []).map((inst) => {
+                          const instKey = String(inst?.id || "");
+                          const actorValue = normActor(inst?.actor);
+                          const isAdding = !!addingByInstId[instKey];
+                          const ratOpen = !!openInstRationale[instKey];
+                          return (
+                            <div key={instKey} className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">Actor</span>
+                                  <select
+                                    className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+                                    value={isAdding ? ADD_NEW_KEY : actorValue}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      if (v === ADD_NEW_KEY) {
+                                        setAddingByInstId((prev) => ({ ...prev, [instKey]: true }));
+                                        return;
+                                      }
+                                      setAddingByInstId((prev) => ({ ...prev, [instKey]: false }));
+                                      updateInstances(
+                                        (measure.instances || []).map((x) =>
+                                          x.id === inst.id
+                                            ? {
+                                                ...x,
+                                                actor:
+                                                  v === UNKNOWN_ACTOR_KEY
+                                                    ? ""
+                                                    : actorLabelByKey.get(v) || String(v),
+                                              }
+                                            : x,
+                                        ),
+                                      );
+                                    }}
+                                    data-testid={`measure-inst-actor-${measure.id}-${instKey}`}
+                                  >
+                                    <option value={UNKNOWN_ACTOR_KEY}>Unknown</option>
+                                    {actorOptions.map((a) => (
+                                      <option key={a.key} value={a.key}>
+                                        {a.label}
+                                      </option>
+                                    ))}
+                                    {onAddActor ? <option value={ADD_NEW_KEY}>Add new…</option> : null}
+                                  </select>
+                                </div>
+
+                                {isAdding && onAddActor ? (
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      value={draftByInstId[instKey] || ""}
+                                      onChange={(e) => {
+                                        const v = e.currentTarget?.value ?? "";
+                                        setDraftByInstId((prev) => ({ ...prev, [instKey]: v }));
+                                      }}
+                                      placeholder="New actor…"
+                                      className="h-8 w-[150px] text-xs bg-white"
+                                      data-testid={`measure-inst-actor-draft-${measure.id}-${instKey}`}
+                                    />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 text-[11px]"
+                                      onClick={() => {
+                                        const clean = String(draftByInstId[instKey] || "").trim();
+                                        if (!clean) return;
+                                        onAddActor(clean);
+                                        updateInstances(
+                                          (measure.instances || []).map((x) => (x.id === inst.id ? { ...x, actor: clean } : x)),
+                                        );
+                                        setDraftByInstId((prev) => ({ ...prev, [instKey]: "" }));
+                                        setAddingByInstId((prev) => ({ ...prev, [instKey]: false }));
+                                      }}
+                                    >
+                                      Add
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 text-[11px] text-gray-500"
+                                      onClick={() => {
+                                        setDraftByInstId((prev) => ({ ...prev, [instKey]: "" }));
+                                        setAddingByInstId((prev) => ({ ...prev, [instKey]: false }));
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                ) : null}
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">As-of</span>
+                                  <Input
+                                    type="date"
+                                    className="h-8 w-[150px] text-xs"
+                                    value={String(inst?.asOfDate || "")}
+                                    min={minDate}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      updateInstances((measure.instances || []).map((x) => (x.id === inst.id ? { ...x, asOfDate: v } : x)));
+                                    }}
+                                    data-testid={`measure-inst-date-${measure.id}-${instKey}`}
+                                  />
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">Score</span>
+                                  <select
+                                    className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+                                    value={inst?.score === null || inst?.score === undefined ? "" : String(inst.score)}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      updateInstances(
+                                        (measure.instances || []).map((x) =>
+                                          x.id === inst.id ? { ...x, score: v ? Number(v) : null } : x,
+                                        ),
+                                      );
+                                    }}
+                                    data-testid={`measure-inst-score-${measure.id}-${instKey}`}
+                                  >
+                                    <option value="">—</option>
+                                    {[1, 2, 3, 4, 5].map((n) => (
+                                      <option key={n} value={String(n)}>
+                                        {n}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">Weight</span>
+                                  <select
+                                    className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+                                    value={String(inst?.weight || "M")}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      updateInstances((measure.instances || []).map((x) => (x.id === inst.id ? { ...x, weight: v as any } : x)));
+                                    }}
+                                    data-testid={`measure-inst-weight-${measure.id}-${instKey}`}
+                                  >
+                                    <option value="H">H</option>
+                                    <option value="M">M</option>
+                                    <option value="L">L</option>
+                                  </select>
+                                </div>
+
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2 text-gray-400 hover:text-red-600"
+                                  onClick={() => updateInstances((measure.instances || []).filter((x) => x.id !== inst.id))}
+                                  data-testid={`measure-inst-remove-${measure.id}-${instKey}`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+
+                              <div>
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenInstRationale((prev) => ({ ...prev, [instKey]: !prev[instKey] }))}
+                                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
+                                  data-testid={`measure-inst-rationale-toggle-${measure.id}-${instKey}`}
+                                >
+                                  {ratOpen ? "Hide rationale" : (inst as any)?.rationale ? "Edit rationale" : "Add rationale"}
+                                </button>
+                                {ratOpen ? (
+                                  <div className="mt-2">
+                                    <Textarea
+                                      value={String((inst as any)?.rationale || "")}
+                                      onChange={(e) => {
+                                        const v = e.currentTarget.value;
+                                        updateInstances(
+                                          (measure.instances || []).map((x) => (x.id === inst.id ? { ...x, rationale: v } : x)),
+                                        );
+                                      }}
+                                      placeholder="Add rationale…"
+                                      className="text-xs min-h-[60px] bg-white"
+                                      data-testid={`measure-inst-rationale-${measure.id}-${instKey}`}
+                                    />
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
 
                   <p className="mt-2 text-[10px] text-gray-400 italic">
                     Make sure you consider the average achievement and how this achievement varies among students.
@@ -460,20 +742,74 @@ interface OutcomeScoreViewProps {
   nodeId?: string;
   title?: string;
   onBack: () => void;
+  sourceFilter?: ScoreFilter;
+  onFilterChange?: (next: ScoreFilter) => void;
 }
 
-export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScoreViewProps) {
+export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, onFilterChange }: OutcomeScoreViewProps) {
+  if (String(nodeId || "") === "overall") {
+    return (
+      <OutcomeScoreOverallInstancesView
+        nodeId={nodeId}
+        title={title}
+        onBack={onBack}
+        sourceFilter={sourceFilter}
+        onFilterChange={onFilterChange}
+      />
+    );
+  }
+
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [scoringMode, setScoringMode] = useState<"targeted" | "overall">("targeted");
+  const [actors, setActors] = useState<string[]>([]);
+  const { actors: globalActors, addActor: addGlobalActor, mergeActors: mergeGlobalActors } = useGlobalActors();
+  const [localFilter, setLocalFilter] = useState<ScoreFilter>({
+    mode: "year",
+    yearKey: listSelectableYearKeys(new Date(), 5)[0],
+    aggregation: "singleLatest",
+  } as any);
+  const filter = sourceFilter || localFilter;
+  const setFilter = useCallback(
+    (next: ScoreFilter) => {
+      onFilterChange?.(next);
+      setLocalFilter(next);
+    },
+    [onFilterChange],
+  );
+  useEffect(() => {
+    if (sourceFilter) setLocalFilter(sourceFilter);
+  }, [sourceFilter]);
   const [targetedOutcomes, setTargetedOutcomes] = useState<TargetedOutcome[]>([]);
   const [overallMeasures, setOverallMeasures] = useState<Measure[]>([]);
   const [expandedOutcomes, setExpandedOutcomes] = useState<Record<string, boolean>>({});
   const [newMeasureName, setNewMeasureName] = useState<Record<string, string>>({});
   const [initialized, setInitialized] = useState(false);
   const [selectedOutcomeLabel, setSelectedOutcomeLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialized) return;
+    mergeGlobalActors(actors);
+  }, [actors, initialized, mergeGlobalActors]);
+
+  const onAddActor = useCallback(
+    (label: string) => {
+      const clean = String(label ?? "").trim();
+      if (!clean) return;
+      addGlobalActor(clean);
+      setActors((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const seen = new Set(list.map((p) => normActor(p)));
+        const key = normActor(clean);
+        if (key === UNKNOWN_ACTOR_KEY) return list;
+        if (seen.has(key)) return list;
+        return [...list, clean];
+      });
+    },
+    [addGlobalActor],
+  );
 
   if (selectedOutcomeLabel) {
     return (
@@ -483,6 +819,8 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
         outcomeLabel={selectedOutcomeLabel}
         onBack={() => setSelectedOutcomeLabel(null)}
         onOpenOutcomeScore={() => setSelectedOutcomeLabel(null)}
+        sourceFilter={filter}
+        onFilterChange={setFilter as any}
       />
     );
   }
@@ -493,6 +831,25 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
     confidence: (m as any).confidence === "H" || (m as any).confidence === "M" || (m as any).confidence === "L" ? (m as any).confidence : "M",
     reflectionAchievement: m.reflectionAchievement || "",
     reflectionVariability: m.reflectionVariability || "",
+    instances: (() => {
+      const raw = Array.isArray((m as any).instances) ? ((m as any).instances as ScoreInstance[]) : [];
+      const fixed = raw.map((i: any) => ({ ...i, rationale: String(i?.rationale || "") })) as ScoreInstance[];
+      // Migration: convert legacy manual rating into a first instance.
+      if (raw.length === 0 && m.rating !== null && m.rating !== undefined) {
+        return [
+          {
+            id: generateId(),
+            actor: "",
+            asOfDate: toIsoDateString(new Date()),
+            score: m.rating as any,
+            weight: "M",
+            rationale: "",
+          } satisfies ScoreInstance,
+        ];
+      }
+      return fixed;
+    })(),
+    rating: null,
   });
 
   const normalizeOutcome = (o: TargetedOutcome): TargetedOutcome => ({
@@ -518,18 +875,33 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
       .map((a: any) => ({ label: a.label, id: a.id, level: a.level }));
   }, [comp]);
 
-  const recalcOutcomes = useCallback((outcomes: TargetedOutcome[]): TargetedOutcome[] => {
-    return outcomes.map(o => ({
-      ...o,
-      calculatedScore: calcOutcomeScore(o.measures),
-    }));
-  }, []);
+  const recalcOutcomes = useCallback(
+    (outcomes: TargetedOutcome[]): TargetedOutcome[] => {
+      return outcomes.map((o) => ({
+        ...o,
+        calculatedScore: calcOutcomeScore(o.measures, filter),
+      }));
+    },
+    [filter],
+  );
 
   useEffect(() => {
     if (comp && !initialized) {
       const hd: any = comp.healthData || {};
       const osd: Partial<OutcomeScoreData> = hd.outcomeScoreData || {};
       setScoringMode(osd.scoringMode || "targeted");
+      setActors(Array.isArray((osd as any).actors) ? ((osd as any).actors as any[]) : []);
+      const saved: any = ((osd as any).filter as any) || {};
+      setFilter(
+        saved?.mode
+          ? (saved as any)
+          : ({
+              mode: "year",
+              yearKey: listSelectableYearKeys(new Date(), 5)[0],
+              aggregation: saved?.aggregation || "singleLatest",
+              actorKey: saved?.actorKey,
+            } as any),
+      );
 
       const existingOutcomes = (osd.targetedOutcomes || []).map(normalizeOutcome);
       const deAims = getDeOutcomeAims();
@@ -602,10 +974,15 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
 
   const finalScore = useMemo(() => {
     if (scoringMode === "overall") {
-      return roundFinal1to5(weightedAverage(overallMeasures));
+      const items = overallMeasures.map((m) => ({
+        rating: effectiveMeasureRating(m, filter),
+        priority: (m as any)?.priority || "M",
+        skipped: !!(m as any)?.skipped,
+      }));
+      return roundFinal1to5(weightedAverage(items));
     }
     return roundFinal1to5(calcComponentScore(targetedOutcomes));
-  }, [scoringMode, targetedOutcomes, overallMeasures]);
+  }, [filter, scoringMode, targetedOutcomes, overallMeasures]);
 
   const normLabel = (s: string) => s.trim().toLowerCase();
 
@@ -641,6 +1018,8 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
             outcomeScoreData: {
               ...existingOsd,
               scoringMode: mode,
+              actors,
+              filter,
               targetedOutcomes: outcomes,
               overallMeasures: measures,
               finalOutcomeScore: score,
@@ -649,17 +1028,53 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
         },
       });
     }, 1000);
-  }, [nodeId, comp, updateMutation]);
+  }, [nodeId, comp, updateMutation, actors, filter]);
 
   useEffect(() => {
     if (initialized) {
       doSave(scoringMode, targetedOutcomes, overallMeasures, finalScore);
     }
-  }, [scoringMode, targetedOutcomes, overallMeasures, finalScore, initialized]);
+  }, [scoringMode, targetedOutcomes, overallMeasures, finalScore, initialized, actors, filter, doSave]);
+
+  // Recalculate outcome scores when the filter changes.
+  useEffect(() => {
+    if (!initialized) return;
+    if (scoringMode !== "targeted") return;
+    setTargetedOutcomes((prev) => recalcOutcomes(prev));
+  }, [initialized, recalcOutcomes, scoringMode]);
 
   const updateTargetedOutcomes = (updated: TargetedOutcome[]) => {
     const recalced = recalcOutcomes(updated);
     setTargetedOutcomes(recalced);
+  };
+
+  const optionalFromSubcomponents = useMemo(() => {
+    if (!comp) return [];
+    const subs: any[] = (comp as any)?.designedExperienceData?.subcomponents || [];
+    const idx = buildSubcomponentOutcomeIndex(subs);
+    const existing = new Set(
+      (Array.isArray(targetedOutcomes) ? targetedOutcomes : [])
+        .map((o) => normOutcomeKey(o?.outcomeName))
+        .filter(Boolean),
+    );
+
+    const out: Array<{ key: string; label: string; subs: { id: string; name: string; priority: "H" | "M" | "L" }[] }> = [];
+    for (const [k, v] of Array.from(idx.entries())) {
+      if (existing.has(k)) continue;
+      out.push({ key: k, label: v.label, subs: v.subcomponents });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [comp, targetedOutcomes]);
+
+  const addOptionalOutcomeToScore = (label: string) => {
+    const clean = String(label || "").trim();
+    if (!clean) return;
+    const key = normOutcomeKey(clean);
+    if (!key) return;
+    const exists = targetedOutcomes.some((o) => normOutcomeKey(o?.outcomeName) === key);
+    if (exists) return;
+    updateTargetedOutcomes([...targetedOutcomes, createOutcome(clean)]);
   };
 
   const deleteOutcome = (id: string) => {
@@ -716,10 +1131,49 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
     : overallMeasures.length;
 
   const ratedMeasures = scoringMode === "targeted"
-    ? targetedOutcomes.reduce((sum, o) => sum + o.measures.filter(m => !m.skipped && m.rating !== null).length, 0)
-    : overallMeasures.filter(m => !m.skipped && m.rating !== null).length;
+    ? targetedOutcomes.reduce(
+        (sum, o) => sum + o.measures.filter((m) => !m.skipped && effectiveMeasureRating(m, filter) !== null).length,
+        0,
+      )
+    : overallMeasures.filter((m) => !m.skipped && effectiveMeasureRating(m, filter) !== null).length;
 
-  const aiSummary = useMemo(() => generateAISummary(targetedOutcomes, overallMeasures, scoringMode, finalScore), [targetedOutcomes, overallMeasures, scoringMode, finalScore]);
+  const aiSummary = useMemo(
+    () => generateAISummary(targetedOutcomes, overallMeasures, scoringMode, finalScore, filter),
+    [targetedOutcomes, overallMeasures, scoringMode, finalScore, filter],
+  );
+
+  const actorOptions = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const add = (a: unknown) => {
+      const clean = String(a ?? "").trim();
+      if (!clean) return;
+      const key = normActor(clean);
+      if (!key || key === UNKNOWN_ACTOR_KEY) return;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(clean);
+    };
+    const scanInstances = (insts: unknown) => {
+      const list = Array.isArray(insts) ? insts : [];
+      for (const inst of list) add((inst as any)?.actor);
+    };
+    const scanMeasures = (measures: unknown) => {
+      const list = Array.isArray(measures) ? measures : [];
+      for (const m of list) scanInstances((m as any)?.instances);
+    };
+
+    for (const a of Array.isArray(globalActors) ? globalActors : []) add(a);
+    for (const a of Array.isArray(actors) ? actors : []) add(a);
+    for (const o of Array.isArray(targetedOutcomes) ? targetedOutcomes : []) {
+      scanInstances((o as any)?.instances);
+      scanMeasures((o as any)?.measures);
+    }
+    scanMeasures(overallMeasures);
+
+    out.sort((a, b) => a.localeCompare(b));
+    return out;
+  }, [actors, globalActors, overallMeasures, targetedOutcomes]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 pb-24">
@@ -731,6 +1185,8 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
         <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
         Back to Status & Health
       </button>
+
+      <ScoreFilterBar filter={filter} onChange={setFilter as any} actors={actorOptions} testId="outcome-filter-bar" />
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden" data-testid="score-dashboard">
         <div className="p-5">
@@ -760,7 +1216,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
                         "bg-red-100 text-red-700"
                       : "bg-gray-100 text-gray-400"
                   )}>
-                    {o.calculatedScore !== null ? (Math.round(o.calculatedScore * 10) / 10).toFixed(1) : "—"}
+                    {o.calculatedScore !== null ? String(Math.max(1, Math.min(5, Math.round(o.calculatedScore)))) : "—"}
                   </div>
                   <div className="min-w-0 flex-1">
                     <span className={cn("text-xs font-medium truncate block", o.skipped && "line-through text-gray-400")}>{o.outcomeName}</span>
@@ -777,6 +1233,25 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
           <div className="bg-blue-50/60 rounded-lg border border-blue-100 p-3 flex gap-2" data-testid="ai-summary">
             <Sparkles className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
             <p className="text-xs text-gray-600 leading-relaxed">{aiSummary}</p>
+          </div>
+
+          <div className="mt-3" data-testid="flags-section">
+            <ScoreFlags
+              overallScore={finalScore}
+              items={
+                (scoringMode === "targeted"
+                  ? (targetedOutcomes || []).map((o: any) => ({ key: String(o.id), label: String(o.outcomeName || "Outcome"), score: o.calculatedScore ?? null }))
+                  : (overallMeasures || []).map((m: any) => ({
+                      key: String(m.id),
+                      label: String(m.name || "Measure"),
+                      score: effectiveMeasureRating(m, filter),
+                    }))
+                ) as any
+              }
+              threshold={2}
+              defaultOpen={false}
+              testId="outcome-flags"
+            />
           </div>
         </div>
 
@@ -868,7 +1343,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
                               <Badge variant="secondary" className="text-[9px] h-4 bg-orange-100 text-orange-600 border border-orange-200">Not scored</Badge>
                             )}
                             {fromDE && (
-                              <Badge variant="secondary" className="text-[9px] h-4 bg-blue-50 text-blue-500 border border-blue-200">From Design</Badge>
+                              <Badge variant="secondary" className="text-[9px] h-4 bg-blue-50 text-blue-700 border border-blue-200">Primary</Badge>
                             )}
                           </div>
                         </div>
@@ -939,6 +1414,9 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
                               onUpdate={(m) => updateMeasureInOutcome(outcome.id, m)}
                               onDelete={() => deleteMeasureFromOutcome(outcome.id, measure.id)}
                               outcomeSkipped={outcome.skipped}
+                              actors={actorOptions}
+                              onAddActor={onAddActor}
+                              filter={filter}
                             />
                           ))}
 
@@ -1020,6 +1498,42 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
             );
           })}
 
+          {optionalFromSubcomponents.length > 0 ? (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-gray-900">Optional outcomes from subcomponents</div>
+                <span className="text-xs text-gray-400">{optionalFromSubcomponents.length}</span>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                You can optionally add these to the Outcome Score here. They will still remain visible on the Outcomes page.
+              </div>
+              <div className="mt-3 space-y-2">
+                {optionalFromSubcomponents.map((o) => (
+                  <div key={o.key} className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-gray-900 truncate">{o.label}</div>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {o.subs.map((s) => (
+                          <Badge key={s.id} variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
+                            From: {s.name} ({s.priority})
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => addOptionalOutcomeToScore(o.label)}>
+                        Add to scoring list
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs text-gray-500 hover:text-gray-900" onClick={() => setSelectedOutcomeLabel(o.label)}>
+                        Details
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="pt-1 text-xs text-gray-400 italic">
             Outcomes are managed in Designed Experience. Add or remove outcomes there to update this list.
           </div>
@@ -1049,6 +1563,9 @@ export default function OutcomeScoreView({ nodeId, title, onBack }: OutcomeScore
               measure={measure}
               onUpdate={updateOverallMeasure}
               onDelete={() => deleteOverallMeasure(measure.id)}
+              actors={actorOptions}
+              onAddActor={onAddActor}
+              filter={filter}
             />
           ))}
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Plus, Check, Search, ArrowRight } from "lucide-react";
+import { ChevronLeft, Plus, Check, Search, ArrowRight, BookOpen, Star } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
-import { OUTCOME_SCHEMA } from "./designed-experience-view";
+import { OUTCOME_SCHEMA } from "./designed-experience-schemas";
 import OutcomeDetailView from "./outcome-detail-view";
+import OutcomesLearnMoreView from "./outcomes-learn-more-view";
+import { buildOutcomeUsageIndexFromComponents, buildSubcomponentOutcomeIndex, normOutcomeKey } from "./outcomes-utils";
 
 function norm(s: string) {
   return (s || "").trim().toLowerCase();
@@ -45,12 +47,42 @@ export interface OutcomeSummaryViewProps {
 
 export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcomeScore }: OutcomeSummaryViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
+  const isOverall = String(nodeId || "") === "overall" || String((comp as any)?.nodeId || "") === "overall";
+  const { data: allComponents } = useQuery({ ...(componentQueries.all as any), enabled: isOverall } as any);
   const updateMutation = useUpdateComponent();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const L1_AREAS = useMemo(
+    () =>
+      [
+        { key: "STEM", label: "STEM" },
+        { key: "Humanities", label: "Arts & Humanities" },
+        { key: "Cross-cutting", label: "Learning & Life" },
+        { key: "Well-being", label: "Wellbeing" },
+        { key: "Wayfinding", label: "Wayfinding" },
+      ] as const,
+    [],
+  );
+
+  const outcomeAreaByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [area, subcats] of Object.entries(OUTCOME_SCHEMA || {})) {
+      for (const items of Object.values(subcats || {})) {
+        for (const label of Array.isArray(items) ? items : []) {
+          const k = normOutcomeKey(label);
+          if (!k) continue;
+          if (!m.has(k)) m.set(k, area);
+        }
+      }
+    }
+    return m;
+  }, []);
+
+  const [activeAreaKey, setActiveAreaKey] = useState<string | null>(null);
+
   const deOutcomes = useMemo(() => {
     const aims: any[] = (comp as any)?.designedExperienceData?.keyDesignElements?.aims || [];
-    return aims.filter((a: any) => a?.type === "outcome" && typeof a?.label === "string");
+    return (Array.isArray(aims) ? aims : []).filter((a: any) => a?.type === "outcome" && typeof a?.label === "string");
   }, [comp]);
 
   const osd = useMemo(() => ((comp as any)?.healthData?.outcomeScoreData || {}) as any, [comp]);
@@ -66,15 +98,130 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
   const [initialized, setInitialized] = useState(false);
   const componentName = title || comp?.title || "this component";
 
+  const keyAimKeySet = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of deOutcomes) {
+      const k = normOutcomeKey(a?.label);
+      if (k) set.add(k);
+    }
+    return set;
+  }, [deOutcomes]);
+
+  const keyAimTagByKey = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const a of deOutcomes) {
+      const label = String(a?.label || "").trim();
+      const k = normOutcomeKey(label);
+      if (!k) continue;
+      if (!m.has(k)) m.set(k, a);
+    }
+    return m;
+  }, [deOutcomes]);
+
+  const scoringKeySet = useMemo(() => {
+    const set = new Set<string>();
+    for (const o of Array.isArray(targeted) ? targeted : []) {
+      const label = String(o?.outcomeName || "").trim();
+      const k = normOutcomeKey(label);
+      if (k) set.add(k);
+    }
+    return set;
+  }, [targeted]);
+
+  const sectionA = useMemo(() => {
+    const order: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    const add = (label: unknown) => {
+      const clean = String(label ?? "").trim();
+      const k = normOutcomeKey(clean);
+      if (!k) return;
+      if (seen.has(k)) return;
+      seen.add(k);
+      order.push({ key: k, label: clean });
+    };
+    for (const a of deOutcomes) add(a?.label);
+    for (const o of Array.isArray(targeted) ? targeted : []) add(o?.outcomeName);
+    order.sort((a, b) => a.label.localeCompare(b.label));
+    return order;
+  }, [deOutcomes, targeted]);
+
+  const filteredSectionA = useMemo(() => {
+    if (!activeAreaKey) return sectionA;
+    return sectionA.filter((o) => outcomeAreaByKey.get(o.key) === activeAreaKey);
+  }, [activeAreaKey, outcomeAreaByKey, sectionA]);
+
+  const subcomponentOnly = useMemo(() => {
+    if (isOverall) return [];
+    const subs: any[] = (comp as any)?.designedExperienceData?.subcomponents || [];
+    const idx = buildSubcomponentOutcomeIndex(subs);
+    const out: Array<{ key: string; label: string; subs: { id: string; name: string; priority: "H" | "M" | "L" }[] }> = [];
+    for (const [k, v] of Array.from(idx.entries())) {
+      if (keyAimKeySet.has(k)) continue;
+      if (scoringKeySet.has(k)) continue;
+      out.push({ key: k, label: v.label, subs: v.subcomponents });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [comp, isOverall, keyAimKeySet, scoringKeySet]);
+
+  const subcomponentsIndexAll = useMemo(() => {
+    if (isOverall) return null;
+    const subs: any[] = (comp as any)?.designedExperienceData?.subcomponents || [];
+    return buildSubcomponentOutcomeIndex(subs);
+  }, [comp, isOverall]);
+
+  const componentsIndexAll = useMemo(() => {
+    if (!isOverall) return null;
+    const list = Array.isArray(allComponents) ? allComponents : [];
+    const other = list.filter((c: any) => String(c?.nodeId || "") !== "overall");
+    return buildOutcomeUsageIndexFromComponents(other);
+  }, [allComponents, isOverall]);
+
+  const filteredSubcomponentOnly = useMemo(() => {
+    if (!activeAreaKey) return subcomponentOnly;
+    return subcomponentOnly.filter((o) => outcomeAreaByKey.get(o.key) === activeAreaKey);
+  }, [activeAreaKey, outcomeAreaByKey, subcomponentOnly]);
+
+  const componentOnly = useMemo(() => {
+    if (!isOverall) return [];
+    const list = Array.isArray(allComponents) ? allComponents : [];
+    const other = list.filter((c: any) => String(c?.nodeId || "") !== "overall");
+    const idx = buildOutcomeUsageIndexFromComponents(other);
+    const out: Array<{ key: string; label: string; comps: { nodeId: string; title: string }[] }> = [];
+    for (const [k, v] of Array.from(idx.entries())) {
+      if (keyAimKeySet.has(k)) continue;
+      if (scoringKeySet.has(k)) continue;
+      out.push({ key: k, label: v.label, comps: v.components });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [allComponents, isOverall, keyAimKeySet, scoringKeySet]);
+
+  const filteredComponentOnly = useMemo(() => {
+    if (!activeAreaKey) return componentOnly;
+    return componentOnly.filter((o) => outcomeAreaByKey.get(o.key) === activeAreaKey);
+  }, [activeAreaKey, componentOnly, outcomeAreaByKey]);
+
   useEffect(() => {
     if (!comp || initialized) return;
     const initial: Record<string, string> = {};
-    for (const a of deOutcomes) {
-      initial[norm(a.label)] = String(notes[norm(a.label)]?.appliesDescription || "");
+    for (const a of sectionA) {
+      initial[a.key] = String(notes[a.key]?.appliesDescription || "");
     }
     setAppliesByKey(initial);
     setInitialized(true);
-  }, [comp, deOutcomes, initialized, notes]);
+  }, [comp, initialized, notes, sectionA]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    const missing = sectionA.filter((a) => appliesByKey[a.key] === undefined);
+    if (missing.length === 0) return;
+    setAppliesByKey((prev) => {
+      const next = { ...prev };
+      for (const a of missing) next[a.key] = String(notes[a.key]?.appliesDescription || "");
+      return next;
+    });
+  }, [appliesByKey, initialized, notes, sectionA]);
 
   const saveNotes = useCallback(
     (next: Record<string, string>) => {
@@ -110,6 +257,10 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
   }, [appliesByKey, initialized, saveNotes]);
 
   const [selectedOutcome, setSelectedOutcome] = useState<string | null>(null);
+  const [showLearnMore, setShowLearnMore] = useState(false);
+  if (showLearnMore) {
+    return <OutcomesLearnMoreView mode="schema" onBack={() => setShowLearnMore(false)} />;
+  }
   if (selectedOutcome) {
     return (
       <OutcomeDetailView
@@ -176,6 +327,8 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
       },
     });
   };
+
+  // Note: adding outcomes to the Outcome Score happens on the Outcome Score page.
 
   const OutcomePickerSheet = () => {
     const [search, setSearch] = useState("");
@@ -255,6 +408,10 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
             {(title || comp?.title) && <p className="text-sm text-gray-500 mt-0.5">{title || comp?.title}</p>}
           </div>
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" className="h-8 text-xs text-gray-500" onClick={() => setShowLearnMore(true)} data-testid="outcomes-learn-more">
+              <BookOpen className="w-3.5 h-3.5 mr-1" />
+              Learn more
+            </Button>
             <OutcomePickerSheet />
             <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onOpenOutcomeScore} disabled={!onOpenOutcomeScore}>
               Open Outcomes Score
@@ -268,59 +425,130 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-gray-900">Selected outcomes</h3>
+          <div className="text-sm font-bold text-gray-900">Filter outcomes</div>
           <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
-            {deOutcomes.length}
+            {activeAreaKey ? (L1_AREAS.find((a) => a.key === activeAreaKey)?.label || activeAreaKey) : "All"}
+          </Badge>
+        </div>
+        <div className="p-3 overflow-x-auto">
+          <div className="flex items-center gap-2 min-w-max">
+            <button
+              type="button"
+              onClick={() => setActiveAreaKey(null)}
+              className={cn(
+                "px-3 py-1.5 rounded-full border text-[11px] font-semibold whitespace-nowrap transition-colors",
+                !activeAreaKey ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:text-gray-900",
+              )}
+            >
+              All
+            </button>
+            {L1_AREAS.map((a) => (
+              <button
+                key={a.key}
+                type="button"
+                onClick={() => setActiveAreaKey((prev) => (prev === a.key ? null : a.key))}
+                className={cn(
+                  "px-3 py-1.5 rounded-full border text-[11px] font-semibold whitespace-nowrap transition-colors",
+                  activeAreaKey === a.key ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:text-gray-900",
+                )}
+                data-testid={`outcome-area-pill-${a.key}`}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-gray-900">{isOverall ? "Whole School Targeted Outcomes" : "Outcomes for this component"}</h3>
+          <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
+            {filteredSectionA.length}
           </Badge>
         </div>
         <div className="p-4 space-y-3">
-          {deOutcomes.length === 0 ? (
+          {filteredSectionA.length === 0 ? (
             <div className="text-xs text-gray-400 italic">No outcomes selected yet. Use “Add outcomes” to select from the schema.</div>
           ) : (
-            deOutcomes.map((a: any) => {
-              const label = String(a.label || "");
-              const p = levelToPriority(a.level);
-              const row = getOutcomeRow(label);
+            filteredSectionA.map((o) => {
+              const label = String(o.label || "");
+              const key = o.key;
+              const aimTag = keyAimTagByKey.get(key) || null;
+              const inKeyAims = !!aimTag;
+              const p = inKeyAims ? levelToPriority(aimTag?.level) : null;
+              const row = getOutcomeRow(label) || (Array.isArray(targeted) ? targeted.find((x: any) => normOutcomeKey(x?.outcomeName) === key) : null);
               const score = row?.calculatedScore ?? null;
               const measures: any[] = row?.measures || [];
               const rated = measures.filter((m) => m?.rating !== null && !m?.skipped).length;
-              const key = norm(label);
               const applies = appliesByKey[key] || "";
+              const inScoring = scoringKeySet.has(key);
+              const isPrimary = !!aimTag?.isPrimary;
+              const originSubs = subcomponentsIndexAll?.get(key)?.subcomponents || [];
+              const originComps = componentsIndexAll?.get(key)?.components || [];
               return (
-                <div key={a.id || label} className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
+                <div key={key} className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <button type="button" className="min-w-0 text-left flex-1" onClick={() => setSelectedOutcome(label)}>
                       <div className="flex items-center gap-2">
                         <div className={cn("w-8 h-6 rounded flex items-center justify-center text-xs font-bold border shrink-0", scoreColor(score))}>
-                          {score !== null ? (Math.round(score * 10) / 10).toFixed(1) : "—"}
+                          {score !== null ? String(Math.max(1, Math.min(5, Math.round(score)))) : "—"}
                         </div>
                         <div className="min-w-0">
                           <div className="text-sm font-semibold text-gray-900 truncate">{label}</div>
                           <div className="text-[10px] text-gray-500">
-                            {rated}/{measures.length} measures rated
+                            {inScoring ? `${rated}/${measures.length} measures rated` : "Not in Outcome Score yet"}
+                          </div>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {isOverall ? (
+                              <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
+                                Whole School
+                              </Badge>
+                            ) : inKeyAims ? (
+                              <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
+                                From: {componentName}
+                              </Badge>
+                            ) : null}
+                            {originComps.map((c: any) => (
+                              <Badge key={String(c.nodeId)} variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
+                                From: {String(c.title)}
+                              </Badge>
+                            ))}
+                            {originSubs.map((s: any) => (
+                              <Badge key={String(s.id)} variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
+                                From: {String(s.name)} ({String(s.priority)})
+                              </Badge>
+                            ))}
+                            {isPrimary ? (
+                              <Badge variant="secondary" className="text-[9px] h-5 bg-yellow-50 text-yellow-700 border border-yellow-200 gap-1">
+                                <Star className="w-3 h-3 fill-current" /> Primary
+                              </Badge>
+                            ) : null}
                           </div>
                         </div>
                       </div>
                     </button>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <div className="inline-flex rounded-md border border-gray-200 overflow-hidden bg-white">
-                        {(["H", "M", "L"] as const).map((k) => (
-                          <button
-                            key={k}
-                            type="button"
-                            onClick={() => updateOutcomePriority(label, k)}
-                            className={cn(
-                              "px-2 py-0.5 text-[10px] font-bold transition-colors",
-                              k !== "H" && "border-l border-gray-200",
-                              p === k ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:text-gray-800",
-                            )}
-                            aria-pressed={p === k}
-                          >
-                            {k}
-                          </button>
-                        ))}
-                      </div>
+                      {inKeyAims ? (
+                        <div className="inline-flex rounded-md border border-gray-200 overflow-hidden bg-white">
+                          {(["H", "M", "L"] as const).map((k) => (
+                            <button
+                              key={k}
+                              type="button"
+                              onClick={() => updateOutcomePriority(label, k)}
+                              className={cn(
+                                "px-2 py-0.5 text-[10px] font-bold transition-colors",
+                                k !== "H" && "border-l border-gray-200",
+                                p === k ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:text-gray-800",
+                              )}
+                              aria-pressed={p === k}
+                            >
+                              {k}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                       <Button variant="ghost" size="sm" className="h-7 text-xs text-gray-500 hover:text-gray-900" onClick={() => setSelectedOutcome(label)}>
                         Details <ArrowRight className="w-3 h-3 ml-1" />
                       </Button>
@@ -333,7 +561,10 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
                     <Label className="text-[11px] text-gray-600">How this outcome applies to {componentName}</Label>
                     <Textarea
                       value={applies}
-                      onChange={(e) => setAppliesByKey((prev) => ({ ...prev, [key]: e.currentTarget.value }))}
+                      onChange={(e) => {
+                        const v = e.currentTarget?.value ?? "";
+                        setAppliesByKey((prev) => ({ ...prev, [key]: v }));
+                      }}
                       placeholder="Describe how this outcome applies in this component…"
                       className="text-xs min-h-[70px] bg-white"
                     />
@@ -344,6 +575,78 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
           )}
         </div>
       </div>
+
+      {!isOverall && subcomponentOnly.length > 0 ? (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="outcomes-from-subcomponents">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-gray-900">Outcomes from subcomponents</h3>
+            <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
+              {filteredSubcomponentOnly.length}
+            </Badge>
+          </div>
+          <div className="p-4 space-y-2">
+            {filteredSubcomponentOnly.length === 0 ? (
+              <div className="text-xs text-gray-400 italic">No subcomponent outcomes match this filter.</div>
+            ) : (
+              filteredSubcomponentOnly.map((o) => (
+              <div key={o.key} className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-900 truncate">{o.label}</div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {o.subs.map((s) => (
+                      <Badge key={s.id} variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
+                        From: {s.name} ({s.priority})
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-gray-500 hover:text-gray-900" onClick={() => setSelectedOutcome(o.label)}>
+                    Details <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                </div>
+              </div>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {isOverall && componentOnly.length > 0 ? (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="outcomes-from-components">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-gray-900">Outcomes from components</h3>
+            <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
+              {filteredComponentOnly.length}
+            </Badge>
+          </div>
+          <div className="p-4 space-y-2">
+            {filteredComponentOnly.length === 0 ? (
+              <div className="text-xs text-gray-400 italic">No component outcomes match this filter.</div>
+            ) : (
+              filteredComponentOnly.map((o) => (
+              <div key={o.key} className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-900 truncate">{o.label}</div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {o.comps.map((c) => (
+                      <Badge key={c.nodeId} variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
+                        From: {c.title}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-gray-500 hover:text-gray-900" onClick={() => setSelectedOutcome(o.label)}>
+                    Details <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                </div>
+              </div>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

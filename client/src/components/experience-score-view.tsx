@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Collapsible,
@@ -39,7 +40,13 @@ import {
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
-import type { ExperienceScoreData, Measure, ExperienceDimension } from "@shared/schema";
+import { effectiveFromInstances, UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
+import { listSelectableSemesterKeys, listSelectableYearKeys, minAsOfDate, toIsoDateString } from "@shared/marking-period";
+import type { ExperienceScoreData, ExperienceDimension, Measure, ScoreFilter, ScoreInstance } from "@shared/schema";
+import ExperienceScoreOverallInstancesView from "./experience-score-overall-instances-view";
+import ScoreFilterBar from "./score-filter-bar";
+import ScoreFlags from "./score-flags";
+import { useGlobalActors } from "@/lib/actors-store";
 
 const PRIORITY_WEIGHT: Record<string, number> = { H: 6, M: 3, L: 1 };
 type LeapsScoringMode = "across" | "individual";
@@ -85,19 +92,35 @@ function weightedAverage(items: { rating: number | null; priority: string; skipp
   return Math.round((totalScore / totalWeight) * 100) / 100;
 }
 
-function calcDimensionScore(dim: ExperienceDimension): number | null {
-  return weightedAverage(dim.measures);
+function effectiveMeasureRating(measure: Measure, filter: ScoreFilter): number | null {
+  const insts: ScoreInstance[] = Array.isArray((measure as any)?.instances) ? ((measure as any).instances as ScoreInstance[]) : [];
+  if (insts.length === 0) return null;
+  return effectiveFromInstances(insts, filter).score;
 }
 
-function calcLeapScoreFromMeasures(measures: Measure[]): number | null {
-  return weightedAverage(measures);
+function calcDimensionScore(dim: ExperienceDimension, filter: ScoreFilter): number | null {
+  const items = (dim.measures || []).map((m: any) => ({
+    rating: effectiveMeasureRating(m as Measure, filter),
+    priority: m?.priority || "M",
+    skipped: !!m?.skipped,
+  }));
+  return weightedAverage(items);
 }
 
-function calcLeapsDimensionScoreFromItems(items: LeapItem[]): number | null {
+function calcLeapScoreFromMeasures(measures: Measure[], filter: ScoreFilter): number | null {
+  const items = (measures || []).map((m: any) => ({
+    rating: effectiveMeasureRating(m as Measure, filter),
+    priority: m?.priority || "M",
+    skipped: !!m?.skipped,
+  }));
+  return weightedAverage(items);
+}
+
+function calcLeapsDimensionScoreFromItems(items: LeapItem[], filter: ScoreFilter): number | null {
   let totalWeight = 0;
   let total = 0;
   for (const item of items) {
-    const score = calcLeapScoreFromMeasures(item.measures);
+    const score = calcLeapScoreFromMeasures(item.measures, filter);
     if (score === null) continue;
     const w = PRIORITY_WEIGHT[item.weight] || 1;
     totalWeight += w;
@@ -201,6 +224,7 @@ function createMeasure(name: string = ""): Measure {
     priority: "M",
     confidence: "M",
     rating: null,
+    instances: [],
     justification: "",
     reflectionAchievement: "",
     reflectionVariability: "",
@@ -218,10 +242,13 @@ function ScoreChip({ score, size = "md" }: { score: number | null; size?: "sm" |
     </div>
   );
 
-  const rounded = Math.round(score * 10) / 10;
-  const color = rounded >= 4 ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
-                rounded >= 3 ? "bg-yellow-100 text-yellow-700 border-yellow-200" :
-                "bg-red-100 text-red-700 border-red-200";
+  const rounded = Math.max(1, Math.min(5, Math.round(score)));
+  const color =
+    rounded >= 4
+      ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+      : rounded >= 3
+        ? "bg-yellow-100 text-yellow-700 border-yellow-200"
+        : "bg-red-100 text-red-700 border-red-200";
 
   return (
     <div className={cn(
@@ -346,20 +373,21 @@ function generateAISummary(
   healthDimScore: number | null,
   behaviorDimScore: number | null,
   finalScore: number | null,
+  filter: ScoreFilter,
 ): string {
   const allMeasures = [...leaps.measures, ...health.measures, ...behavior.measures];
-  const rated = allMeasures.filter(m => !m.skipped && m.rating !== null);
+  const rated = allMeasures.filter((m) => !m.skipped && effectiveMeasureRating(m as any, filter) !== null);
 
   if (rated.length === 0) {
-    return "No measures have been scored yet. Add and rate measures across dimensions to see a summary.";
+    return "No measures have been scored yet. Add measures and instances across dimensions to see a summary.";
   }
 
   let summary = `Experience score is ${finalScore !== null ? String(finalScore) : "pending"}.`;
 
   if (leapsDimScore !== null) {
-    summary += ` Leaps dimension: ${(Math.round(leapsDimScore * 10) / 10).toFixed(1)}.`;
-    const strong = leaps.measures.filter(m => !m.skipped && (m.rating ?? 0) >= 4);
-    const weak = leaps.measures.filter(m => !m.skipped && m.rating !== null && m.rating < 3);
+    summary += ` Leaps dimension: ${String(Math.max(1, Math.min(5, Math.round(leapsDimScore))))}.`;
+    const strong = leaps.measures.filter((m) => !m.skipped && (effectiveMeasureRating(m as any, filter) ?? 0) >= 4);
+    const weak = leaps.measures.filter((m) => !m.skipped && effectiveMeasureRating(m as any, filter) !== null && (effectiveMeasureRating(m as any, filter) || 0) < 3);
     if (strong.length > 0) summary += ` Strong: ${strong.map(m => m.name).join(", ")}.`;
     if (weak.length > 0) summary += ` Needs attention: ${weak.map(m => m.name).join(", ")}.`;
   } else {
@@ -369,13 +397,13 @@ function generateAISummary(
   if (health.measures.length === 0) {
     summary += " Health dimension excluded (no measures).";
   } else if (healthDimScore !== null) {
-    summary += ` Health: ${(Math.round(healthDimScore * 10) / 10).toFixed(1)}.`;
+    summary += ` Health: ${String(Math.max(1, Math.min(5, Math.round(healthDimScore))))}.`;
   }
 
   if (behavior.measures.length === 0) {
     summary += " Behavior dimension excluded (no measures).";
   } else if (behaviorDimScore !== null) {
-    summary += ` Behavior: ${(Math.round(behaviorDimScore * 10) / 10).toFixed(1)}.`;
+    summary += ` Behavior: ${String(Math.max(1, Math.min(5, Math.round(behaviorDimScore))))}.`;
   }
 
   return summary;
@@ -393,12 +421,18 @@ function MeasureCard({
   onDelete,
   sectionDisabled,
   isLeapsDimension,
+  actors,
+  onAddActor,
+  filter,
 }: {
   measure: Measure;
   onUpdate: (m: Measure) => void;
   onDelete: () => void;
   sectionDisabled?: boolean;
   isLeapsDimension?: boolean;
+  actors: string[];
+  onAddActor?: (label: string) => void;
+  filter: ScoreFilter;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showScale, setShowScale] = useState(false);
@@ -406,11 +440,53 @@ function MeasureCard({
   const canSkip = measure.priority === "L";
   const isDisabled = measure.skipped || sectionDisabled;
   const scaleDefs = measure.scaleDefinitions || {};
+  const minDate = useMemo(() => minAsOfDate(new Date(), 5), []);
+  const score = useMemo(() => effectiveMeasureRating(measure, filter), [filter, measure]);
+  const actorOptions = useMemo(() => {
+    const out: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const a of Array.isArray(actors) ? actors : []) {
+      const clean = String(a ?? "").trim();
+      if (!clean) continue;
+      const key = normActor(clean);
+      if (!key || key === UNKNOWN_ACTOR_KEY) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, label: clean });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [actors]);
+  const actorLabelByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of actorOptions) m.set(a.key, a.label);
+    return m;
+  }, [actorOptions]);
+  const ADD_NEW_KEY = "__add_new__";
+  const [addingByInstId, setAddingByInstId] = useState<Record<string, boolean>>({});
+  const [draftByInstId, setDraftByInstId] = useState<Record<string, string>>({});
+  const [openInstRationale, setOpenInstRationale] = useState<Record<string, boolean>>({});
 
   const updateScale = (n: string, val: string) => {
     const updated = { ...scaleDefs, [n]: val };
     if (!val.trim()) delete updated[n];
     onUpdate({ ...measure, scaleDefinitions: Object.keys(updated).length > 0 ? updated : undefined });
+  };
+
+  const updateInstances = (next: ScoreInstance[]) => {
+    onUpdate({ ...measure, rating: null, instances: next });
+  };
+
+  const addInstance = () => {
+    const next: ScoreInstance = {
+      id: generateId(),
+      actor: "",
+      asOfDate: toIsoDateString(new Date()),
+      score: null,
+      weight: "M",
+      rationale: "",
+    };
+    updateInstances([...(measure.instances || []), next]);
   };
 
   return (
@@ -424,13 +500,13 @@ function MeasureCard({
             <div className="flex items-center gap-2.5 flex-1 min-w-0 text-left">
               <div className={cn(
                 "w-7 h-7 rounded flex items-center justify-center text-xs font-bold shrink-0",
-                measure.rating !== null
-                  ? measure.rating >= 4 ? "bg-emerald-100 text-emerald-700" :
-                    measure.rating === 3 ? "bg-yellow-100 text-yellow-700" :
+                score !== null
+                  ? score >= 4 ? "bg-emerald-100 text-emerald-700" :
+                    score === 3 ? "bg-yellow-100 text-yellow-700" :
                     "bg-red-100 text-red-700"
                   : "bg-gray-100 text-gray-400"
               )}>
-                {measure.rating !== null ? measure.rating : "—"}
+                {score !== null ? score : "—"}
               </div>
               <div className="flex-1 min-w-0">
                 <span className="text-sm font-medium text-gray-900 truncate block">{measure.name || "Untitled measure"}</span>
@@ -441,12 +517,9 @@ function MeasureCard({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                className="text-[9px] font-bold text-gray-400 bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded cursor-not-allowed uppercase tracking-wider whitespace-nowrap"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Update Score
-              </button>
+              <div className="text-[9px] font-bold text-gray-400 bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">
+                Instances {(measure.instances || []).length}
+              </div>
               <div onClick={(e) => e.stopPropagation()}>
                 <PriorityPicker value={measure.priority} onChange={(p) => onUpdate({ ...measure, priority: p, skipped: p !== "L" ? false : measure.skipped })} disabled={isDisabled} />
               </div>
@@ -522,7 +595,7 @@ function MeasureCard({
                 <Separator />
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <Label className="text-xs text-gray-500 font-semibold">Rating (1–5)</Label>
+                    <Label className="text-xs text-gray-500 font-semibold">Instances</Label>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setShowScale(!showScale)}
@@ -557,11 +630,216 @@ function MeasureCard({
                     </div>
                   </div>
 
-                  <RatingInput
-                    value={measure.rating}
-                    onChange={(r) => onUpdate({ ...measure, rating: r })}
-                    scaleDefinitions={measure.scaleDefinitions}
-                  />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-[10px] text-gray-500">Uses marking period + aggregation filters to compute this measure’s score.</div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px] gap-1"
+                        onClick={addInstance}
+                        data-testid={`measure-add-instance-${measure.id}`}
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add instance
+                      </Button>
+                    </div>
+
+                    {(measure.instances || []).length === 0 ? (
+                      <div className="text-xs text-gray-400 italic">No instances yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {(measure.instances || []).map((inst) => {
+                          const instKey = String(inst?.id || "");
+                          const actorValue = normActor(inst?.actor);
+                          const isAdding = !!addingByInstId[instKey];
+                          const ratOpen = !!openInstRationale[instKey];
+                          return (
+                            <div key={instKey} className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">Actor</span>
+                                  <select
+                                    className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+                                    value={isAdding ? ADD_NEW_KEY : actorValue}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      if (v === ADD_NEW_KEY) {
+                                        setAddingByInstId((prev) => ({ ...prev, [instKey]: true }));
+                                        return;
+                                      }
+                                      setAddingByInstId((prev) => ({ ...prev, [instKey]: false }));
+                                      updateInstances(
+                                        (measure.instances || []).map((x) =>
+                                          x.id === inst.id
+                                            ? {
+                                                ...x,
+                                                actor:
+                                                  v === UNKNOWN_ACTOR_KEY
+                                                    ? ""
+                                                    : actorLabelByKey.get(v) || String(v),
+                                              }
+                                            : x,
+                                        ),
+                                      );
+                                    }}
+                                    data-testid={`measure-inst-actor-${measure.id}-${instKey}`}
+                                  >
+                                    <option value={UNKNOWN_ACTOR_KEY}>Unknown</option>
+                                    {actorOptions.map((a) => (
+                                      <option key={a.key} value={a.key}>
+                                        {a.label}
+                                      </option>
+                                    ))}
+                                    {onAddActor ? <option value={ADD_NEW_KEY}>Add new…</option> : null}
+                                  </select>
+                                </div>
+
+                                {isAdding && onAddActor ? (
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      value={draftByInstId[instKey] || ""}
+                                      onChange={(e) => {
+                                        const v = e.currentTarget?.value ?? "";
+                                        setDraftByInstId((prev) => ({ ...prev, [instKey]: v }));
+                                      }}
+                                      placeholder="New actor…"
+                                      className="h-8 w-[150px] text-xs bg-white"
+                                      data-testid={`measure-inst-actor-draft-${measure.id}-${instKey}`}
+                                    />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 text-[11px]"
+                                      onClick={() => {
+                                        const clean = String(draftByInstId[instKey] || "").trim();
+                                        if (!clean) return;
+                                        onAddActor(clean);
+                                        updateInstances(
+                                          (measure.instances || []).map((x) => (x.id === inst.id ? { ...x, actor: clean } : x)),
+                                        );
+                                        setDraftByInstId((prev) => ({ ...prev, [instKey]: "" }));
+                                        setAddingByInstId((prev) => ({ ...prev, [instKey]: false }));
+                                      }}
+                                    >
+                                      Add
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 text-[11px] text-gray-500"
+                                      onClick={() => {
+                                        setDraftByInstId((prev) => ({ ...prev, [instKey]: "" }));
+                                        setAddingByInstId((prev) => ({ ...prev, [instKey]: false }));
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                ) : null}
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">As-of</span>
+                                  <Input
+                                    type="date"
+                                    className="h-8 w-[150px] text-xs"
+                                    value={String(inst?.asOfDate || "")}
+                                    min={minDate}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      updateInstances((measure.instances || []).map((x) => (x.id === inst.id ? { ...x, asOfDate: v } : x)));
+                                    }}
+                                    data-testid={`measure-inst-date-${measure.id}-${instKey}`}
+                                  />
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">Score</span>
+                                  <select
+                                    className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+                                    value={inst?.score === null || inst?.score === undefined ? "" : String(inst.score)}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      updateInstances(
+                                        (measure.instances || []).map((x) =>
+                                          x.id === inst.id ? { ...x, score: v ? Number(v) : null } : x,
+                                        ),
+                                      );
+                                    }}
+                                    data-testid={`measure-inst-score-${measure.id}-${instKey}`}
+                                  >
+                                    <option value="">—</option>
+                                    {[1, 2, 3, 4, 5].map((n) => (
+                                      <option key={n} value={String(n)}>
+                                        {n}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-semibold text-gray-600">Weight</span>
+                                  <select
+                                    className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+                                    value={String(inst?.weight || "M")}
+                                    onChange={(e) => {
+                                      const v = e.currentTarget.value;
+                                      updateInstances((measure.instances || []).map((x) => (x.id === inst.id ? { ...x, weight: v as any } : x)));
+                                    }}
+                                    data-testid={`measure-inst-weight-${measure.id}-${instKey}`}
+                                  >
+                                    <option value="H">H</option>
+                                    <option value="M">M</option>
+                                    <option value="L">L</option>
+                                  </select>
+                                </div>
+
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2 text-gray-400 hover:text-red-600"
+                                  onClick={() => updateInstances((measure.instances || []).filter((x) => x.id !== inst.id))}
+                                  data-testid={`measure-inst-remove-${measure.id}-${instKey}`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+
+                              <div>
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenInstRationale((prev) => ({ ...prev, [instKey]: !prev[instKey] }))}
+                                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
+                                  data-testid={`measure-inst-rationale-toggle-${measure.id}-${instKey}`}
+                                >
+                                  {ratOpen ? "Hide rationale" : (inst as any)?.rationale ? "Edit rationale" : "Add rationale"}
+                                </button>
+                                {ratOpen ? (
+                                  <div className="mt-2">
+                                    <Textarea
+                                      value={String((inst as any)?.rationale || "")}
+                                      onChange={(e) => {
+                                        const v = e.currentTarget.value;
+                                        updateInstances(
+                                          (measure.instances || []).map((x) => (x.id === inst.id ? { ...x, rationale: v } : x)),
+                                        );
+                                      }}
+                                      placeholder="Add rationale…"
+                                      className="text-xs min-h-[60px] bg-white"
+                                      data-testid={`measure-inst-rationale-${measure.id}-${instKey}`}
+                                    />
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
 
                   <p className="mt-2 text-[10px] text-gray-400 italic">
                     Make sure you consider the average achievement and how this achievement varies among students.
@@ -632,18 +910,51 @@ interface ExperienceScoreViewProps {
   nodeId?: string;
   title?: string;
   onBack: () => void;
+  sourceFilter?: ScoreFilter;
+  onFilterChange?: (next: ScoreFilter) => void;
 }
 
-export default function ExperienceScoreView({ nodeId, title, onBack }: ExperienceScoreViewProps) {
+export default function ExperienceScoreView({ nodeId, title, onBack, sourceFilter, onFilterChange }: ExperienceScoreViewProps) {
+  if (String(nodeId || "") === "overall") {
+    return (
+      <ExperienceScoreOverallInstancesView
+        nodeId={nodeId}
+        title={title}
+        onBack={onBack}
+        sourceFilter={sourceFilter}
+        onFilterChange={onFilterChange}
+      />
+    );
+  }
+
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [scoringMode, setScoringMode] = useState<"dimensions" | "overall">("dimensions");
+  const [activeDimTab, setActiveDimTab] = useState<"leaps" | "health" | "behavior">("leaps");
   const [leapsScoringMode, setLeapsScoringMode] = useState<LeapsScoringMode>("across");
-  const [leaps, setLeaps] = useState<ExperienceDimension>({ measures: [], excluded: false });
-  const [health, setHealth] = useState<ExperienceDimension>({ measures: [], excluded: false });
-  const [behavior, setBehavior] = useState<ExperienceDimension>({ measures: [], excluded: false });
+  const [actors, setActors] = useState<string[]>([]);
+  const { actors: globalActors, addActor: addGlobalActor, mergeActors: mergeGlobalActors } = useGlobalActors();
+  const [localFilter, setLocalFilter] = useState<ScoreFilter>({
+    mode: "year",
+    yearKey: listSelectableYearKeys(new Date(), 5)[0],
+    aggregation: "singleLatest",
+  } as any);
+  const filter = sourceFilter || localFilter;
+  const setFilter = useCallback(
+    (next: ScoreFilter) => {
+      onFilterChange?.(next);
+      setLocalFilter(next);
+    },
+    [onFilterChange],
+  );
+  useEffect(() => {
+    if (sourceFilter) setLocalFilter(sourceFilter);
+  }, [sourceFilter]);
+  const [leaps, setLeaps] = useState<ExperienceDimension>({ instances: [], measures: [], excluded: false });
+  const [health, setHealth] = useState<ExperienceDimension>({ instances: [], measures: [], excluded: false });
+  const [behavior, setBehavior] = useState<ExperienceDimension>({ instances: [], measures: [], excluded: false });
   const [leapItems, setLeapItems] = useState<LeapItem[]>([]);
   const [overallMeasures, setOverallMeasures] = useState<Measure[]>([]);
   const [newMeasureName, setNewMeasureName] = useState<Record<string, string>>({ leaps: "", health: "", behavior: "" });
@@ -651,12 +962,56 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
   const [newOverallMeasureName, setNewOverallMeasureName] = useState("");
   const [initialized, setInitialized] = useState(false);
 
+  useEffect(() => {
+    if (scoringMode === "dimensions") setActiveDimTab("leaps");
+  }, [scoringMode]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    mergeGlobalActors(actors);
+  }, [actors, initialized, mergeGlobalActors]);
+
+  const onAddActor = useCallback(
+    (label: string) => {
+      const clean = String(label ?? "").trim();
+      if (!clean) return;
+      addGlobalActor(clean);
+      setActors((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const seen = new Set(list.map((p) => normActor(p)));
+        const key = normActor(clean);
+        if (key === UNKNOWN_ACTOR_KEY) return list;
+        if (seen.has(key)) return list;
+        return [...list, clean];
+      });
+    },
+    [addGlobalActor],
+  );
+
   const normalizeMeasure = (m: Measure): Measure => ({
     ...m,
     skipped: m.priority === "L" ? m.skipped : false,
     confidence: (m as any).confidence === "H" || (m as any).confidence === "M" || (m as any).confidence === "L" ? (m as any).confidence : "M",
     reflectionAchievement: m.reflectionAchievement || "",
     reflectionVariability: m.reflectionVariability || "",
+    instances: (() => {
+      const raw = Array.isArray((m as any).instances) ? ((m as any).instances as ScoreInstance[]) : [];
+      const fixed = raw.map((i: any) => ({ ...i, rationale: String(i?.rationale || "") })) as ScoreInstance[];
+      if (raw.length === 0 && m.rating !== null && m.rating !== undefined) {
+        return [
+          {
+            id: generateId(),
+            actor: "",
+            asOfDate: toIsoDateString(new Date()),
+            score: m.rating as any,
+            weight: "M",
+            rationale: "",
+          } satisfies ScoreInstance,
+        ];
+      }
+      return fixed;
+    })(),
+    rating: null,
   });
 
   const getLeapAimsFromDE = useCallback((): { id: string; label: string; level?: unknown }[] => {
@@ -678,15 +1033,36 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
       const esd: Partial<ExperienceScoreData> = hd.experienceScoreData || {};
       setScoringMode((esd as any).scoringMode || "dimensions");
       setLeapsScoringMode(((esd as any).leapsScoringMode as LeapsScoringMode) || "across");
+      setActors(Array.isArray((esd as any).actors) ? ((esd as any).actors as any[]) : []);
+      const saved: any = ((esd as any).filter as any) || {};
+      setFilter(
+        saved?.mode
+          ? (saved as any)
+          : ({
+              mode: "year",
+              yearKey: listSelectableYearKeys(new Date(), 5)[0],
+              aggregation: saved?.aggregation || "singleLatest",
+              actorKey: saved?.actorKey,
+            } as any),
+      );
       setLeaps({
+        instances: Array.isArray((esd.leaps as any)?.instances)
+          ? (((esd.leaps as any).instances as any[]) || []).map((i: any) => ({ ...i, rationale: String(i?.rationale || "") }))
+          : [],
         measures: (esd.leaps?.measures || []).map(normalizeMeasure),
         excluded: esd.leaps?.excluded || false,
       });
       setHealth({
+        instances: Array.isArray((esd.health as any)?.instances)
+          ? (((esd.health as any).instances as any[]) || []).map((i: any) => ({ ...i, rationale: String(i?.rationale || "") }))
+          : [],
         measures: (esd.health?.measures || []).map(normalizeMeasure),
         excluded: esd.health?.excluded || false,
       });
       setBehavior({
+        instances: Array.isArray((esd.behavior as any)?.instances)
+          ? (((esd.behavior as any).instances as any[]) || []).map((i: any) => ({ ...i, rationale: String(i?.rationale || "") }))
+          : [],
         measures: (esd.behavior?.measures || []).map(normalizeMeasure),
         excluded: esd.behavior?.excluded || false,
       });
@@ -745,11 +1121,11 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
   }, [getLeapAimsFromDE, initialized, leapItems, leapsScoringMode, scoringMode]);
 
   const leapsDimScore = useMemo(() => {
-    if (leapsScoringMode === "individual") return calcLeapsDimensionScoreFromItems(leapItems);
-    return calcDimensionScore(leaps);
-  }, [leapItems, leaps, leapsScoringMode]);
-  const healthDimScore = useMemo(() => calcDimensionScore(health), [health]);
-  const behaviorDimScore = useMemo(() => calcDimensionScore(behavior), [behavior]);
+    if (leapsScoringMode === "individual") return calcLeapsDimensionScoreFromItems(leapItems, filter);
+    return calcDimensionScore(leaps, filter);
+  }, [filter, leapItems, leaps, leapsScoringMode]);
+  const healthDimScore = useMemo(() => calcDimensionScore(health, filter), [filter, health]);
+  const behaviorDimScore = useMemo(() => calcDimensionScore(behavior, filter), [filter, behavior]);
 
   const leapsMeasuresAll = useMemo(() => {
     if (leapsScoringMode === "individual") return leapItems.flatMap((li) => li.measures);
@@ -760,7 +1136,13 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
     () => {
       let raw: number | null = null;
       if (scoringMode === "overall") {
-        raw = weightedAverage(overallMeasures);
+        raw = weightedAverage(
+          overallMeasures.map((m: any) => ({
+            rating: effectiveMeasureRating(m as Measure, filter),
+            priority: m?.priority || "M",
+            skipped: !!m?.skipped,
+          })),
+        );
         return roundFinal1to5(raw);
       }
       const requiresLeaps = baseWeights.leapsWeight > 0;
@@ -770,7 +1152,7 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
       raw = calcFinalScore(leapsDimScore, healthDimScore, behaviorDimScore, baseWeights);
       return roundFinal1to5(raw);
     },
-    [scoringMode, overallMeasures, baseWeights, leapsDimScore, healthDimScore, behaviorDimScore, leaps.measures.length, leapItems, leapsScoringMode]
+    [filter, scoringMode, overallMeasures, baseWeights, leapsDimScore, healthDimScore, behaviorDimScore, leaps.measures.length, leapItems, leapsScoringMode]
   );
 
   const adjustedWeights = useMemo(
@@ -803,6 +1185,8 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
             experienceScoreData: {
               scoringMode: args.scoringMode,
               leapsScoringMode: args.leapsScoringMode,
+              actors,
+              filter,
               leaps: args.leaps,
               health: args.health,
               behavior: args.behavior,
@@ -817,7 +1201,7 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
         },
       });
     }, 1000);
-  }, [nodeId, comp, updateMutation]);
+  }, [nodeId, comp, updateMutation, actors, filter]);
 
   useEffect(() => {
     if (initialized) {
@@ -900,16 +1284,25 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
 
   const allMeasures = scoringMode === "overall" ? overallMeasures : [...leapsMeasuresAll, ...health.measures, ...behavior.measures];
   const totalMeasures = allMeasures.length;
-  const ratedMeasures = allMeasures.filter(m => !m.skipped && m.rating !== null).length;
+  const ratedMeasures = allMeasures.filter((m) => !m.skipped && effectiveMeasureRating(m as any, filter) !== null).length;
 
   const aiSummary = useMemo(() => {
     if (scoringMode === "overall") {
-      const rated = overallMeasures.filter(m => !m.skipped && m.rating !== null);
-      if (rated.length === 0) return "No measures have been scored yet. Add and rate measures to see a summary.";
+      const rated = overallMeasures.filter((m) => !m.skipped && effectiveMeasureRating(m as any, filter) !== null);
+      if (rated.length === 0) return "No measures have been scored yet. Add measures and instances to see a summary.";
       return `Overall experience score is ${finalScore !== null ? String(finalScore) : "pending"} based on ${rated.length} rated measure${rated.length !== 1 ? "s" : ""}.`;
     }
-    return generateAISummary({ measures: leapsMeasuresAll, excluded: false }, health, behavior, leapsDimScore, healthDimScore, behaviorDimScore, finalScore);
-  }, [behavior, behaviorDimScore, finalScore, health, healthDimScore, leapsDimScore, leapsMeasuresAll, overallMeasures, scoringMode]);
+    return generateAISummary(
+      { instances: [], measures: leapsMeasuresAll, excluded: false },
+      health,
+      behavior,
+      leapsDimScore,
+      healthDimScore,
+      behaviorDimScore,
+      finalScore,
+      filter,
+    );
+  }, [behavior, behaviorDimScore, filter, finalScore, health, healthDimScore, leapsDimScore, leapsMeasuresAll, overallMeasures, scoringMode]);
 
   const weightFormulaText = useMemo(() => {
     if (leapCount === 0) return "No leaps tagged → Leaps 0%, Health 50%, Behavior 50%";
@@ -966,6 +1359,42 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
     { key: "behavior" as const, name: "Behavior, Attendance & Engagement", icon: Users, score: behaviorDimScore, weight: adjustedWeights.behavior, color: "text-blue-500" },
   ];
 
+  const actorOptions = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const add = (a: unknown) => {
+      const clean = String(a ?? "").trim();
+      if (!clean) return;
+      const key = normActor(clean);
+      if (!key || key === UNKNOWN_ACTOR_KEY) return;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(clean);
+    };
+    const scanInstances = (insts: unknown) => {
+      const list = Array.isArray(insts) ? insts : [];
+      for (const inst of list) add((inst as any)?.actor);
+    };
+    const scanMeasures = (measures: unknown) => {
+      const list = Array.isArray(measures) ? measures : [];
+      for (const m of list) scanInstances((m as any)?.instances);
+    };
+
+    for (const a of Array.isArray(globalActors) ? globalActors : []) add(a);
+    for (const a of Array.isArray(actors) ? actors : []) add(a);
+    scanInstances((leaps as any)?.instances);
+    scanMeasures((leaps as any)?.measures);
+    scanInstances((health as any)?.instances);
+    scanMeasures((health as any)?.measures);
+    scanInstances((behavior as any)?.instances);
+    scanMeasures((behavior as any)?.measures);
+    for (const li of Array.isArray(leapItems) ? leapItems : []) scanInstances((li as any)?.instances);
+    scanMeasures(overallMeasures);
+
+    out.sort((a, b) => a.localeCompare(b));
+    return out;
+  }, [actors, behavior, globalActors, health, leapItems, leaps, overallMeasures]);
+
   return (
     <TooltipProvider>
       <div className="space-y-6 pb-12 max-w-5xl mx-auto p-6" data-testid="experience-score-view">
@@ -977,6 +1406,8 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
           <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
           Back to Status & Health
         </button>
+
+        <ScoreFilterBar filter={filter} onChange={setFilter as any} actors={actorOptions} testId="experience-filter-bar" />
 
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="score-dashboard">
           <div className="px-5 py-4 border-b border-gray-100">
@@ -1021,6 +1452,55 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
               <Sparkles className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
               <p className="text-xs text-blue-700 leading-relaxed">{aiSummary}</p>
             </div>
+          </div>
+
+          <div className="px-4 pb-4" data-testid="flags-section">
+            <ScoreFlags
+              overallScore={finalScore}
+              items={
+                scoringMode === "overall"
+                  ? overallMeasures
+                      .filter((m: any) => !m?.skipped)
+                      .map((m: any) => ({
+                        key: String(m?.id || m?.name || Math.random()),
+                        label: String(m?.name || "Measure"),
+                        score: effectiveMeasureRating(m as any, filter),
+                      }))
+                  : [
+                      ...(leapsScoringMode === "individual"
+                        ? leapItems.map((li) => ({
+                            key: `leap:${String(li.id)}`,
+                            label: String(li.label || "Leap"),
+                            score: calcLeapScoreFromMeasures(li.measures, filter),
+                          }))
+                        : (leapsMeasuresAll || [])
+                            .filter((m: any) => !m?.skipped)
+                            .map((m: any) => ({
+                              key: String(m?.id || m?.name || Math.random()),
+                              label: `Leaps: ${String(m?.name || "Measure")}`,
+                              score: effectiveMeasureRating(m as any, filter),
+                            }))),
+                      ...(health.measures || [])
+                        .filter((m: any) => !m?.skipped)
+                        .map((m: any) => ({
+                          key: String(m?.id || m?.name || Math.random()),
+                          label: `Health: ${String(m?.name || "Measure")}`,
+                          score: effectiveMeasureRating(m as any, filter),
+                        })),
+                      ...(behavior.measures || [])
+                        .filter((m: any) => !m?.skipped)
+                        .map((m: any) => ({
+                          key: String(m?.id || m?.name || Math.random()),
+                          label: `Behavior: ${String(m?.name || "Measure")}`,
+                          score: effectiveMeasureRating(m as any, filter),
+                        })),
+                    ]
+              }
+              threshold={2}
+              maxPerSide={6}
+              defaultOpen={false}
+              testId="experience-flags"
+            />
           </div>
 
           <div className="px-4 pb-3 flex items-center justify-between text-[10px] text-gray-400">
@@ -1084,6 +1564,9 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
                   onDelete={() => deleteOverallMeasure(m.id)}
                   sectionDisabled={false}
                   isLeapsDimension={false}
+                  actors={actorOptions}
+                  onAddActor={onAddActor}
+                  filter={filter}
                 />
               ))}
               <div className="flex items-center gap-2" data-testid="add-measure-overall">
@@ -1109,6 +1592,33 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
           </div>
         ) : (
           <>
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="experience-dimension-tabs">
+              <div className="px-4 py-3">
+                <Tabs value={activeDimTab} onValueChange={(v) => setActiveDimTab(v as any)} className="w-full">
+                  <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-gray-200 gap-6">
+                    {(
+                      [
+                        { key: "leaps" as const, label: "Leaps & Design Principles", score: leapsDimScore },
+                        { key: "health" as const, label: "Mental & Physical Health", score: healthDimScore },
+                        { key: "behavior" as const, label: "Behavior, Attendance & Engagement", score: behaviorDimScore },
+                      ] as const
+                    ).map((t) => (
+                      <TabsTrigger
+                        key={t.key}
+                        value={t.key}
+                        className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-900 data-[state=active]:shadow-none px-0 py-2 text-gray-500 hover:text-gray-700 bg-transparent flex items-center gap-2"
+                        data-testid={`experience-dim-tab-${t.key}`}
+                      >
+                        <span className="truncate max-w-[220px]">{t.label}</span>
+                        <ScoreChip score={t.score} size="sm" />
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+              </div>
+            </div>
+
+            {activeDimTab === "leaps" ? (
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="section-leaps">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1150,6 +1660,9 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
                         onDelete={() => deleteDimMeasure("leaps", m.id)}
                         sectionDisabled={false}
                         isLeapsDimension
+                        actors={actorOptions}
+                        onAddActor={onAddActor}
+                        filter={filter}
                       />
                     ))}
 
@@ -1188,69 +1701,89 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
                     ) : (
                       <div className="space-y-3">
                         {leapItems.map((li) => {
-                          const leapScore = calcLeapScoreFromMeasures(li.measures);
+                          const leapScore = calcLeapScoreFromMeasures(li.measures, filter);
+                          const instCount = (li.measures || []).reduce((s, m: any) => s + (Array.isArray(m?.instances) ? m.instances.length : 0), 0);
+                          const measureCount = Array.isArray(li.measures) ? li.measures.length : 0;
                           return (
-                            <div key={li.id} className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-3" data-testid={`leap-item-${li.id}`}>
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-xs font-semibold text-gray-900 truncate">{li.label}</div>
-                                  <div className="text-[10px] text-gray-500">Weight and measures roll up into the Leaps dimension.</div>
+                            <Collapsible key={li.id} defaultOpen={false}>
+                              <div className="bg-gray-50 rounded-lg border border-gray-200" data-testid={`leap-item-${li.id}`}>
+                                <div className="p-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <CollapsibleTrigger asChild>
+                                      <button type="button" className="flex items-center gap-2 min-w-0 text-left">
+                                        <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                                        <div className="min-w-0">
+                                          <div className="text-xs font-semibold text-gray-900 truncate">{li.label}</div>
+                                          <div className="text-[10px] text-gray-500">
+                                            Wt {li.weight} • {measureCount} measure{measureCount === 1 ? "" : "s"} • {instCount} inst
+                                          </div>
+                                        </div>
+                                      </button>
+                                    </CollapsibleTrigger>
+                                    <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                      <Badge
+                                        variant="secondary"
+                                        className="text-[9px] h-5 bg-gray-200 text-gray-700"
+                                        title="Set leap priority in Designed Experience"
+                                      >
+                                        Wt {li.weight}
+                                      </Badge>
+                                      <ScoreChip score={leapScore} size="sm" />
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-3 shrink-0">
-                                  <Badge
-                                    variant="secondary"
-                                    className="text-[9px] h-5 bg-gray-200 text-gray-700"
-                                    title="Set leap priority in Designed Experience"
-                                  >
-                                    Wt {li.weight}
-                                  </Badge>
-                                  <ScoreChip score={leapScore} size="sm" />
-                                </div>
+
+                                <CollapsibleContent>
+                                  <div className="px-3 pb-3 space-y-3">
+                                    {li.measures.length === 0 && (
+                                      <div className="text-center py-3 text-xs text-gray-400" data-testid={`empty-leap-measures-${li.id}`}>
+                                        No measures added yet. Add a measure below.
+                                      </div>
+                                    )}
+
+                                    {li.measures.map((m) => (
+                                      <MeasureCard
+                                        key={m.id}
+                                        measure={m}
+                                        onUpdate={(updated) => updateLeapItemMeasure(li.id, m.id, updated)}
+                                        onDelete={() => deleteLeapItemMeasure(li.id, m.id)}
+                                        sectionDisabled={false}
+                                        isLeapsDimension
+                                        actors={actorOptions}
+                                        onAddActor={onAddActor}
+                                        filter={filter}
+                                      />
+                                    ))}
+
+                                    <div className="flex items-center gap-2" data-testid={`add-measure-leap-${li.id}`}>
+                                      <select
+                                        value={newLeapMeasureName[li.id] || ""}
+                                        onChange={(e) => setNewLeapMeasureName((prev) => ({ ...prev, [li.id]: e.target.value }))}
+                                        className="flex h-8 flex-1 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        data-testid={`select-new-measure-leap-${li.id}`}
+                                      >
+                                        <option value="">Select a measure...</option>
+                                        {LEAP_MEASURES.map((m) => (
+                                          <option key={m} value={m}>
+                                            {m}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => addLeapItemMeasure(li.id)}
+                                        disabled={!((newLeapMeasureName[li.id] || "").trim())}
+                                        className="h-8 gap-1 border-blue-200 text-blue-600 hover:bg-blue-50"
+                                      >
+                                        <Plus className="w-3.5 h-3.5" />
+                                        Add
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </CollapsibleContent>
                               </div>
-
-                              {li.measures.length === 0 && (
-                                <div className="text-center py-3 text-xs text-gray-400" data-testid={`empty-leap-measures-${li.id}`}>
-                                  No measures added yet. Add a measure below.
-                                </div>
-                              )}
-
-                              {li.measures.map((m) => (
-                                <MeasureCard
-                                  key={m.id}
-                                  measure={m}
-                                  onUpdate={(updated) => updateLeapItemMeasure(li.id, m.id, updated)}
-                                  onDelete={() => deleteLeapItemMeasure(li.id, m.id)}
-                                  sectionDisabled={false}
-                                  isLeapsDimension
-                                />
-                              ))}
-
-                              <div className="flex items-center gap-2" data-testid={`add-measure-leap-${li.id}`}>
-                                <select
-                                  value={newLeapMeasureName[li.id] || ""}
-                                  onChange={(e) => setNewLeapMeasureName((prev) => ({ ...prev, [li.id]: e.target.value }))}
-                                  className="flex h-8 flex-1 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                  data-testid={`select-new-measure-leap-${li.id}`}
-                                >
-                                  <option value="">Select a measure...</option>
-                                  {LEAP_MEASURES.map((m) => (
-                                    <option key={m} value={m}>
-                                      {m}
-                                    </option>
-                                  ))}
-                                </select>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => addLeapItemMeasure(li.id)}
-                                  disabled={!((newLeapMeasureName[li.id] || "").trim())}
-                                  className="h-8 gap-1 border-blue-200 text-blue-600 hover:bg-blue-50"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                  Add
-                                </Button>
-                              </div>
-                            </div>
+                            </Collapsible>
                           );
                         })}
                       </div>
@@ -1259,38 +1792,49 @@ export default function ExperienceScoreView({ nodeId, title, onBack }: Experienc
                 )}
               </div>
             </div>
+            ) : null}
 
-            <DimensionSection
-              dimKey="health"
-              title="Mental & Physical Health"
-              icon={Heart}
-              iconColor="text-rose-500"
-              dimension={health}
-              baseWeight={baseWeights.healthWeight}
-              adjustedWeight={adjustedWeights.health}
-              weightTooltip={getWeightTooltip("health")}
-              newMeasureName={newMeasureName.health}
-              onNewMeasureNameChange={(v) => setNewMeasureName(prev => ({ ...prev, health: v }))}
-              onAddMeasure={() => addDimMeasure("health")}
-              onUpdateMeasure={(id, m) => updateDimMeasure("health", id, m)}
-              onDeleteMeasure={(id) => deleteDimMeasure("health", id)}
-            />
+            {activeDimTab === "health" ? (
+              <DimensionSection
+                dimKey="health"
+                title="Mental & Physical Health"
+                icon={Heart}
+                iconColor="text-rose-500"
+                dimension={health}
+                baseWeight={baseWeights.healthWeight}
+                adjustedWeight={adjustedWeights.health}
+                weightTooltip={getWeightTooltip("health")}
+                newMeasureName={newMeasureName.health}
+                onNewMeasureNameChange={(v) => setNewMeasureName(prev => ({ ...prev, health: v }))}
+                onAddMeasure={() => addDimMeasure("health")}
+                onUpdateMeasure={(id, m) => updateDimMeasure("health", id, m)}
+                onDeleteMeasure={(id) => deleteDimMeasure("health", id)}
+                actors={actorOptions}
+                onAddActor={onAddActor}
+                filter={filter}
+              />
+            ) : null}
 
-            <DimensionSection
-              dimKey="behavior"
-              title="Behavior, Attendance & Engagement"
-              icon={Users}
-              iconColor="text-blue-500"
-              dimension={behavior}
-              baseWeight={baseWeights.behaviorWeight}
-              adjustedWeight={adjustedWeights.behavior}
-              weightTooltip={getWeightTooltip("behavior")}
-              newMeasureName={newMeasureName.behavior}
-              onNewMeasureNameChange={(v) => setNewMeasureName(prev => ({ ...prev, behavior: v }))}
-              onAddMeasure={() => addDimMeasure("behavior")}
-              onUpdateMeasure={(id, m) => updateDimMeasure("behavior", id, m)}
-              onDeleteMeasure={(id) => deleteDimMeasure("behavior", id)}
-            />
+            {activeDimTab === "behavior" ? (
+              <DimensionSection
+                dimKey="behavior"
+                title="Behavior, Attendance & Engagement"
+                icon={Users}
+                iconColor="text-blue-500"
+                dimension={behavior}
+                baseWeight={baseWeights.behaviorWeight}
+                adjustedWeight={adjustedWeights.behavior}
+                weightTooltip={getWeightTooltip("behavior")}
+                newMeasureName={newMeasureName.behavior}
+                onNewMeasureNameChange={(v) => setNewMeasureName(prev => ({ ...prev, behavior: v }))}
+                onAddMeasure={() => addDimMeasure("behavior")}
+                onUpdateMeasure={(id, m) => updateDimMeasure("behavior", id, m)}
+                onDeleteMeasure={(id) => deleteDimMeasure("behavior", id)}
+                actors={actorOptions}
+                onAddActor={onAddActor}
+                filter={filter}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -1314,6 +1858,9 @@ function DimensionSection({
   onUpdateMeasure,
   onDeleteMeasure,
   leapCount,
+  actors,
+  onAddActor,
+  filter,
 }: {
   dimKey: string;
   title: string;
@@ -1329,6 +1876,9 @@ function DimensionSection({
   onUpdateMeasure: (id: string, m: Measure) => void;
   onDeleteMeasure: (id: string) => void;
   leapCount?: number;
+  actors: string[];
+  onAddActor?: (label: string) => void;
+  filter: ScoreFilter;
 }) {
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid={`section-${dimKey}`}>
@@ -1372,6 +1922,9 @@ function DimensionSection({
             onDelete={() => onDeleteMeasure(m.id)}
             sectionDisabled={false}
             isLeapsDimension={dimKey === "leaps"}
+            actors={actors}
+            onAddActor={onAddActor}
+            filter={filter}
           />
         ))}
 

@@ -1,4 +1,5 @@
 import type { RingDesignScoreData } from "./schema";
+import { effectiveFromInstances } from "./score-instances";
 
 const DEFAULT_WEIGHT_MEANING: Record<"H" | "M" | "L", number> = { H: 4, M: 2, L: 1 };
 
@@ -42,9 +43,48 @@ function maybeRoundedScore(value: number | null): number | null {
   return clampInt1to5(value);
 }
 
+function hasAnyInstances(rsd: RingDesignScoreData): boolean {
+  const overall: any[] = Array.isArray((rsd as any).overallInstances) ? ((rsd as any).overallInstances as any[]) : [];
+  if (overall.length > 0) return true;
+
+  const sub: any = (rsd as any).subDimensions || {};
+  const aims: any = sub.aims || {};
+  const se: any = sub.studentExperience || {};
+  const sr: any = sub.supportingResources || {};
+
+  const lists: any[] = [
+    aims.leapsInstances,
+    aims.outcomesInstances,
+    se.thoroughnessInstances,
+    se.leapinessInstances,
+    se.coherenceInstances,
+    sr.thoroughnessInstances,
+    sr.qualityInstances,
+    sr.coherenceInstances,
+  ];
+  return lists.some((x) => Array.isArray(x) && x.length > 0);
+}
+
+function scoreFromInstancesOrLegacy(args: {
+  instances: unknown;
+  legacyScore: unknown;
+  filter: any;
+  instanceMode: boolean;
+}): number | null {
+  const { instances, legacyScore, filter, instanceMode } = args;
+  if (Array.isArray(instances)) {
+    const eff = effectiveFromInstances(instances as any, filter).score;
+    if (eff !== null) return eff;
+    return instanceMode ? null : safeScore(legacyScore);
+  }
+  return safeScore(legacyScore);
+}
+
 export function calculateRingDesignDimensionScores(
   rsd: RingDesignScoreData,
 ): { aimsScore: number | null; experienceScore: number | null; resourcesScore: number | null } {
+  const filter: any = (rsd as any).filter || { mode: "none", aggregation: "singleLatest" };
+  const instanceMode = hasAnyInstances(rsd);
   const sub = (rsd as any).subDimensions;
   if (!sub) {
     const aimsScore = safeScore((rsd as any).designDimensions?.aimsScore);
@@ -56,31 +96,71 @@ export function calculateRingDesignDimensionScores(
   // Aims: Leaps (M locked), Outcomes (M locked)
   const aims = sub.aims || {};
   const aimsItems: { score: number; weight: unknown }[] = [];
-  const leapsScore = safeScore(aims.leapsScore);
+  const leapsScore = scoreFromInstancesOrLegacy({
+    instances: (aims as any).leapsInstances,
+    legacyScore: (aims as any).leapsScore,
+    filter,
+    instanceMode,
+  });
   if (leapsScore !== null) aimsItems.push({ score: leapsScore, weight: "M" });
-  const outcomesScore = safeScore(aims.outcomesScore);
+  const outcomesScore = scoreFromInstancesOrLegacy({
+    instances: (aims as any).outcomesInstances,
+    legacyScore: (aims as any).outcomesScore,
+    filter,
+    instanceMode,
+  });
   if (outcomesScore !== null) aimsItems.push({ score: outcomesScore, weight: "M" });
   const aimsAvg = weightedAverage(aimsItems);
 
   // Student experience: Thoroughness (default L, changeable), Leapiness (H locked), Coherence (default L, changeable)
   const se = sub.studentExperience || {};
   const seItems: { score: number; weight: unknown }[] = [];
-  const thoroughnessScore = safeScore(se.thoroughnessScore);
+  const thoroughnessScore = scoreFromInstancesOrLegacy({
+    instances: (se as any).thoroughnessInstances,
+    legacyScore: (se as any).thoroughnessScore,
+    filter,
+    instanceMode,
+  });
   if (thoroughnessScore !== null) seItems.push({ score: thoroughnessScore, weight: se.thoroughnessWeight ?? "L" });
-  const leapinessScore = safeScore(se.leapinessScore);
+  const leapinessScore = scoreFromInstancesOrLegacy({
+    instances: (se as any).leapinessInstances,
+    legacyScore: (se as any).leapinessScore,
+    filter,
+    instanceMode,
+  });
   if (leapinessScore !== null) seItems.push({ score: leapinessScore, weight: "H" });
-  const coherenceScore = safeScore(se.coherenceScore);
+  const coherenceScore = scoreFromInstancesOrLegacy({
+    instances: (se as any).coherenceInstances,
+    legacyScore: (se as any).coherenceScore,
+    filter,
+    instanceMode,
+  });
   if (coherenceScore !== null) seItems.push({ score: coherenceScore, weight: se.coherenceWeight ?? "L" });
   const seAvg = weightedAverage(seItems);
 
   // Supporting resources: Thoroughness/Quality/Coherence (default M, changeable)
   const sr = sub.supportingResources || {};
   const srItems: { score: number; weight: unknown }[] = [];
-  const srThoroughnessScore = safeScore(sr.thoroughnessScore);
+  const srThoroughnessScore = scoreFromInstancesOrLegacy({
+    instances: (sr as any).thoroughnessInstances,
+    legacyScore: (sr as any).thoroughnessScore,
+    filter,
+    instanceMode,
+  });
   if (srThoroughnessScore !== null) srItems.push({ score: srThoroughnessScore, weight: sr.thoroughnessWeight ?? "M" });
-  const qualityScore = safeScore(sr.qualityScore);
+  const qualityScore = scoreFromInstancesOrLegacy({
+    instances: (sr as any).qualityInstances,
+    legacyScore: (sr as any).qualityScore,
+    filter,
+    instanceMode,
+  });
   if (qualityScore !== null) srItems.push({ score: qualityScore, weight: sr.qualityWeight ?? "M" });
-  const srCoherenceScore = safeScore(sr.coherenceScore);
+  const srCoherenceScore = scoreFromInstancesOrLegacy({
+    instances: (sr as any).coherenceInstances,
+    legacyScore: (sr as any).coherenceScore,
+    filter,
+    instanceMode,
+  });
   if (srCoherenceScore !== null) srItems.push({ score: srCoherenceScore, weight: sr.coherenceWeight ?? "M" });
   const srAvg = weightedAverage(srItems);
 
@@ -105,7 +185,11 @@ export function calculateRingDesignScore(
   if (!rsd) return null;
 
   if (rsd.designScoringMode === "overall") {
-    return safeScore(rsd.overallDesignScore);
+    const filter: any = (rsd as any).filter || { mode: "none", aggregation: "singleLatest" };
+    const overallInstances: any[] = Array.isArray((rsd as any).overallInstances) ? ((rsd as any).overallInstances as any[]) : [];
+    const instanceMode = hasAnyInstances(rsd);
+    if (overallInstances.length > 0) return effectiveFromInstances(overallInstances as any, filter).score;
+    return instanceMode ? null : safeScore(rsd.overallDesignScore);
   }
 
   const dimScores = calculateRingDesignDimensionScores(rsd);

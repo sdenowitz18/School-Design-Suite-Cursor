@@ -31,7 +31,17 @@ export function useUpdateComponent() {
         body: JSON.stringify(data),
       });
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      // Update cache immediately to prevent stale overwrites between competing autosaves.
+      queryClient.setQueryData(["components", variables.nodeId], data);
+      queryClient.setQueryData(["components"], (prev: any) => {
+        if (!Array.isArray(prev)) return prev;
+        const idx = prev.findIndex((c: any) => String(c?.nodeId) === String(variables.nodeId));
+        if (idx < 0) return prev;
+        const next = prev.slice();
+        next[idx] = data;
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["components"] });
       queryClient.invalidateQueries({ queryKey: ["components", variables.nodeId] });
     },
