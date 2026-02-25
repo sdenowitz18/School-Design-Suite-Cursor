@@ -16,7 +16,19 @@ if (!connectionString) {
   );
 }
 
+const sslMode = process.env.PGSSLMODE || process.env.POSTGRES_SSLMODE;
+const wantsSsl =
+  String(sslMode || "").toLowerCase() === "require" ||
+  String(sslMode || "").toLowerCase() === "prefer" ||
+  /sslmode=/i.test(connectionString) ||
+  /neon\.tech/i.test(connectionString);
+
 const globalForPg = globalThis as unknown as { __pgPool?: Pool };
-export const pool = globalForPg.__pgPool ?? new Pool({ connectionString });
+export const pool =
+  globalForPg.__pgPool ??
+  new Pool({
+    connectionString,
+    ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
+  });
 globalForPg.__pgPool = pool;
 export const db = drizzle(pool, { schema });
