@@ -2,11 +2,21 @@ import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
+const connectionString =
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  process.env.POSTGRES_URL_NON_POOLING ||
+  process.env.NEON_DATABASE_URL ||
+  process.env.DRIZZLE_DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error(
+    "Database connection string must be set (DATABASE_URL or POSTGRES_URL). Did you forget to configure Vercel/Neon env vars?",
+  );
 }
 
 const globalForPg = globalThis as unknown as { __pgPool?: Pool };
-export const pool = globalForPg.__pgPool ?? new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = globalForPg.__pgPool ?? new Pool({ connectionString });
 globalForPg.__pgPool = pool;
 export const db = drizzle(pool, { schema });
