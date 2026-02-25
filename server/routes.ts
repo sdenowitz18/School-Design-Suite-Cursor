@@ -1,32 +1,27 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { pool } from "./db";
+import { getDbEnvInfo, getPool } from "./db";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   app.get("/api/health", async (_req, res) => {
-    const env = {
-      VERCEL: !!process.env.VERCEL,
-      NODE_ENV: process.env.NODE_ENV || "",
-      HAS_DATABASE_URL: !!process.env.DATABASE_URL,
-      HAS_POSTGRES_URL: !!process.env.POSTGRES_URL,
-      HAS_POSTGRES_URL_NON_POOLING: !!process.env.POSTGRES_URL_NON_POOLING,
-      HAS_NEON_DATABASE_URL: !!process.env.NEON_DATABASE_URL,
-      HAS_DRIZZLE_DATABASE_URL: !!process.env.DRIZZLE_DATABASE_URL,
-      PGSSLMODE: process.env.PGSSLMODE || process.env.POSTGRES_SSLMODE || "",
-    };
-
+    const info = getDbEnvInfo();
     try {
+      const pool = getPool();
       const r = await pool.query("select 1 as ok");
-      return res.json({ ok: true, db: { ok: r?.rows?.[0]?.ok === 1 }, env });
+      return res.json({
+        ok: true,
+        db: { ok: r?.rows?.[0]?.ok === 1, wantsSsl: info.wantsSsl },
+        env: info.env,
+      });
     } catch (err: any) {
       return res.status(500).json({
         ok: false,
-        db: { ok: false, error: String(err?.message || err) },
-        env,
+        db: { ok: false, error: String(err?.message || err), wantsSsl: info.wantsSsl },
+        env: info.env,
       });
     }
   });
