@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { createApp } from "../server/app";
 
-let appPromise: Promise<ReturnType<typeof createApp>> | null = null;
+let appPromise: ReturnType<typeof createApp> | null = null;
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   if (!appPromise) appPromise = createApp();
