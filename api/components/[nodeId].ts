@@ -16,7 +16,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     if (method === "GET") {
-      const pool = getPool();
+      const pool = await getPool();
       const r = await pool.query("select * from components where node_id = $1 limit 1", [nodeId]);
       const component = r.rows?.[0];
       if (!component) {
@@ -31,7 +31,7 @@ export default async function handler(req: any, res: any) {
     if (method === "PATCH") {
       const body = (await readJsonBody(req)) || {};
       const data = body || {};
-      const pool = getPool();
+      const pool = await getPool();
 
       const sets: string[] = [];
       const values: any[] = [];
@@ -86,7 +86,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (method === "DELETE") {
-      const pool = getPool();
+      const pool = await getPool();
       const r = await pool.query("delete from components where node_id = $1 returning node_id", [nodeId]);
       const deleted = (r.rows || []).length > 0;
       if (!deleted) {

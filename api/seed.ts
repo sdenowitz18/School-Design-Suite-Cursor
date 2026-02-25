@@ -12,7 +12,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const pool = getPool();
+    const pool = await getPool();
     const existing = await pool.query("select node_id from components limit 1");
     if ((existing.rows || []).length > 0) {
       res.setHeader("Content-Type", "application/json");

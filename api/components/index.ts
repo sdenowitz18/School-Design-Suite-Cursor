@@ -9,7 +9,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     if (method === "GET") {
-      const pool = getPool();
+      const pool = await getPool();
       const r = await pool.query("select * from components");
       const components = r.rows || [];
       res.setHeader("Content-Type", "application/json");
@@ -18,7 +18,7 @@ export default async function handler(req: any, res: any) {
 
     if (method === "POST") {
       const body = await readJsonBody(req);
-      const pool = getPool();
+      const pool = await getPool();
       const row = body || {};
       const q =
         "insert into components (node_id,title,subtitle,color,canvas_x,canvas_y,snapshot_data,designed_experience_data,health_data) " +

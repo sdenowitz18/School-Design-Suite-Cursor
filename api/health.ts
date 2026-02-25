@@ -12,7 +12,7 @@ export default async function handler(req: any, res: any) {
 
   const info = getDbEnvInfo();
   try {
-    const pool = getPool();
+    const pool = await getPool();
     const r = await pool.query("select 1 as ok");
     res.setHeader("Content-Type", "application/json");
     return res.end(

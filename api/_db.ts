@@ -1,5 +1,3 @@
-import { Pool } from "pg";
-
 type DbEnvInfo = {
   connectionString?: string;
   wantsSsl: boolean;
@@ -38,9 +36,13 @@ export function getDbEnvInfo(): DbEnvInfo {
   };
 }
 
-const globalForPg = globalThis as unknown as { __vercelPgPool?: Pool; __vercelPgPoolKey?: string };
+type AnyPool = {
+  query: (sql: string, values?: any[]) => Promise<{ rows?: any[] }>;
+};
 
-export function getPool(): Pool {
+const globalForPg = globalThis as unknown as { __vercelPgPool?: AnyPool; __vercelPgPoolKey?: string };
+
+export async function getPool(): Promise<AnyPool> {
   const info = getDbEnvInfo();
   if (!info.connectionString) {
     throw new Error(
@@ -50,7 +52,12 @@ export function getPool(): Pool {
 
   const key = `${info.connectionString}::ssl=${info.wantsSsl ? "1" : "0"}`;
   if (!globalForPg.__vercelPgPool || globalForPg.__vercelPgPoolKey !== key) {
-    globalForPg.__vercelPgPool = new Pool({
+    const pgMod: any = await import("pg");
+    const PoolCtor = pgMod?.Pool;
+    if (!PoolCtor) {
+      throw new Error("Failed to load pg Pool in Vercel runtime.");
+    }
+    globalForPg.__vercelPgPool = new PoolCtor({
       connectionString: info.connectionString,
       ssl: info.wantsSsl ? { rejectUnauthorized: false } : undefined,
     });
