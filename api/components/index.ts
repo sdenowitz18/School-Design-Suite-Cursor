@@ -2,6 +2,22 @@ export const config = {
   runtime: "nodejs",
 };
 
+function mapComponentRow(row: any) {
+  if (!row || typeof row !== "object") return row;
+  return {
+    id: row.id,
+    nodeId: row.node_id,
+    title: row.title,
+    subtitle: row.subtitle,
+    color: row.color,
+    canvasX: row.canvas_x,
+    canvasY: row.canvas_y,
+    snapshotData: row.snapshot_data || {},
+    designedExperienceData: row.designed_experience_data || {},
+    healthData: row.health_data || {},
+  };
+}
+
 async function getPool() {
   const connectionString =
     process.env.DATABASE_URL ||
@@ -52,7 +68,7 @@ export default async function handler(req: any, res: any) {
     if (method === "GET") {
       const pool = await getPool();
       const r = await pool.query("select * from components");
-      const components = r.rows || [];
+      const components = (r.rows || []).map(mapComponentRow);
       res.setHeader("Content-Type", "application/json");
       return res.end(JSON.stringify(components));
     }
@@ -76,7 +92,7 @@ export default async function handler(req: any, res: any) {
         JSON.stringify(row.healthData || {}),
       ];
       const created = await pool.query(q, values);
-      const component = created.rows?.[0];
+      const component = mapComponentRow(created.rows?.[0]);
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       return res.end(JSON.stringify(component));

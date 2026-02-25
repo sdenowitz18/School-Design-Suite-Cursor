@@ -2,6 +2,22 @@ export const config = {
   runtime: "nodejs",
 };
 
+function mapComponentRow(row: any) {
+  if (!row || typeof row !== "object") return row;
+  return {
+    id: row.id,
+    nodeId: row.node_id,
+    title: row.title,
+    subtitle: row.subtitle,
+    color: row.color,
+    canvasX: row.canvas_x,
+    canvasY: row.canvas_y,
+    snapshotData: row.snapshot_data || {},
+    designedExperienceData: row.designed_experience_data || {},
+    healthData: row.health_data || {},
+  };
+}
+
 async function getPool() {
   const connectionString =
     process.env.DATABASE_URL ||
@@ -59,7 +75,7 @@ export default async function handler(req: any, res: any) {
     if (method === "GET") {
       const pool = await getPool();
       const r = await pool.query("select * from components where node_id = $1 limit 1", [nodeId]);
-      const component = r.rows?.[0];
+      const component = mapComponentRow(r.rows?.[0]);
       if (!component) {
         res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
@@ -103,7 +119,7 @@ export default async function handler(req: any, res: any) {
       if (sets.length === 0) {
         // no-op update, return current row
         const r0 = await pool.query("select * from components where node_id = $1 limit 1", [nodeId]);
-        const current = r0.rows?.[0];
+        const current = mapComponentRow(r0.rows?.[0]);
         if (!current) {
           res.statusCode = 404;
           res.setHeader("Content-Type", "application/json");
@@ -116,7 +132,7 @@ export default async function handler(req: any, res: any) {
       values.push(nodeId);
       const q = `update components set ${sets.join(", ")} where node_id = $${idx} returning *`;
       const updatedRow = await pool.query(q, values);
-      const updated = updatedRow.rows?.[0];
+      const updated = mapComponentRow(updatedRow.rows?.[0]);
       if (!updated) {
         res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
