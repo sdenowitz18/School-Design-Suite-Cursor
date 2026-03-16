@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { 
   Target, 
@@ -37,6 +37,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AnimatePresence, motion } from "framer-motion";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 import OutcomeSummaryView from "./outcome-summary-view";
@@ -50,8 +51,17 @@ import SupportDetailView from "./support-detail-view";
 import type { SupportGroupKey } from "./support-groups-config";
 import PogHubView from "./pog/pog-hub-view";
 import PogAttributeDetailView from "./pog/pog-attribute-detail-view";
+import PogOutcomesFirstView from "./pog/pog-outcomes-first-view";
+import PogAttributesOverviewView from "./pog/pog-attributes-overview-view";
 import type { PortraitOfGraduate } from "./pog/pog-types";
 import { normalizePortrait, syncKeyAimsOutcomesFromPortrait, normKey as normPogKey } from "./pog/pog-utils";
+import {
+  applyScenarioLevelsToAims,
+  buildCenterScenarios,
+  buildRingScenarios,
+  priorityToLevel as rollupPriorityToLevel,
+  type TargetingScenario,
+} from "./targeting-rollup-utils";
 
 import artifactDoc from "@/assets/images/artifact-doc.png";
 import artifactSlide from "@/assets/images/artifact-slide.png";
@@ -260,7 +270,14 @@ function CompactTagRow({
           </div>
           <div className="flex flex-wrap gap-1 flex-1">
             {aims.map(tag => (
-              <Chip key={tag.id} type={tag.type} label={tag.label} isPrimary={tag.isPrimary} onRemove={() => onRemoveAim(tag.id)} />
+              <Chip
+                key={tag.id}
+                type={tag.type}
+                label={tag.label}
+                isPrimary={tag.isPrimary}
+                meta={tag.type === "outcome" || tag.type === "leap" ? levelToHml(tag.level) : undefined}
+                onRemove={() => onRemoveAim(tag.id)}
+              />
             ))}
             <SchemaPickerSheet
               title="Select Outcomes"
@@ -697,12 +714,20 @@ function SubcomponentDetailPage({
 }
 
 function KeyDesignElementsSummary({
+  nodeId,
+  isOverall,
+  allComponents,
+  subcomponents,
   elements,
   onChange,
   onViewOutcomes,
   onOpenOutcome,
   onViewSupports,
 }: {
+  nodeId?: string;
+  isOverall: boolean;
+  allComponents?: any[];
+  subcomponents: DESubcomponent[];
   elements: KeyDesignElements;
   onChange: (updated: KeyDesignElements) => void;
   onViewOutcomes?: () => void;
@@ -725,23 +750,18 @@ function KeyDesignElementsSummary({
 
   const current = { aims, practices, supports };
 
-  const getAimLevel = (label: string, type: "outcome" | "leap") => {
-    return aims.find(a => a.type === type && a.label === label)?.level;
-  };
-
-  const setAimLevel = (label: string, type: "outcome" | "leap", level: TagLevel) => {
-    onChange({
-      ...current,
-      aims: aims.map(a => (a.type === type && a.label === label ? { ...a, level } : a)),
-    });
-  };
-
   const toggleAim = (label: string, type: TagType) => {
     const exists = aims.some(a => a.label === label);
     if (exists) {
       onChange({ ...current, aims: aims.filter(a => a.label !== label) });
     } else {
-      onChange({ ...current, aims: [...aims, { id: generateId(), type, label, level: "Medium" }] });
+      onChange({
+        ...current,
+        aims: [
+          ...aims,
+          { id: generateId(), type, label, level: null, levelMode: "auto", overrideLevel: null } as any,
+        ],
+      });
     }
   };
 
@@ -797,6 +817,78 @@ function KeyDesignElementsSummary({
     });
   };
 
+  const ringComponents = useMemo(
+    () => (Array.isArray(allComponents) ? allComponents.filter((c: any) => String(c?.nodeId || c?.node_id || "") !== "overall") : []),
+    [allComponents],
+  );
+
+  const outcomeScenarios = useMemo<TargetingScenario[]>(() => {
+    if (isOverall) {
+      return buildCenterScenarios({
+        centerTopAims: aims,
+        ringComponents,
+        type: "outcome",
+      });
+    }
+    return buildRingScenarios({
+      topAims: aims,
+      subcomponents,
+      type: "outcome",
+    });
+  }, [aims, isOverall, ringComponents, subcomponents]);
+
+  const leapScenarios = useMemo<TargetingScenario[]>(() => {
+    if (isOverall) {
+      return buildCenterScenarios({
+        centerTopAims: aims,
+        ringComponents,
+        type: "leap",
+      });
+    }
+    return buildRingScenarios({
+      topAims: aims,
+      subcomponents,
+      type: "leap",
+    });
+  }, [aims, isOverall, ringComponents, subcomponents]);
+
+  const intendedOutcomeScenarios = useMemo(() => outcomeScenarios.filter((s) => s.intended), [outcomeScenarios]);
+  const realizedOnlyOutcomeScenarios = useMemo(() => outcomeScenarios.filter((s) => !s.intended && s.realized), [outcomeScenarios]);
+  const intendedLeapScenarios = useMemo(() => leapScenarios.filter((s) => s.intended), [leapScenarios]);
+  const realizedOnlyLeapScenarios = useMemo(() => leapScenarios.filter((s) => !s.intended && s.realized), [leapScenarios]);
+
+  const upgradeRealizedToIntended = (scenario: TargetingScenario) => {
+    const exists = aims.some((a) => a.type === scenario.type && String(a.label || "").trim().toLowerCase() === scenario.label.toLowerCase());
+    if (exists) return;
+    onChange({
+      ...current,
+      aims: [
+        ...aims,
+        {
+          id: generateId(),
+          type: scenario.type,
+          label: scenario.label,
+          level: rollupPriorityToLevel(scenario.resolvedLevel || scenario.computedLevel || "M"),
+          computedLevel: scenario.computedLevel,
+          levelMode: "auto",
+          overrideLevel: null,
+        } as any,
+      ],
+    });
+  };
+
+  const scenarioByKey = useMemo(() => {
+    const m = new Map<string, TargetingScenario>();
+    for (const s of [...outcomeScenarios, ...leapScenarios]) m.set(s.key, s);
+    return m;
+  }, [leapScenarios, outcomeScenarios]);
+
+  const getScenarioMeta = (type: "outcome" | "leap", label: string): string | undefined => {
+    const s = scenarioByKey.get(`${type}:${String(label || "").trim().toLowerCase()}`);
+    if (!s?.resolvedLevel) return undefined;
+    return s.resolvedLevel;
+  };
+
   return (
     <section className="space-y-4" data-testid="section-key-design-elements">
       <div className="flex items-center justify-between">
@@ -841,60 +933,77 @@ function KeyDesignElementsSummary({
               </div>
               <ScrollArea className="max-h-[280px]">
                 <div className="space-y-2">
-                  {outcomes.length > 0 && (
-                    <div className="space-y-1">
-                      <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Outcomes</span>
-                      <div className="flex flex-wrap gap-1">
-                        {outcomes.map(aim => (
-                          <Chip
-                            key={aim.id}
-                            type="outcome"
-                            label={aim.label}
-                            meta={levelToHml(aim.level)}
-                            isPrimary={aim.isPrimary}
-                            onClick={onOpenOutcome ? () => onOpenOutcome(aim.label) : undefined}
-                            onRemove={() => removeAim(aim.label)}
-                          />
-                        ))}
-                      </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Outcomes</span>
+                    <div className="flex flex-wrap gap-1">
+                      <TooltipProvider delayDuration={150}>
+                        {intendedOutcomeScenarios.map((s) => {
+                          const lowImplementation = isOverall && !s.realized;
+                          const chip = (
+                            <Chip
+                              key={`outcome:${s.label}`}
+                              type="outcome"
+                              label={s.label}
+                              meta={s.resolvedLevel || undefined}
+                              className={lowImplementation ? "border-red-300 ring-1 ring-red-200" : undefined}
+                              isPrimary={outcomes.find((o) => String(o.label || "").trim().toLowerCase() === s.label.toLowerCase())?.isPrimary}
+                              onClick={onOpenOutcome ? () => onOpenOutcome(s.label) : undefined}
+                              onRemove={() => removeAim(s.label)}
+                            />
+                          );
+                          if (!lowImplementation) return chip;
+                          return (
+                            <Tooltip key={`tooltip:outcome:${s.label}`}>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex">{chip}</span>
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-white text-gray-900 border border-gray-200 shadow-sm">
+                                Little to no implementation across school design.
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        })}
+                      </TooltipProvider>
                     </div>
-                  )}
-                  {leaps.length > 0 && (
+                    <div className="pt-1">
+                      <SchemaPickerSheet
+                        title="Select Outcomes"
+                        description="Add or remove outcome aims for this component."
+                        schema={OUTCOME_SCHEMA}
+                        selectedLabels={aimLabels}
+                        onToggle={(label) => toggleAim(label, "outcome")}
+                        getLevel={undefined}
+                        onSetLevel={undefined}
+                        type="outcome"
+                        triggerLabel="Outcomes"
+                        triggerIcon={Target}
+                      />
+                    </div>
+                  </div>
+                  {intendedLeapScenarios.length > 0 && (
                     <div className="space-y-1 pt-1">
                       <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Leaps</span>
                       <div className="flex flex-wrap gap-1">
-                        {leaps.map(aim => (
-                          <Chip key={aim.id} type="leap" label={aim.label} onRemove={() => removeAim(aim.label)} />
+                        {intendedLeapScenarios.map((s) => (
+                          <Chip key={`leap:${s.label}`} type="leap" label={s.label} meta={s.resolvedLevel || undefined} onRemove={() => removeAim(s.label)} />
                         ))}
                       </div>
                     </div>
                   )}
-                  {aims.length === 0 && (
+                  {intendedOutcomeScenarios.length === 0 && intendedLeapScenarios.length === 0 && (!isOverall || (realizedOnlyOutcomeScenarios.length === 0 && realizedOnlyLeapScenarios.length === 0)) && (
                     <p className="text-xs text-gray-400 italic">No aims defined yet</p>
                   )}
                 </div>
               </ScrollArea>
               <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
                 <SchemaPickerSheet
-                  title="Select Outcomes"
-                  description="Add or remove outcome aims for this component."
-                  schema={OUTCOME_SCHEMA}
-                  selectedLabels={aimLabels}
-                  onToggle={(label) => toggleAim(label, "outcome")}
-                  getLevel={(label) => getAimLevel(label, "outcome")}
-                  onSetLevel={(label, level) => setAimLevel(label, "outcome", level)}
-                  type="outcome"
-                  triggerLabel="Outcomes"
-                  triggerIcon={Target}
-                />
-                <SchemaPickerSheet
                   title="Select Leaps"
                   description="Add or remove leap aims for this component."
                   schema={LEAP_SCHEMA}
                   selectedLabels={aimLabels}
                   onToggle={(label) => toggleAim(label, "leap")}
-                  getLevel={(label) => getAimLevel(label, "leap")}
-                  onSetLevel={(label, level) => setAimLevel(label, "leap", level)}
+                  getLevel={undefined}
+                  onSetLevel={undefined}
                   type="leap"
                   triggerLabel="Leaps"
                   triggerIcon={Sparkles}
@@ -996,7 +1105,9 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   const [keyDesignElements, setKeyDesignElements] = useState<KeyDesignElements>({ aims: [], practices: [], supports: [] });
   const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
   const [portraitOfGraduate, setPortraitOfGraduate] = useState<PortraitOfGraduate>({ attributes: [], linksByAttributeId: {} });
-  const [pogNav, setPogNav] = useState<{ mode: "hub" } | { mode: "detail"; attributeId: string }>({ mode: "hub" });
+  const [pogNav, setPogNav] = useState<{ mode: "hub" } | { mode: "detail"; attributeId: string } | { mode: "outcomesFirst" } | { mode: "all" }>({ mode: "hub" });
+  const [pogReturnToDetailAttrId, setPogReturnToDetailAttrId] = useState<string | null>(null);
+  const [pogOutcomesFirstDraft, setPogOutcomesFirstDraft] = useState<{ selectedKeys: string[]; step: 1 | 2 }>({ selectedKeys: [], step: 1 });
   const [loadedNodeId, setLoadedNodeId] = useState<string | null>(null);
   const [localOpenSubId, setLocalOpenSubId] = useState<string | null>(null);
   const [addingSubcomponent, setAddingSubcomponent] = useState(false);
@@ -1018,6 +1129,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   };
 
   const { data: componentData } = useQuery(componentQueries.byNodeId(nodeId || ""));
+  const { data: allComponents } = useQuery(componentQueries.all);
   const updateMutation = useUpdateComponent();
   const deRef = useRef<DesignedExperienceData>({});
   const isOverall = String(nodeId || "") === "overall" || String((componentData as any)?.nodeId || "") === "overall";
@@ -1042,6 +1154,8 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       supports: s.supports || [],
     })));
     setPortraitOfGraduate(normalizePortrait((de as any)?.portraitOfGraduate));
+    setPogReturnToDetailAttrId(null);
+    setPogOutcomesFirstDraft({ selectedKeys: [], step: 1 });
     setPogNav({ mode: "hub" });
     setLoadedNodeId(nodeId);
   }, [componentData, loadedNodeId, nodeId]);
@@ -1079,8 +1193,27 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
 
   const saveData = useCallback(() => {
     if (!nodeId) return;
-    const syncedDe = isOverall ? syncKeyAimsOutcomesFromPortrait({ keyDesignElements }, portraitOfGraduate) : { keyDesignElements };
-    const keyDesignElementsToSave = (syncedDe as any)?.keyDesignElements || keyDesignElements;
+    const baseAims = (keyDesignElements as any)?.aims || [];
+    const ringList = ((allComponents as any[]) || []).filter((c: any) => String(c?.nodeId || c?.node_id || "") !== "overall");
+    const outcomeScenarios = isOverall
+      ? buildCenterScenarios({ centerTopAims: baseAims, ringComponents: ringList, type: "outcome" })
+      : buildRingScenarios({ topAims: baseAims, subcomponents, type: "outcome" });
+    const leapScenarios = isOverall
+      ? buildCenterScenarios({ centerTopAims: baseAims, ringComponents: ringList, type: "leap" })
+      : buildRingScenarios({ topAims: baseAims, subcomponents, type: "leap" });
+
+    const aimsWithResolvedLevels = applyScenarioLevelsToAims(
+      applyScenarioLevelsToAims(baseAims, outcomeScenarios, "outcome"),
+      leapScenarios,
+      "leap",
+    );
+    const keyDesignElementsWithLevels: KeyDesignElements = {
+      ...keyDesignElements,
+      aims: aimsWithResolvedLevels as any,
+    };
+
+    const syncedDe = isOverall ? syncKeyAimsOutcomesFromPortrait({ keyDesignElements: keyDesignElementsWithLevels }, portraitOfGraduate) : { keyDesignElements: keyDesignElementsWithLevels };
+    const keyDesignElementsToSave = (syncedDe as any)?.keyDesignElements || keyDesignElementsWithLevels;
     const designedExperienceData: DesignedExperienceData = {
       ...(deRef.current || {}),
       description,
@@ -1089,7 +1222,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       portraitOfGraduate: isOverall ? portraitOfGraduate : (deRef.current as any)?.portraitOfGraduate,
     };
     updateMutation.mutate({ nodeId, data: { designedExperienceData } });
-  }, [nodeId, description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, updateMutation]);
+  }, [nodeId, description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, updateMutation, allComponents]);
 
   useEffect(() => {
     if (!nodeId || !componentData) return;
@@ -1128,6 +1261,17 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   };
 
   const openSub = activeSubId ? subcomponents.find(s => s.id === activeSubId) : null;
+  const linkedPogOutcomeKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const linksByAttr = (portraitOfGraduate as any)?.linksByAttributeId || {};
+    for (const links of Object.values(linksByAttr) as any[]) {
+      for (const link of Array.isArray(links) ? links : []) {
+        const key = normPogKey((link as any)?.outcomeLabel);
+        if (key) keys.add(key);
+      }
+    }
+    return Array.from(keys);
+  }, [portraitOfGraduate]);
 
   if (showOutcomeScore) {
     return <OutcomeScoreView nodeId={nodeId} title={title} onBack={() => setShowOutcomeScore(false)} />;
@@ -1150,7 +1294,16 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       <OutcomeSummaryView
         nodeId={nodeId}
         title={title}
-        onBack={() => setShowOutcomeSummary(false)}
+        onBack={() => {
+          const latestDe: any = (componentData as any)?.designedExperienceData || {};
+          const latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
+          setKeyDesignElements({
+            aims: Array.isArray(latestKde?.aims) ? latestKde.aims : [],
+            practices: Array.isArray(latestKde?.practices) ? latestKde.practices : [],
+            supports: Array.isArray(latestKde?.supports) ? latestKde.supports : [],
+          });
+          setShowOutcomeSummary(false);
+        }}
         onOpenOutcomeScore={() => setShowOutcomeScore(true)}
       />
     );
@@ -1164,7 +1317,44 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           attributeId={pogNav.attributeId}
           onChange={setPortraitOfGraduate}
           onBack={() => setPogNav({ mode: "hub" })}
+        />
+      </div>
+    );
+  }
+
+  if (isOverall && pogNav.mode === "outcomesFirst") {
+    return (
+      <div className="p-6">
+        <PogOutcomesFirstView
+          portrait={portraitOfGraduate}
+          onChange={setPortraitOfGraduate}
           outcomeSchema={OUTCOME_SCHEMA as any}
+          selectedKeys={pogOutcomesFirstDraft.selectedKeys}
+          onSelectedKeysChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, selectedKeys: next }))}
+          step={pogOutcomesFirstDraft.step}
+          onStepChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, step: next }))}
+          onOpenOutcome={(label) => setSelectedOutcomeLabel(label)}
+          onBack={() => {
+            if (pogReturnToDetailAttrId) {
+              const attrId = pogReturnToDetailAttrId;
+              setPogReturnToDetailAttrId(null);
+              setPogNav({ mode: "detail", attributeId: attrId });
+              return;
+            }
+            setPogNav({ mode: "hub" });
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (isOverall && pogNav.mode === "all") {
+    return (
+      <div className="p-6">
+        <PogAttributesOverviewView
+          portrait={portraitOfGraduate}
+          onBack={() => setPogNav({ mode: "hub" })}
+          onOpenAttribute={(attributeId) => setPogNav({ mode: "detail", attributeId })}
         />
       </div>
     );
@@ -1259,6 +1449,10 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         </section>
 
         <KeyDesignElementsSummary
+          nodeId={nodeId}
+          isOverall={isOverall}
+          allComponents={(allComponents as any[]) || []}
+          subcomponents={subcomponents}
           elements={keyDesignElements}
           onChange={setKeyDesignElements}
           onViewOutcomes={() => setShowOutcomeSummary(true)}
@@ -1272,6 +1466,15 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
               portrait={portraitOfGraduate}
               onChange={setPortraitOfGraduate}
               onOpenAttribute={(attributeId) => setPogNav({ mode: "detail", attributeId })}
+              onViewAll={() => setPogNav({ mode: "all" })}
+              onStartWithOutcomes={() => {
+                setPogReturnToDetailAttrId(null);
+                setPogOutcomesFirstDraft((prev) => {
+                  const merged = new Set<string>([...prev.selectedKeys, ...linkedPogOutcomeKeys]);
+                  return { ...prev, selectedKeys: Array.from(merged) };
+                });
+                setPogNav({ mode: "outcomesFirst" });
+              }}
             />
           ) : (
             <>

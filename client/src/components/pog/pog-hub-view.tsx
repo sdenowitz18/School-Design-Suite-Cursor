@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { SchemaPickerSheet } from "@/components/de-schema-picker-sheet";
+import { OUTCOME_SCHEMA } from "@/components/designed-experience-schemas";
 import type { PortraitOfGraduate, PortraitAttribute } from "./pog-types";
 import { normKey } from "./pog-utils";
 import PogOutcomePill from "./pog-outcome-pill";
@@ -16,14 +18,30 @@ function genId() {
   return `pog_attr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function priorityToLevel(priority: unknown): "High" | "Medium" | "Low" {
+  if (priority === "H") return "High";
+  if (priority === "L") return "Low";
+  return "Medium";
+}
+
+function levelToPriority(level: unknown): "H" | "M" | "L" {
+  if (level === "High") return "H";
+  if (level === "Low") return "L";
+  return "M";
+}
+
 export default function PogHubView({
   portrait,
   onChange,
   onOpenAttribute,
+  onStartWithOutcomes,
+  onViewAll,
 }: {
   portrait: PortraitOfGraduate;
   onChange: (next: PortraitOfGraduate) => void;
   onOpenAttribute: (attributeId: string) => void;
+  onStartWithOutcomes: () => void;
+  onViewAll: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [showLearnMore, setShowLearnMore] = useState(false);
@@ -88,6 +106,8 @@ export default function PogHubView({
   };
 
   const removeAttr = (id: string) => {
+    const confirmed = window.confirm("Delete this attribute? This will also remove all linked outcomes from this attribute.");
+    if (!confirmed) return;
     const next: PortraitOfGraduate = {
       ...portrait,
       attributes: (portrait.attributes || []).filter((a) => a.id !== id),
@@ -116,7 +136,48 @@ export default function PogHubView({
     onChange(next);
     setDraft({ icon: "★", name: "", description: "" });
     setAdding(false);
-    onOpenAttribute(id);
+  };
+
+  const linksForAttr = (attributeId: string): { outcomeLabel: string; priority: "H" | "M" | "L" }[] =>
+    ((portrait.linksByAttributeId?.[attributeId] || []) as any[]) || [];
+
+  const toggleAttrOutcome = (attributeId: string, label: string) => {
+    const key = normKey(label);
+    const current = linksForAttr(attributeId);
+    const exists = current.some((l) => normKey(l?.outcomeLabel) === key);
+    const next = exists
+      ? current.filter((l) => normKey(l?.outcomeLabel) !== key)
+      : [...current, { outcomeLabel: label, priority: "M" as const }];
+    onChange({
+      ...portrait,
+      linksByAttributeId: {
+        ...(portrait.linksByAttributeId || {}),
+        [attributeId]: next,
+      },
+    });
+  };
+
+  const getAttrOutcomeLevel = (attributeId: string, label: string): "High" | "Medium" | "Low" | undefined => {
+    const key = normKey(label);
+    const link = linksForAttr(attributeId).find((l) => normKey((l as any)?.outcomeLabel) === key);
+    if (!link) return undefined;
+    return priorityToLevel((link as any)?.priority);
+  };
+
+  const setAttrOutcomeLevel = (attributeId: string, label: string, level: "High" | "Medium" | "Low") => {
+    const key = normKey(label);
+    const next = linksForAttr(attributeId).map((l) =>
+      normKey((l as any)?.outcomeLabel) === key
+        ? { ...(l as any), priority: levelToPriority(level) }
+        : l,
+    );
+    onChange({
+      ...portrait,
+      linksByAttributeId: {
+        ...(portrait.linksByAttributeId || {}),
+        [attributeId]: next as any,
+      },
+    });
   };
 
   return (
@@ -132,7 +193,15 @@ export default function PogHubView({
           </div>
           <div className="text-sm text-muted-foreground">
             Create attributes that describe your graduate vision, then connect each attribute to outcomes. Linked outcomes are automatically added to Whole
-            School outcomes (priority is not carried over).
+            School outcomes (priority is derived from POG links).
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={onStartWithOutcomes}>
+              Start with outcomes
+            </Button>
+            <Button size="sm" variant="outline" onClick={onViewAll}>
+              View all
+            </Button>
           </div>
         </div>
         <Button onClick={() => setAdding(true)} className={cn(adding && "opacity-60")} disabled={adding}>
@@ -232,6 +301,28 @@ export default function PogHubView({
                       )}
                     </div>
                   )}
+
+                  <div className="pt-1">
+                    <SchemaPickerSheet
+                      title={`Add outcomes to ${a.name || "this attribute"}`}
+                      description="Selections here are unique to this Portrait attribute and do not mirror Key Design Elements selections."
+                      schema={OUTCOME_SCHEMA}
+                      selectedLabels={(linksForAttr(a.id) || []).map((l: any) => String(l?.outcomeLabel || ""))}
+                      onToggle={(label) => toggleAttrOutcome(a.id, label)}
+                      getLevel={(label) => getAttrOutcomeLevel(a.id, label)}
+                      onSetLevel={(label, level) => setAttrOutcomeLevel(a.id, label, level as any)}
+                      type="outcome"
+                      triggerLabel="Outcomes"
+                    >
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 text-[11px] font-medium border border-dashed rounded-full px-2 py-0.5 transition-colors text-indigo-600 border-indigo-300 hover:text-indigo-700 hover:border-indigo-400"
+                      >
+                        <Plus className="w-3 h-3" />
+                        + Outcomes
+                      </button>
+                    </SchemaPickerSheet>
+                  </div>
 
                   {linked.length === 0 && (
                     <div className="text-xs text-muted-foreground">

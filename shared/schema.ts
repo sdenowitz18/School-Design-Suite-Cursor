@@ -168,15 +168,19 @@ export const scoreInstanceSchema = z.object({
   asOfDate: z.string(),
   score: z.number().int().min(1).max(5).nullable().default(null),
   weight: z.enum(["H", "M", "L"]).default("M"),
+  importance: z.enum(["H", "M", "L"]).default("M"),
+  confidence: z.enum(["H", "M", "L"]).default("M"),
   rationale: z.string().default(""),
+  retired: z.boolean().default(false),
 });
 export type ScoreInstance = z.infer<typeof scoreInstanceSchema>;
 
 export const scoreFilterSchema = z.object({
-  mode: z.enum(["none", "year", "semester"]).default("none"),
+  mode: z.enum(["none", "year", "semester", "quarter"]).default("none"),
   yearKey: z.string().optional(),
   semesterKey: z.string().optional(),
-  aggregation: z.enum(["singleLatest", "latestPerActor"]).default("singleLatest"),
+  quarterKey: z.string().optional(),
+  aggregation: z.enum(["singleLatest", "latestPerActor"]).optional().default("singleLatest"),
   actorKey: z.string().optional(),
 });
 export type ScoreFilter = z.infer<typeof scoreFilterSchema>;
@@ -184,6 +188,14 @@ export type ScoreFilter = z.infer<typeof scoreFilterSchema>;
 export const measureSchema = z.object({
   id: z.string(),
   name: z.string(),
+  markingPeriod: z
+    .object({
+      mode: z.enum(["year", "semester", "quarter"]).optional(),
+      yearKey: z.string().optional(),
+      semesterKey: z.string().optional(),
+      quarterKey: z.string().optional(),
+    })
+    .optional(),
   appliesTo: z.string().default("All students"),
   priority: z.enum(["H", "M", "L"]).default("M"),
   confidence: z.enum(["H", "M", "L"]).default("M"),
@@ -198,6 +210,69 @@ export const measureSchema = z.object({
 });
 
 export type Measure = z.infer<typeof measureSchema>;
+
+export const outcomePeriodSnapshotSchema = z.object({
+  markingPeriod: z.object({
+    mode: z.enum(["year", "semester", "quarter"]).optional(),
+    yearKey: z.string().optional(),
+    semesterKey: z.string().optional(),
+    quarterKey: z.string().optional(),
+  }),
+  importance: z.enum(["H", "M", "L"]).default("M"),
+  confidence: z.enum(["H", "M", "L"]).default("M"),
+  instances: z.array(scoreInstanceSchema).default([]),
+  archivedAt: z.string().optional(),
+});
+export type OutcomePeriodSnapshot = z.infer<typeof outcomePeriodSnapshotSchema>;
+
+export const outcomeMeasureSchema = measureSchema.extend({
+  subDimensionIds: z.array(z.string()).default([]),
+  description: z.string().default(""),
+  importance: z.enum(["H", "M", "L"]).default("M"),
+  type: z.enum(["measure", "perception"]).default("measure"),
+  portedFromId: z.string().optional(),
+  portedFlag: z.boolean().default(false),
+  periodHistory: z.array(outcomePeriodSnapshotSchema).default([]),
+  crossOutcome: z.boolean().default(false),
+});
+export type OutcomeMeasure = z.infer<typeof outcomeMeasureSchema>;
+
+export const scoringNodeWeightSchema = z.enum(["H", "M", "L"]);
+export type ScoringNodeWeight = z.infer<typeof scoringNodeWeightSchema>;
+
+export const scoringNodeSchema: z.ZodType<any> = z.lazy(() =>
+  z
+    .object({
+      id: z.string(),
+      label: z.string(),
+      weight: scoringNodeWeightSchema.default("M"),
+      score: z.number().int().min(1).max(5).nullable().default(null),
+      measures: z.array(measureSchema).default([]),
+      children: z.array(scoringNodeSchema).default([]),
+      confidence: z.enum(["H", "M", "L"]).default("M"),
+      rationale: z.string().optional(),
+      meta: z.record(z.string(), z.unknown()).optional(),
+    })
+    .passthrough(),
+);
+
+export type ScoringNode = z.infer<typeof scoringNodeSchema>;
+
+export function canNodeAcceptMeasures(node: Pick<ScoringNode, "children">): boolean {
+  return !Array.isArray(node.children) || node.children.length === 0;
+}
+
+export const scoreTreeSchema = z.object({
+  scoringMode: z.enum(["dimensions", "overall"]).default("dimensions"),
+  actors: z.array(z.string()).default([]),
+  filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
+  overallInstances: z.array(scoreInstanceSchema).default([]),
+  overallMeasures: z.array(measureSchema).default([]),
+  nodes: z.array(scoringNodeSchema).default([]),
+  finalScore: z.number().int().min(1).max(5).nullable().default(null),
+});
+
+export type ScoreTree = z.infer<typeof scoreTreeSchema>;
 
 export const targetedOutcomeSchema = z.object({
   id: z.string(),
@@ -214,12 +289,12 @@ export const targetedOutcomeSchema = z.object({
 export type TargetedOutcome = z.infer<typeof targetedOutcomeSchema>;
 
 export const outcomeScoreDataSchema = z.object({
-  scoringMode: z.enum(["targeted", "overall"]).default("targeted"),
   actors: z.array(z.string()).default([]),
   filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
-  targetedOutcomes: z.array(targetedOutcomeSchema).default([]),
-  overallInstances: z.array(scoreInstanceSchema).default([]),
-  overallMeasures: z.array(measureSchema).default([]),
+  subDimensionWeights: z.record(z.string(), z.enum(["H", "M", "L"])).default({}),
+  measures: z.array(outcomeMeasureSchema).default([]),
+  overallMeasures: z.array(outcomeMeasureSchema).default([]),
+  finalOutcomeScore: z.number().nullable().default(null),
   outcomeNotes: z
     .record(
       z.string(),
@@ -228,7 +303,6 @@ export const outcomeScoreDataSchema = z.object({
       }),
     )
     .default({}),
-  finalOutcomeScore: z.number().nullable().default(null),
 });
 
 export type OutcomeScoreData = z.infer<typeof outcomeScoreDataSchema>;
@@ -246,6 +320,7 @@ export const experienceScoreDataSchema = z.object({
   leapsScoringMode: z.enum(["across", "individual"]).default("across"),
   actors: z.array(z.string()).default([]),
   filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
+  canonicalTree: scoreTreeSchema.optional(),
   leaps: experienceDimensionSchema.default({ measures: [], excluded: false }),
   health: experienceDimensionSchema.default({ measures: [], excluded: false }),
   behavior: experienceDimensionSchema.default({ measures: [], excluded: false }),
@@ -366,12 +441,65 @@ export const ringDesignSubDimensionsSchema = z.object({
 
 export type RingDesignSubDimensions = z.infer<typeof ringDesignSubDimensionsSchema>;
 
+export const ringDesignMeasureNodeSchema = z.object({
+  measures: z.array(measureSchema).default([]),
+});
+export type RingDesignMeasureNode = z.infer<typeof ringDesignMeasureNodeSchema>;
+
+export const ringDesignCoherenceMeasureSchema = z.object({
+  qualityOfMaterials: ringDesignMeasureNodeSchema.default({ measures: [] }),
+  qualityOfMaterialsCompilation: ringDesignMeasureNodeSchema.default({ measures: [] }),
+  childWeights: z
+    .object({
+      qualityOfMaterialsWeight: z.enum(["H", "M", "L"]).default("M"),
+      qualityOfMaterialsCompilationWeight: z.enum(["H", "M", "L"]).default("M"),
+    })
+    .default({
+      qualityOfMaterialsWeight: "M",
+      qualityOfMaterialsCompilationWeight: "M",
+    }),
+});
+export type RingDesignCoherenceMeasure = z.infer<typeof ringDesignCoherenceMeasureSchema>;
+
+export const ringDesignMeasureDimensionsSchema = z.object({
+  aims: ringDesignMeasureNodeSchema.default({ measures: [] }),
+  completenessDesignedExperience: ringDesignMeasureNodeSchema.default({ measures: [] }),
+  qualityCompletenessSrr: ringDesignMeasureNodeSchema.default({ measures: [] }),
+  coherenceDesignedExperience: ringDesignCoherenceMeasureSchema.default({}),
+  alignmentDesignedExperience: ringDesignMeasureNodeSchema.default({ measures: [] }),
+});
+export type RingDesignMeasureDimensions = z.infer<typeof ringDesignMeasureDimensionsSchema>;
+
+export const ringDesignMeasureWeightsSchema = z.object({
+  aimsWeight: z.enum(["H", "M", "L"]).default("M"),
+  completenessDesignedExperienceWeight: z.enum(["H", "M", "L"]).default("M"),
+  qualityCompletenessSrrWeight: z.enum(["H", "M", "L"]).default("M"),
+  coherenceDesignedExperienceWeight: z.enum(["H", "M", "L"]).default("M"),
+  alignmentDesignedExperienceWeight: z.enum(["H", "M", "L"]).default("M"),
+});
+export type RingDesignMeasureWeights = z.infer<typeof ringDesignMeasureWeightsSchema>;
+
+export const ringDesignMeasureBasedSchema = z.object({
+  dimensions: ringDesignMeasureDimensionsSchema.default({}),
+  weights: ringDesignMeasureWeightsSchema.default({
+    aimsWeight: "M",
+    completenessDesignedExperienceWeight: "M",
+    qualityCompletenessSrrWeight: "M",
+    coherenceDesignedExperienceWeight: "M",
+    alignmentDesignedExperienceWeight: "M",
+  }),
+});
+export type RingDesignMeasureBased = z.infer<typeof ringDesignMeasureBasedSchema>;
+
 export const ringDesignScoreDataSchema = z.object({
   designScoringMode: z.enum(["overall", "multi"]).default("overall"),
   actors: z.array(z.string()).default([]),
   filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
+  canonicalTree: scoreTreeSchema.optional(),
+  measureBasedDesign: ringDesignMeasureBasedSchema.default({}),
   overallDesignScore: z.number().int().min(1).max(5).nullable().default(null),
   overallInstances: z.array(scoreInstanceSchema).default([]),
+  overallMeasures: z.array(measureSchema).default([]),
   overallDesignRationale: z.string().optional(),
   overallDesignConfidence: z.enum(["H", "M", "L"]).default("M"),
   designDimensions: ringDesignDimensionsSchema.default({
@@ -412,6 +540,56 @@ export type RingImplementationInstance = z.infer<typeof ringImplementationInstan
 export const ringImplementationFilterSchema = scoreFilterSchema;
 export type RingImplementationFilter = z.infer<typeof ringImplementationFilterSchema>;
 
+export const ringImplementationMeasureNodeSchema = z.object({
+  measures: z.array(measureSchema).default([]),
+});
+export type RingImplementationMeasureNode = z.infer<typeof ringImplementationMeasureNodeSchema>;
+
+export const ringImplementationSkillfulnessMeasureSchema = z.object({
+  classroomManagementDeliveryOutcomes: ringImplementationMeasureNodeSchema.default({ measures: [] }),
+  inspireMotivateEngagement: ringImplementationMeasureNodeSchema.default({ measures: [] }),
+  childWeights: z
+    .object({
+      classroomManagementDeliveryOutcomesWeight: z.enum(["H", "M", "L"]).default("M"),
+      inspireMotivateEngagementWeight: z.enum(["H", "M", "L"]).default("M"),
+    })
+    .default({
+      classroomManagementDeliveryOutcomesWeight: "M",
+      inspireMotivateEngagementWeight: "M",
+    }),
+});
+export type RingImplementationSkillfulnessMeasure = z.infer<typeof ringImplementationSkillfulnessMeasureSchema>;
+
+export const ringImplementationMeasureDimensionsSchema = z.object({
+  studentsEnrollment: ringImplementationMeasureNodeSchema.default({ measures: [] }),
+  feasibilitySustainability: ringImplementationMeasureNodeSchema.default({ measures: [] }),
+  fidelityDesignedExperience: ringImplementationMeasureNodeSchema.default({ measures: [] }),
+  skillfulnessInstructionFacilitation: ringImplementationSkillfulnessMeasureSchema.default({}),
+  measurementAdministrationQuality: ringImplementationMeasureNodeSchema.default({ measures: [] }),
+});
+export type RingImplementationMeasureDimensions = z.infer<typeof ringImplementationMeasureDimensionsSchema>;
+
+export const ringImplementationMeasureWeightsSchema = z.object({
+  studentsEnrollmentWeight: z.enum(["H", "M", "L"]).default("M"),
+  feasibilitySustainabilityWeight: z.enum(["H", "M", "L"]).default("M"),
+  fidelityDesignedExperienceWeight: z.enum(["H", "M", "L"]).default("M"),
+  skillfulnessInstructionFacilitationWeight: z.enum(["H", "M", "L"]).default("M"),
+  measurementAdministrationQualityWeight: z.enum(["H", "M", "L"]).default("M"),
+});
+export type RingImplementationMeasureWeights = z.infer<typeof ringImplementationMeasureWeightsSchema>;
+
+export const ringImplementationMeasureBasedSchema = z.object({
+  dimensions: ringImplementationMeasureDimensionsSchema.default({}),
+  weights: ringImplementationMeasureWeightsSchema.default({
+    studentsEnrollmentWeight: "M",
+    feasibilitySustainabilityWeight: "M",
+    fidelityDesignedExperienceWeight: "M",
+    skillfulnessInstructionFacilitationWeight: "M",
+    measurementAdministrationQualityWeight: "M",
+  }),
+});
+export type RingImplementationMeasureBased = z.infer<typeof ringImplementationMeasureBasedSchema>;
+
 export const ringImplementationDimensionSchema = z.object({
   scoringMode: z.enum(["overall", "items"]).default("overall"),
   itemsKind: z.enum(["subcomponent", "component"]).optional(),
@@ -441,7 +619,10 @@ export const ringImplementationScoreDataSchema = z.object({
   implementationScoringMode: z.enum(["overall", "multi"]).default("overall"),
   actors: z.array(z.string()).default([]),
   filter: ringImplementationFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
+  canonicalTree: scoreTreeSchema.optional(),
+  measureBasedImplementation: ringImplementationMeasureBasedSchema.default({}),
   overallInstances: z.array(ringImplementationInstanceSchema).default([]),
+  overallMeasures: z.array(measureSchema).default([]),
   overallImplementationScore: z.number().int().min(1).max(5).nullable().default(null),
   overallImplementationRationale: z.string().optional(),
   overallImplementationConfidence: z.enum(["H", "M", "L"]).default("M"),

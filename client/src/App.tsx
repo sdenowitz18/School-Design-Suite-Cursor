@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import DesignedExperiencePage from "@/pages/designed-experience";
 
+declare const __BUILD_TIME__: string;
+
 function Router() {
   return (
     <Switch>
@@ -21,6 +23,11 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <Router />
+        {import.meta.env.DEV && (
+          <div className="fixed bottom-2 right-2 z-50 bg-black/70 text-white text-[10px] font-mono px-2 py-1 rounded pointer-events-none select-none">
+            {new Date(__BUILD_TIME__).toLocaleTimeString()}
+          </div>
+        )}
       </TooltipProvider>
     </QueryClientProvider>
   );

@@ -7,6 +7,8 @@ export type PortraitAttribute = {
   name: string;
   description: string;
   icon: string; // lightweight (emoji or short text)
+  score1to5?: 1 | 2 | 3 | 4 | 5 | null;
+  builtPercent?: 0 | 25 | 50 | 75 | 100 | null;
 };
 
 export type PortraitAttributeLink = {

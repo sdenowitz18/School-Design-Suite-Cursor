@@ -18,6 +18,14 @@ export function normalizePortrait(raw: any): PortraitOfGraduate {
       name: String(a?.name || "").trim(),
       description: String(a?.description || "").trim(),
       icon: String(a?.icon || "★").trim() || "★",
+      score1to5:
+        a?.score1to5 === 1 || a?.score1to5 === 2 || a?.score1to5 === 3 || a?.score1to5 === 4 || a?.score1to5 === 5
+          ? a.score1to5
+          : null,
+      builtPercent:
+        a?.builtPercent === 0 || a?.builtPercent === 25 || a?.builtPercent === 50 || a?.builtPercent === 75 || a?.builtPercent === 100
+          ? a.builtPercent
+          : null,
     }))
     .filter((a) => a.name.length > 0);
 
@@ -45,6 +53,42 @@ export function normalizePortrait(raw: any): PortraitOfGraduate {
   return { attributes, linksByAttributeId };
 }
 
+export type WhereBuiltComponent = {
+  nodeId: string;
+  title: string;
+  outcomes: string[];
+};
+
+export function buildWhereBuiltForOutcomeKeys(
+  components: any[],
+  targetOutcomeKeys: Set<string>,
+): WhereBuiltComponent[] {
+  const out: WhereBuiltComponent[] = [];
+  for (const comp of Array.isArray(components) ? components : []) {
+    const nodeId = String(comp?.nodeId || comp?.node_id || "");
+    if (!nodeId) continue;
+    if (nodeId === "overall") continue; // Exclude Whole School from "where built"
+    const title = String(comp?.title || nodeId || "Component");
+    const found = new Map<string, string>();
+
+    const aims = comp?.designedExperienceData?.keyDesignElements?.aims || [];
+    for (const a of Array.isArray(aims) ? aims : []) {
+      if (a?.type !== "outcome") continue;
+      const label = String(a?.label || "").trim();
+      const k = normKey(label);
+      if (!k || !targetOutcomeKeys.has(k)) continue;
+      found.set(k, label);
+    }
+
+    // For now, "where built" only considers key aims outcomes.
+
+    const outcomes = Array.from(found.values()).sort((a, b) => a.localeCompare(b));
+    if (outcomes.length > 0) out.push({ nodeId, title, outcomes });
+  }
+  out.sort((a, b) => a.title.localeCompare(b.title));
+  return out;
+}
+
 export function listLinkedOutcomes(p: PortraitOfGraduate): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -62,9 +106,28 @@ export function listLinkedOutcomes(p: PortraitOfGraduate): string[] {
   return out;
 }
 
+function listLinkedOutcomesWithPriority(p: PortraitOfGraduate): { label: string; key: string }[] {
+  const byKey = new Map<string, { label: string }>();
+  for (const links of Object.values(p.linksByAttributeId || {})) {
+    for (const l of Array.isArray(links) ? links : []) {
+      const label = String((l as any)?.outcomeLabel || "").trim();
+      const key = normKey(label);
+      if (!key) continue;
+      const cur = byKey.get(key) || { label };
+      byKey.set(key, cur);
+    }
+  }
+  return Array.from(byKey.entries())
+    .map(([key, v]) => ({
+      key,
+      label: v.label,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 export function syncKeyAimsOutcomesFromPortrait(de: any, portrait: PortraitOfGraduate): any {
-  const linked = listLinkedOutcomes(portrait);
-  const linkedKeys = new Set(linked.map((l) => normKey(l)));
+  const linked = listLinkedOutcomesWithPriority(portrait);
+  const linkedKeys = new Set(linked.map((l) => l.key));
 
   const kde: any = de?.keyDesignElements || { aims: [], practices: [], supports: [] };
   const aims: any[] = Array.isArray(kde.aims) ? kde.aims : [];
@@ -91,22 +154,27 @@ export function syncKeyAimsOutcomesFromPortrait(de: any, portrait: PortraitOfGra
       continue;
     }
     if (k && linkedKeys.has(k) && !manualOutcomeKeys.has(k)) {
-      out.push(a);
+      out.push({
+        ...a,
+        // Portrait links no longer drive center-level priority.
+        level: a?.level ?? null,
+      });
     }
   }
 
-  // Add missing linked outcomes (as source:'pog'), but do NOT set level/priority.
+  // Add missing linked outcomes (as source:'pog') with no priority level.
   const existingKeys = new Set(out.filter((a) => a?.type === "outcome").map((a) => normKey(a?.label)).filter(Boolean));
-  for (const label of linked) {
-    const k = normKey(label);
+  for (const item of linked) {
+    const k = item.key;
     if (!k) continue;
     if (manualOutcomeKeys.has(k)) continue; // already manually present
     if (existingKeys.has(k)) continue;
     out.push({
       id: genId("aim"),
       type: "outcome",
-      label,
+      label: item.label,
       source: "pog",
+      level: null,
     });
     existingKeys.add(k);
   }

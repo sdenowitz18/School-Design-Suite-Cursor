@@ -170,7 +170,7 @@ export default function ExperienceScoreOverallInstancesView({
 
   const [scoringMode, setScoringMode] = useState<ScoringMode>("dimensions");
   const [activeDimTab, setActiveDimTab] = useState<"leaps" | "health" | "behavior">("leaps");
-  const [leapsScoringMode, setLeapsScoringMode] = useState<LeapsScoringMode>("across");
+  const [leapsScoringMode, setLeapsScoringMode] = useState<LeapsScoringMode>("individual");
   const [overallInstances, setOverallInstances] = useState<ScoreInstance[]>([]);
   const [leapsInstances, setLeapsInstances] = useState<ScoreInstance[]>([]);
   const [healthInstances, setHealthInstances] = useState<ScoreInstance[]>([]);
@@ -195,7 +195,7 @@ export default function ExperienceScoreOverallInstancesView({
       };
     setLocalFilter(initialFilter as any);
     setScoringMode((esd.scoringMode as any) === "overall" ? "overall" : "dimensions");
-    setLeapsScoringMode((esd.leapsScoringMode as any) === "individual" ? "individual" : "across");
+    setLeapsScoringMode("individual");
     setActors(Array.isArray(esd.actors) ? esd.actors : []);
     setOverallInstances(Array.isArray(esd?.overallInstances) ? esd.overallInstances : []);
     setLeapsInstances(Array.isArray(esd?.leaps?.instances) ? esd.leaps.instances : []);
@@ -302,9 +302,9 @@ export default function ExperienceScoreOverallInstancesView({
 
   const dimConfig = useMemo(() => {
     return [
-      { key: "leaps" as const, name: "Leaps & Design Principles", icon: Zap, score: leapsDimScore, weight: adjustedWeights.leaps, color: "text-amber-600" },
-      { key: "health" as const, name: "Mental & Physical Health", icon: Heart, score: healthDimScore, weight: adjustedWeights.health, color: "text-rose-500" },
-      { key: "behavior" as const, name: "Behavior, Attendance & Engagement", icon: Users, score: behaviorDimScore, weight: adjustedWeights.behavior, color: "text-blue-500" },
+      { key: "leaps" as const, name: "Core Experience Tenants", icon: Zap, score: leapsDimScore, weight: adjustedWeights.leaps, color: "text-amber-600" },
+      { key: "health" as const, name: "Emergent States: Mental & Physical Health Status", icon: Heart, score: healthDimScore, weight: adjustedWeights.health, color: "text-rose-500" },
+      { key: "behavior" as const, name: "Emergent States: Satisfaction, Engagement, Behavior, and Conduct", icon: Users, score: behaviorDimScore, weight: adjustedWeights.behavior, color: "text-blue-500" },
     ];
   }, [adjustedWeights.behavior, adjustedWeights.health, adjustedWeights.leaps, behaviorDimScore, healthDimScore, leapsDimScore]);
 
@@ -473,15 +473,13 @@ export default function ExperienceScoreOverallInstancesView({
             items={
               scoringMode === "dimensions"
                 ? [
-                    ...(leapsScoringMode === "individual"
-                      ? leapItems.map((li) => ({
-                          key: `leap:${String(li.id)}`,
-                          label: String(li.label || "Leap"),
-                          score: effectiveFromInstances(li.instances || [], filter).score,
-                        }))
-                      : [{ key: "leaps", label: "Leaps & Design Principles", score: leapsDimScore }]),
-                    { key: "health", label: "Mental & Physical Health", score: healthDimScore },
-                    { key: "behavior", label: "Behavior, Attendance & Engagement", score: behaviorDimScore },
+                    ...leapItems.map((li) => ({
+                      key: `tenant:${String(li.id)}`,
+                      label: String(li.label || "Core tenant"),
+                      score: effectiveFromInstances(li.instances || [], filter).score,
+                    })),
+                    { key: "health", label: "Emergent States: Mental & Physical Health Status", score: healthDimScore },
+                    { key: "behavior", label: "Emergent States: Satisfaction, Engagement, Behavior, and Conduct", score: behaviorDimScore },
                   ]
                 : []
             }
@@ -514,7 +512,7 @@ export default function ExperienceScoreOverallInstancesView({
           >
             <div>
               <div className="text-sm font-semibold text-gray-900">Dimensions</div>
-              <p className="text-xs text-gray-500 mt-0.5">Score Leaps, Health, and Behavior separately, then roll up</p>
+              <p className="text-xs text-gray-500 mt-0.5">Score core tenants and emergent states, then roll up</p>
             </div>
           </button>
           <button
@@ -563,9 +561,9 @@ export default function ExperienceScoreOverallInstancesView({
                 <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-gray-200 gap-6">
                   {(
                     [
-                      { key: "leaps" as const, label: "Leaps & Design Principles", score: leapsDimScore },
-                      { key: "health" as const, label: "Mental & Physical Health", score: healthDimScore },
-                      { key: "behavior" as const, label: "Behavior, Attendance & Engagement", score: behaviorDimScore },
+                      { key: "leaps" as const, label: "Core Experience Tenants", score: leapsDimScore },
+                      { key: "health" as const, label: "Emergent States: Mental & Physical Health Status", score: healthDimScore },
+                      { key: "behavior" as const, label: "Emergent States: Satisfaction, Engagement, Behavior, and Conduct", score: behaviorDimScore },
                     ] as const
                   ).map((t) => (
                     <TabsTrigger
@@ -588,7 +586,7 @@ export default function ExperienceScoreOverallInstancesView({
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Zap className={cn("w-4 h-4", "text-amber-600")} />
-                <h3 className="text-sm font-bold text-gray-900">Leaps &amp; Design Principles</h3>
+                <h3 className="text-sm font-bold text-gray-900">Core Experience Tenants</h3>
                 <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600 gap-0.5 cursor-default">
                   <Lock className="w-2.5 h-2.5" />
                   {Math.round(adjustedWeights.leaps * 100)}%
@@ -598,60 +596,10 @@ export default function ExperienceScoreOverallInstancesView({
             </div>
 
             <div className="p-4 space-y-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2" data-testid="leaps-mode-toggle">
-                <div className="text-xs text-gray-700 font-semibold">Leaps scoring</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex items-start gap-3 p-3 rounded-lg border-2 transition-all text-left",
-                      leapsScoringMode === "across" ? "border-blue-500 bg-blue-50/50" : "border-gray-200 hover:border-gray-300 bg-white",
-                    )}
-                    onClick={() => setLeapsScoringMode("across")}
-                    data-testid="leaps-mode-across"
-                  >
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">Across leaps</div>
-                      <p className="text-xs text-gray-500 mt-0.5">One shared set of instances</p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex items-start gap-3 p-3 rounded-lg border-2 transition-all text-left",
-                      leapsScoringMode === "individual" ? "border-blue-500 bg-blue-50/50" : "border-gray-200 hover:border-gray-300 bg-white",
-                    )}
-                    onClick={() => setLeapsScoringMode("individual")}
-                    data-testid="leaps-mode-individual"
-                  >
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">Individual leaps</div>
-                      <p className="text-xs text-gray-500 mt-0.5">Score each leap, then roll up</p>
-                    </div>
-                  </button>
-                </div>
-                <div className="text-[11px] text-gray-500 mt-2">Switching modes does not delete saved values.</div>
-              </div>
-
-              {leapsScoringMode === "across" ? (
-                <div className="space-y-3" data-testid="leaps-across">
-                  <ScoreInstancesInlineEditor
-                    label="Instances"
-                    instances={leapsInstances}
-                    onChange={setLeapsInstances}
-                    actors={actorOptions}
-                    onAddActor={(label) => {
-                      addGlobalActor(label);
-                      setActors((prev) => [...prev, label]);
-                    }}
-                    testIdPrefix="leaps-across"
-                  />
-                </div>
-              ) : (
-                <div className="space-y-3" data-testid="leaps-individual">
+              <div className="space-y-3" data-testid="leaps-individual">
                   {leapItems.length === 0 ? (
                     <div className="text-center py-4 text-xs text-gray-400" data-testid="empty-leap-items">
-                      No leaps are tagged in Designed Experience yet. Add leaps there to score them here.
+                      No core tenants are tagged in Designed Experience yet.
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -707,8 +655,7 @@ export default function ExperienceScoreOverallInstancesView({
                       })}
                     </div>
                   )}
-                </div>
-              )}
+              </div>
             </div>
           </div>
           ) : null}
@@ -718,7 +665,7 @@ export default function ExperienceScoreOverallInstancesView({
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Heart className={cn("w-4 h-4", "text-rose-500")} />
-                <h3 className="text-sm font-bold text-gray-900">Mental &amp; Physical Health</h3>
+                <h3 className="text-sm font-bold text-gray-900">Emergent States: Mental &amp; Physical Health Status</h3>
                 <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600 gap-0.5 cursor-default">
                   <Lock className="w-2.5 h-2.5" />
                   {Math.round(adjustedWeights.health * 100)}%
@@ -746,7 +693,7 @@ export default function ExperienceScoreOverallInstancesView({
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users className={cn("w-4 h-4", "text-blue-500")} />
-                <h3 className="text-sm font-bold text-gray-900">Behavior, Attendance &amp; Engagement</h3>
+                <h3 className="text-sm font-bold text-gray-900">Emergent States: Satisfaction, Engagement, Behavior, and Conduct</h3>
                 <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600 gap-0.5 cursor-default">
                   <Lock className="w-2.5 h-2.5" />
                   {Math.round(adjustedWeights.behavior * 100)}%

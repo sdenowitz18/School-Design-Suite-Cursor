@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Plus, Check, Search, ArrowRight, BookOpen, Star } from "lucide-react";
+import { ChevronLeft, Plus, Check, Search, ArrowRight, BookOpen } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { OUTCOME_SCHEMA } from "./designed-experience-schemas";
 import OutcomeDetailView from "./outcome-detail-view";
 import OutcomesLearnMoreView from "./outcomes-learn-more-view";
 import { buildOutcomeUsageIndexFromComponents, buildSubcomponentOutcomeIndex, normOutcomeKey } from "./outcomes-utils";
+import { buildCenterScenarios, buildRingScenarios, priorityToLevel } from "./targeting-rollup-utils";
 
 function norm(s: string) {
   return (s || "").trim().toLowerCase();
@@ -25,10 +26,11 @@ function levelToPriority(level: unknown): "H" | "M" | "L" {
   return "M";
 }
 
-function priorityToLevel(p: "H" | "M" | "L"): "High" | "Medium" | "Low" {
-  if (p === "H") return "High";
-  if (p === "L") return "Low";
-  return "Medium";
+function levelToPriorityOrNull(level: unknown): "H" | "M" | "L" | null {
+  if (level === "High") return "H";
+  if (level === "Medium") return "M";
+  if (level === "Low") return "L";
+  return null;
 }
 
 function scoreColor(score: number | null) {
@@ -80,10 +82,15 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
 
   const [activeAreaKey, setActiveAreaKey] = useState<string | null>(null);
 
-  const deOutcomes = useMemo(() => {
+  const deAims = useMemo(() => {
     const aims: any[] = (comp as any)?.designedExperienceData?.keyDesignElements?.aims || [];
-    return (Array.isArray(aims) ? aims : []).filter((a: any) => a?.type === "outcome" && typeof a?.label === "string");
+    return Array.isArray(aims) ? aims : [];
   }, [comp]);
+
+  const deOutcomes = useMemo(() => {
+    return deAims.filter((a: any) => a?.type === "outcome" && typeof a?.label === "string");
+  }, [deAims]);
+
 
   const osd = useMemo(() => ((comp as any)?.healthData?.outcomeScoreData || {}) as any, [comp]);
   const targeted: any[] = osd?.targetedOutcomes || [];
@@ -98,15 +105,6 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
   const [initialized, setInitialized] = useState(false);
   const componentName = title || comp?.title || "this component";
 
-  const keyAimKeySet = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of deOutcomes) {
-      const k = normOutcomeKey(a?.label);
-      if (k) set.add(k);
-    }
-    return set;
-  }, [deOutcomes]);
-
   const keyAimTagByKey = useMemo(() => {
     const m = new Map<string, any>();
     for (const a of deOutcomes) {
@@ -117,6 +115,32 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
     }
     return m;
   }, [deOutcomes]);
+
+  const ringComponents = useMemo(() => {
+    const list = Array.isArray(allComponents) ? allComponents : [];
+    return list.filter((c: any) => String(c?.nodeId || c?.node_id || "") !== "overall");
+  }, [allComponents]);
+
+  const targetingScenarios = useMemo(() => {
+    if (isOverall) {
+      return buildCenterScenarios({
+        centerTopAims: deOutcomes.map((a: any) => ({ ...a, type: "outcome" })),
+        ringComponents,
+        type: "outcome",
+      });
+    }
+    const subs: any[] = (comp as any)?.designedExperienceData?.subcomponents || [];
+    return buildRingScenarios({
+      topAims: deOutcomes.map((a: any) => ({ ...a, type: "outcome" })),
+      subcomponents: subs,
+      type: "outcome",
+    });
+  }, [comp, deOutcomes, isOverall, ringComponents]);
+
+  const intendedOutcomes = useMemo(() => targetingScenarios.filter((s) => s.intended), [targetingScenarios]);
+  const realizedOnlyOutcomes = useMemo(() => targetingScenarios.filter((s) => !s.intended && s.realized), [targetingScenarios]);
+  const scenarioByKey = useMemo(() => new Map(targetingScenarios.map((s) => [normOutcomeKey(s.label), s])), [targetingScenarios]);
+
 
   const scoringKeySet = useMemo(() => {
     const set = new Set<string>();
@@ -129,21 +153,11 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
   }, [targeted]);
 
   const sectionA = useMemo(() => {
-    const order: { key: string; label: string }[] = [];
-    const seen = new Set<string>();
-    const add = (label: unknown) => {
-      const clean = String(label ?? "").trim();
-      const k = normOutcomeKey(clean);
-      if (!k) return;
-      if (seen.has(k)) return;
-      seen.add(k);
-      order.push({ key: k, label: clean });
-    };
-    for (const a of deOutcomes) add(a?.label);
-    for (const o of Array.isArray(targeted) ? targeted : []) add(o?.outcomeName);
-    order.sort((a, b) => a.label.localeCompare(b.label));
-    return order;
-  }, [deOutcomes, targeted]);
+    return intendedOutcomes
+      .map((s) => ({ key: normOutcomeKey(s.label), label: s.label }))
+      .filter((x) => !!x.key)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [intendedOutcomes]);
 
   const filteredSectionA = useMemo(() => {
     if (!activeAreaKey) return sectionA;
@@ -152,17 +166,17 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
 
   const subcomponentOnly = useMemo(() => {
     if (isOverall) return [];
-    const subs: any[] = (comp as any)?.designedExperienceData?.subcomponents || [];
-    const idx = buildSubcomponentOutcomeIndex(subs);
-    const out: Array<{ key: string; label: string; subs: { id: string; name: string; priority: "H" | "M" | "L" }[] }> = [];
-    for (const [k, v] of Array.from(idx.entries())) {
-      if (keyAimKeySet.has(k)) continue;
-      if (scoringKeySet.has(k)) continue;
-      out.push({ key: k, label: v.label, subs: v.subcomponents });
-    }
-    out.sort((a, b) => a.label.localeCompare(b.label));
-    return out;
-  }, [comp, isOverall, keyAimKeySet, scoringKeySet]);
+    return realizedOnlyOutcomes
+      .map((s) => ({
+        key: normOutcomeKey(s.label),
+        label: s.label,
+        priority: s.resolvedLevel || s.computedLevel || null,
+        subs: (s.sourcePriorities || []).length > 0
+          ? (s.sourcePriorities || []).map((sp, idx) => ({ id: `${s.key}:${idx}`, name: sp.name, priority: sp.priority }))
+          : (s.realizedBy || []).map((name, idx) => ({ id: `${s.key}:${idx}`, name, priority: s.resolvedLevel || s.computedLevel || "M" })),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [isOverall, realizedOnlyOutcomes]);
 
   const subcomponentsIndexAll = useMemo(() => {
     if (isOverall) return null;
@@ -184,18 +198,17 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
 
   const componentOnly = useMemo(() => {
     if (!isOverall) return [];
-    const list = Array.isArray(allComponents) ? allComponents : [];
-    const other = list.filter((c: any) => String(c?.nodeId || "") !== "overall");
-    const idx = buildOutcomeUsageIndexFromComponents(other);
-    const out: Array<{ key: string; label: string; comps: { nodeId: string; title: string }[] }> = [];
-    for (const [k, v] of Array.from(idx.entries())) {
-      if (keyAimKeySet.has(k)) continue;
-      if (scoringKeySet.has(k)) continue;
-      out.push({ key: k, label: v.label, comps: v.components });
-    }
-    out.sort((a, b) => a.label.localeCompare(b.label));
-    return out;
-  }, [allComponents, isOverall, keyAimKeySet, scoringKeySet]);
+    return realizedOnlyOutcomes
+      .map((s) => ({
+        key: normOutcomeKey(s.label),
+        label: s.label,
+        priority: s.resolvedLevel || s.computedLevel || null,
+        comps: (s.sourcePriorities || []).length > 0
+          ? (s.sourcePriorities || []).map((sp, idx) => ({ nodeId: `${s.key}:${idx}`, title: sp.name, priority: sp.priority }))
+          : (s.realizedBy || []).map((title, idx) => ({ nodeId: `${s.key}:${idx}`, title, priority: s.resolvedLevel || s.computedLevel || "M" })),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [isOverall, realizedOnlyOutcomes]);
 
   const filteredComponentOnly = useMemo(() => {
     if (!activeAreaKey) return componentOnly;
@@ -273,13 +286,28 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
     );
   }
 
-  const updateOutcomePriority = (label: string, p: "H" | "M" | "L") => {
+  const updateOutcomePriority = (label: string, p: "H" | "M" | "L" | "AUTO") => {
     if (!nodeId || !comp) return;
     const de: any = (comp as any).designedExperienceData || {};
     const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
     const aims: any[] = kde.aims || [];
+    const currentAim = aims.find((a: any) => a?.type === "outcome" && norm(a?.label) === norm(label));
+    const currentMode = String((currentAim as any)?.levelMode || "auto");
+    const currentOverride = (currentAim as any)?.overrideLevel;
+
+    if (p !== "AUTO" && (currentMode !== "override" || currentOverride !== p)) {
+      const confirmed = window.confirm(
+        "This will override the auto-calculated level for this outcome. Continue?",
+      );
+      if (!confirmed) return;
+    }
+
     const updated = aims.map((a: any) =>
-      a?.type === "outcome" && norm(a?.label) === norm(label) ? { ...a, level: priorityToLevel(p) } : a,
+      a?.type === "outcome" && norm(a?.label) === norm(label)
+        ? p === "AUTO"
+          ? { ...a, levelMode: "auto", overrideLevel: null, level: null }
+          : { ...a, levelMode: "override", overrideLevel: p, level: priorityToLevel(p) }
+        : a,
     );
     updateMutation.mutate({
       nodeId,
@@ -316,7 +344,14 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
     const aims: any[] = kde.aims || [];
     const exists = aims.some((a: any) => a?.type === "outcome" && norm(a?.label) === norm(label));
     if (exists) return;
-    const newAim = { id: `aim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, type: "outcome", label: label.trim(), level: "Medium" };
+    const newAim = {
+      id: `aim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "outcome",
+      label: label.trim(),
+      level: null,
+      levelMode: "auto",
+      overrideLevel: null,
+    };
     updateMutation.mutate({
       nodeId,
       data: {
@@ -327,6 +362,7 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
       },
     });
   };
+
 
   // Note: adding outcomes to the Outcome Score happens on the Outcome Score page.
 
@@ -462,7 +498,7 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-gray-900">{isOverall ? "Whole School Targeted Outcomes" : "Outcomes for this component"}</h3>
+          <h3 className="text-sm font-bold text-gray-900">{isOverall ? "Whole School Intended Target Outcomes" : "Intended Target Outcomes"}</h3>
           <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
             {filteredSectionA.length}
           </Badge>
@@ -476,14 +512,15 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
               const key = o.key;
               const aimTag = keyAimTagByKey.get(key) || null;
               const inKeyAims = !!aimTag;
-              const p = inKeyAims ? levelToPriority(aimTag?.level) : null;
+              const scenario = scenarioByKey.get(key) || null;
+              const p = scenario?.resolvedLevel ?? (inKeyAims ? levelToPriorityOrNull(aimTag?.level) : null);
+              const levelMode = scenario?.levelMode || "auto";
               const row = getOutcomeRow(label) || (Array.isArray(targeted) ? targeted.find((x: any) => normOutcomeKey(x?.outcomeName) === key) : null);
               const score = row?.calculatedScore ?? null;
               const measures: any[] = row?.measures || [];
               const rated = measures.filter((m) => m?.rating !== null && !m?.skipped).length;
               const applies = appliesByKey[key] || "";
               const inScoring = scoringKeySet.has(key);
-              const isPrimary = !!aimTag?.isPrimary;
               const originSubs = subcomponentsIndexAll?.get(key)?.subcomponents || [];
               const originComps = componentsIndexAll?.get(key)?.components || [];
               return (
@@ -519,11 +556,6 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
                                 From: {String(s.name)} ({String(s.priority)})
                               </Badge>
                             ))}
-                            {isPrimary ? (
-                              <Badge variant="secondary" className="text-[9px] h-5 bg-yellow-50 text-yellow-700 border border-yellow-200 gap-1">
-                                <Star className="w-3 h-3 fill-current" /> Primary
-                              </Badge>
-                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -532,19 +564,19 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
                     <div className="flex items-center gap-2 shrink-0">
                       {inKeyAims ? (
                         <div className="inline-flex rounded-md border border-gray-200 overflow-hidden bg-white">
-                          {(["H", "M", "L"] as const).map((k) => (
+                          {(["AUTO", "H", "M", "L"] as const).map((k) => (
                             <button
                               key={k}
                               type="button"
-                              onClick={() => updateOutcomePriority(label, k)}
+                              onClick={() => updateOutcomePriority(label, k as any)}
                               className={cn(
                                 "px-2 py-0.5 text-[10px] font-bold transition-colors",
-                                k !== "H" && "border-l border-gray-200",
-                                p === k ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:text-gray-800",
+                                k !== "AUTO" && "border-l border-gray-200",
+                                (k === "AUTO" ? levelMode === "auto" : p === k) ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:text-gray-800",
                               )}
-                              aria-pressed={p === k}
+                              aria-pressed={k === "AUTO" ? levelMode === "auto" : p === k}
                             >
-                              {k}
+                              {k === "AUTO" ? "Auto" : k}
                             </button>
                           ))}
                         </div>
@@ -576,10 +608,10 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
         </div>
       </div>
 
-      {!isOverall && subcomponentOnly.length > 0 ? (
+      {!isOverall ? (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="outcomes-from-subcomponents">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-gray-900">Outcomes from subcomponents</h3>
+            <h3 className="text-sm font-bold text-gray-900">Realized target outcomes from subcomponents</h3>
             <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
               {filteredSubcomponentOnly.length}
             </Badge>
@@ -591,7 +623,14 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
               filteredSubcomponentOnly.map((o) => (
               <div key={o.key} className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-gray-900 truncate">{o.label}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-gray-900 truncate">{o.label}</div>
+                    {o.priority ? (
+                      <Badge variant="secondary" className="text-[9px] h-5 bg-blue-50 text-blue-700 border border-blue-200">
+                        Priority: {o.priority}
+                      </Badge>
+                    ) : null}
+                  </div>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {o.subs.map((s) => (
                       <Badge key={s.id} variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
@@ -601,6 +640,9 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => addOutcome(o.label)}>
+                    Upgrade to targeted
+                  </Button>
                   <Button variant="ghost" size="sm" className="h-7 text-xs text-gray-500 hover:text-gray-900" onClick={() => setSelectedOutcome(o.label)}>
                     Details <ArrowRight className="w-3 h-3 ml-1" />
                   </Button>
@@ -615,7 +657,7 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
       {isOverall && componentOnly.length > 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" data-testid="outcomes-from-components">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-gray-900">Outcomes from components</h3>
+            <h3 className="text-sm font-bold text-gray-900">Realized target outcomes from ring components</h3>
             <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
               {filteredComponentOnly.length}
             </Badge>
@@ -627,16 +669,26 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
               filteredComponentOnly.map((o) => (
               <div key={o.key} className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-gray-900 truncate">{o.label}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-gray-900 truncate">{o.label}</div>
+                    {o.priority ? (
+                      <Badge variant="secondary" className="text-[9px] h-5 bg-blue-50 text-blue-700 border border-blue-200">
+                        Priority: {o.priority}
+                      </Badge>
+                    ) : null}
+                  </div>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {o.comps.map((c) => (
                       <Badge key={c.nodeId} variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-700">
-                        From: {c.title}
+                        From: {c.title} ({c.priority || "M"})
                       </Badge>
                     ))}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => addOutcome(o.label)}>
+                    Upgrade to targeted
+                  </Button>
                   <Button variant="ghost" size="sm" className="h-7 text-xs text-gray-500 hover:text-gray-900" onClick={() => setSelectedOutcome(o.label)}>
                     Details <ArrowRight className="w-3 h-3 ml-1" />
                   </Button>
@@ -647,6 +699,7 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
           </div>
         </div>
       ) : null}
+
     </div>
   );
 }

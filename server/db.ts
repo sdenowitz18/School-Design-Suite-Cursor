@@ -50,6 +50,10 @@ export function getPool(): Pool {
       connectionString: info.connectionString,
       ssl: info.wantsSsl ? { rejectUnauthorized: false } : undefined,
     });
+    // Prevent transient socket errors on idle clients from crashing the dev server.
+    globalForPg.__pgPool.on("error", (err) => {
+      console.error("[db] pool error", err);
+    });
     globalForPg.__pgPoolConnKey = connKey;
   }
   return globalForPg.__pgPool;

@@ -130,7 +130,7 @@ const OUTCOME_SCHEMA = {
   }
 };
 
-const PrimaryOutcomePill = ({ label, onRemove }: { label: string; onRemove: () => void }) => (
+const OutcomePill = ({ label, onRemove }: { label: string; onRemove: () => void }) => (
   <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-medium" data-testid={`pill-outcome-${label}`}>
     <Target className="w-3 h-3" />
     {label}
@@ -563,9 +563,9 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
               <Separator orientation="vertical" className="h-4 hidden md:block" />
               
               <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mr-1">Primary Outcomes:</span>
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mr-1">Outcomes:</span>
                 {primaryOutcomes.map(outcome => (
-                  <PrimaryOutcomePill 
+                  <OutcomePill 
                     key={outcome} 
                     label={outcome} 
                     onRemove={() => removePrimaryOutcome(outcome)} 
@@ -581,7 +581,7 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
                   <SheetContent className="overflow-y-auto">
                     <SheetHeader>
                       <SheetTitle>Select Outcomes</SheetTitle>
-                      <SheetDescription>Choose primary outcomes for this component.</SheetDescription>
+                      <SheetDescription>Choose outcomes for this component.</SheetDescription>
                     </SheetHeader>
                     <div className="mt-4 space-y-6">
                       <Input placeholder="Search outcomes..." className="mb-4" data-testid="input-search-outcomes" />

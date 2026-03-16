@@ -1,4 +1,4 @@
-import type { RingDesignScoreData } from "./schema";
+import type { Measure, RingDesignMeasureBased, RingDesignScoreData, ScoreFilter } from "./schema";
 import { effectiveFromInstances } from "./score-instances";
 
 const DEFAULT_WEIGHT_MEANING: Record<"H" | "M" | "L", number> = { H: 4, M: 2, L: 1 };
@@ -41,6 +41,128 @@ function weightedAverage(scored: { score: number; weight: unknown }[]): number |
 function maybeRoundedScore(value: number | null): number | null {
   if (value === null) return null;
   return clampInt1to5(value);
+}
+
+function periodRankFromFilter(filter: ScoreFilter | any): number | null {
+  const mode = String(filter?.mode || "none");
+  if (mode === "year") {
+    const y = Number(String(filter?.yearKey || ""));
+    return Number.isFinite(y) ? y * 10 : null;
+  }
+  if (mode === "semester") {
+    const key = String(filter?.semesterKey || "");
+    const [yRaw, semRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const sem = semRaw === "Fall" ? 1 : semRaw === "Spring" ? 2 : null;
+    return sem ? y * 10 + sem : null;
+  }
+  if (mode === "quarter") {
+    const key = String(filter?.quarterKey || "");
+    const [yRaw, qRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const q = qRaw === "Q1" ? 1 : qRaw === "Q2" ? 2 : qRaw === "Q3" ? 3 : qRaw === "Q4" ? 4 : null;
+    return q ? y * 10 + q : null;
+  }
+  return null;
+}
+
+function periodRankFromMeasure(measure: Measure): number | null {
+  const mp: any = (measure as any)?.markingPeriod;
+  if (!mp) return null;
+  const mode = String(mp?.mode || "");
+  if (mode === "year") {
+    const y = Number(String(mp?.yearKey || ""));
+    return Number.isFinite(y) ? y * 10 : null;
+  }
+  if (mode === "semester") {
+    const key = String(mp?.semesterKey || "");
+    const [yRaw, semRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const sem = semRaw === "Fall" ? 1 : semRaw === "Spring" ? 2 : null;
+    return sem ? y * 10 + sem : null;
+  }
+  if (mode === "quarter") {
+    const key = String(mp?.quarterKey || "");
+    const [yRaw, qRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const q = qRaw === "Q1" ? 1 : qRaw === "Q2" ? 2 : qRaw === "Q3" ? 3 : qRaw === "Q4" ? 4 : null;
+    return q ? y * 10 + q : null;
+  }
+  return null;
+}
+
+function measuresForSelectedPeriod(measures: Measure[], filter: ScoreFilter | any): Measure[] {
+  const mode = String(filter?.mode || "none");
+  if (mode === "none") return measures;
+  const selected = periodRankFromFilter(filter);
+  if (selected === null) return measures;
+  const withRanks = measures
+    .map((m) => ({ measure: m, rank: periodRankFromMeasure(m) }))
+    .filter((x) => x.rank !== null && (x.rank as number) <= selected);
+  if (withRanks.length === 0) return [];
+  const target = Math.max(...withRanks.map((x) => x.rank as number));
+  return withRanks.filter((x) => x.rank === target).map((x) => x.measure);
+}
+
+function scoreFromMeasures(measures: Measure[], filter: ScoreFilter | any): number | null {
+  const selectedMeasures = measuresForSelectedPeriod(measures, filter);
+  if (selectedMeasures.length === 0) return null;
+  const scored: { score: number; weight: unknown }[] = [];
+  for (const m of selectedMeasures) {
+    const score = effectiveFromInstances((m as any)?.instances || [], filter).score;
+    if (score === null) continue;
+    scored.push({ score, weight: (m as any)?.priority || "M" });
+  }
+  const avg = weightedAverage(scored);
+  return maybeRoundedScore(avg);
+}
+
+export type RingDesignMeasureDimensionScores = {
+  aimsScore: number | null;
+  completenessDesignedExperienceScore: number | null;
+  qualityCompletenessSrrScore: number | null;
+  coherenceDesignedExperienceScore: number | null;
+  alignmentDesignedExperienceScore: number | null;
+  coherenceChildren: {
+    qualityOfMaterialsScore: number | null;
+    qualityOfMaterialsCompilationScore: number | null;
+  };
+};
+
+export function calculateRingDesignMeasureDimensionScores(rsd: RingDesignScoreData): RingDesignMeasureDimensionScores {
+  const filter: any = (rsd as any).filter || { mode: "none", aggregation: "singleLatest" };
+  const mb = (rsd as any).measureBasedDesign as RingDesignMeasureBased | undefined;
+  const dims: any = mb?.dimensions || {};
+  const aimsScore = scoreFromMeasures((dims?.aims?.measures || []) as Measure[], filter);
+  const completenessDesignedExperienceScore = scoreFromMeasures((dims?.completenessDesignedExperience?.measures || []) as Measure[], filter);
+  const qualityCompletenessSrrScore = scoreFromMeasures((dims?.qualityCompletenessSrr?.measures || []) as Measure[], filter);
+  const alignmentDesignedExperienceScore = scoreFromMeasures((dims?.alignmentDesignedExperience?.measures || []) as Measure[], filter);
+
+  const coherenceQualityScore = scoreFromMeasures((dims?.coherenceDesignedExperience?.qualityOfMaterials?.measures || []) as Measure[], filter);
+  const coherenceCompilationScore = scoreFromMeasures((dims?.coherenceDesignedExperience?.qualityOfMaterialsCompilation?.measures || []) as Measure[], filter);
+  const childWeights = dims?.coherenceDesignedExperience?.childWeights || {};
+  const coherenceAvg = weightedAverage(
+    [
+      { score: coherenceQualityScore ?? NaN, weight: childWeights?.qualityOfMaterialsWeight ?? "M" },
+      { score: coherenceCompilationScore ?? NaN, weight: childWeights?.qualityOfMaterialsCompilationWeight ?? "M" },
+    ].filter((x) => Number.isFinite(x.score)) as { score: number; weight: unknown }[],
+  );
+
+  return {
+    aimsScore,
+    completenessDesignedExperienceScore,
+    qualityCompletenessSrrScore,
+    coherenceDesignedExperienceScore: maybeRoundedScore(coherenceAvg),
+    alignmentDesignedExperienceScore,
+    coherenceChildren: {
+      qualityOfMaterialsScore: coherenceQualityScore,
+      qualityOfMaterialsCompilationScore: coherenceCompilationScore,
+    },
+  };
 }
 
 function hasAnyInstances(rsd: RingDesignScoreData): boolean {
@@ -186,10 +308,30 @@ export function calculateRingDesignScore(
 
   if (rsd.designScoringMode === "overall") {
     const filter: any = (rsd as any).filter || { mode: "none", aggregation: "singleLatest" };
+    const overallMeasures: Measure[] = Array.isArray((rsd as any).overallMeasures) ? (((rsd as any).overallMeasures as unknown[]) as Measure[]) : [];
+    if (overallMeasures.length > 0) {
+      return scoreFromMeasures(overallMeasures, filter);
+    }
     const overallInstances: any[] = Array.isArray((rsd as any).overallInstances) ? ((rsd as any).overallInstances as any[]) : [];
     const instanceMode = hasAnyInstances(rsd);
     if (overallInstances.length > 0) return effectiveFromInstances(overallInstances as any, filter).score;
     return instanceMode ? null : safeScore(rsd.overallDesignScore);
+  }
+
+  const mb = (rsd as any).measureBasedDesign as RingDesignMeasureBased | undefined;
+  if (mb) {
+    const scores = calculateRingDesignMeasureDimensionScores(rsd);
+    const w = mb.weights || ({} as any);
+    const rows = [
+      { score: scores.aimsScore, weight: (w as any).aimsWeight ?? "M" },
+      { score: scores.completenessDesignedExperienceScore, weight: (w as any).completenessDesignedExperienceWeight ?? "M" },
+      { score: scores.qualityCompletenessSrrScore, weight: (w as any).qualityCompletenessSrrWeight ?? "M" },
+      { score: scores.coherenceDesignedExperienceScore, weight: (w as any).coherenceDesignedExperienceWeight ?? "M" },
+      { score: scores.alignmentDesignedExperienceScore, weight: (w as any).alignmentDesignedExperienceWeight ?? "M" },
+    ].filter((r): r is { score: number; weight: unknown } => r.score !== null);
+    if (rows.length === 0) return null;
+    const avg = weightedAverage(rows);
+    return avg === null ? null : clampInt1to5(avg);
   }
 
   const dimScores = calculateRingDesignDimensionScores(rsd);

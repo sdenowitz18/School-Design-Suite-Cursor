@@ -18,12 +18,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -31,34 +25,34 @@ import { useQuery } from "@tanstack/react-query";
 import { componentQueries } from "@/lib/api";
 import OutcomeScoreView from "./outcome-score-view";
 import ExperienceScoreView from "./experience-score-view";
-import { calculateRingDesignDimensionScores, calculateRingDesignScore } from "@shared/ring-design-score";
+import { calculateRingDesignMeasureDimensionScores, calculateRingDesignScore } from "@shared/ring-design-score";
 import type { RingDesignScoreData } from "@shared/schema";
 import RingDesignScoreView from "./ring-design-score-view";
 import RingImplementationScoreView from "./ring-implementation-score-view";
-import { calculateRingImplementationScore } from "@shared/ring-implementation-score";
+import { calculateRingImplementationMeasureDimensionScores, calculateRingImplementationScore } from "@shared/ring-implementation-score";
 import RingConditionsScoreView from "./ring-conditions-score-view";
 import { calculateRingConditionsScore, calculateRingConditionsScoreFromData, calculateRingConditionsSum } from "@shared/ring-conditions-score";
 import { effectiveFromInstances, UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
+import { calcOverallOutcomeScore, calcL1Score } from "@shared/outcome-score-calc";
+import { OUTCOME_SUBDIMENSION_TREE } from "@shared/outcome-subdimension-tree";
 import { getSchoolYearKey, getSemesterKey, listSelectableSemesterKeys, listSelectableYearKeys, parseIsoDate } from "@shared/marking-period";
 import type { ScoreFilter, ScoreInstance } from "@shared/schema";
 import ScoreFilterBar from "./score-filter-bar";
 import ScoreFlags, { SignalFlags } from "./score-flags";
-
 const RING_NODE_IDS = ["algebra", "math", "college_exposure"] as const;
+
+function scorePillClass(score: number | null): string {
+  if (score === null) return "bg-gray-100 text-gray-500 border-gray-200";
+  if (score >= 4) return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (score >= 3) return "bg-yellow-50 text-yellow-700 border-yellow-200";
+  return "bg-red-50 text-red-700 border-red-200";
+}
 
 interface ComponentHealthViewProps {
   nodeId?: string;
   title?: string;
 }
 
-// Mock Data
-const JOURNEY_SNAPSHOTS = [
-  "Baseline",
-  "Sept '25 (Baseline)",
-  "Jan '26 (Mid-Year)",
-  "June '26 (End-Year)",
-  "Sept '26 (Target)"
-];
 
 const DRIVER_DATA = {
   design: {
@@ -119,7 +113,6 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
   const canUseRingImplementation = !!comp && (isRingNode || isOverall);
   const canOpenDriverScoring = !!comp;
 
-  const [asOfDate, setAsOfDate] = useState("Sept '25 (Baseline)");
   const [status, setStatus] = useState("Test & Refine");
   const [showOutcomeScore, setShowOutcomeScore] = useState(false);
   const [showExperienceScore, setShowExperienceScore] = useState(false);
@@ -178,110 +171,16 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     return (hd.ringDesignScoreData || null) as RingDesignScoreData | null;
   }, [comp]);
 
-  const targetedOutcomes: any[] = useMemo(() => {
-    const fromHealth: any[] = outcomeScoreData?.targetedOutcomes || [];
-    const de: any = comp?.designedExperienceData || {};
-    const kde = de.keyDesignElements || {};
-    const aims: any[] = kde.aims || [];
-    const deOutcomeAims = aims
-      .filter((a: any) => a?.type === "outcome" && typeof a?.label === "string")
-      .map((a: any) => ({ id: String(a.id || a.label), label: String(a.label) }));
-
-    const norm = (s: string) => s.trim().toLowerCase();
-    const byName = new Map<string, any>();
-    for (const o of fromHealth) {
-      byName.set(norm(String(o?.outcomeName || "")), o);
-    }
-
-    const seen = new Set<string>();
-    const merged: any[] = [];
-    for (const aim of deOutcomeAims) {
-      const key = norm(aim.label);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      const existing = byName.get(key);
-      merged.push(
-        existing ?? {
-          id: aim.id,
-          outcomeName: aim.label,
-          priority: "M",
-          skipped: false,
-          measures: [],
-          calculatedScore: null,
-        },
-      );
-    }
-
-    return merged;
-  }, [comp?.designedExperienceData, outcomeScoreData?.targetedOutcomes]);
-
-  const computedTargetedOutcomes = useMemo(() => {
-    const list: any[] = Array.isArray(targetedOutcomes) ? targetedOutcomes : [];
-    const W: Record<string, number> = { H: 6, M: 3, L: 1 };
-    const calc = (measures: any[]): number | null => {
-      const ms = Array.isArray(measures) ? measures : [];
-      let totalW = 0;
-      let total = 0;
-      for (const m of ms) {
-        if (m?.skipped) continue;
-        const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-        const rating = insts.length > 0 ? effectiveFromInstances(insts, globalFilter).score : null;
-        if (rating === null) continue;
-        const w = W[String(m?.priority || "M")] ?? 1;
-        totalW += w;
-        total += rating * w;
-      }
-      if (totalW <= 0) return null;
-      return Math.round((total / totalW) * 100) / 100;
-    };
-    return list.map((o) => ({ ...o, calculatedScore: calc(o?.measures || []) }));
-  }, [globalFilter, targetedOutcomes]);
-
   const realOutcomeScore = useMemo(() => {
     if (!outcomeScoreData) return null;
-    const stored = (outcomeScoreData as any)?.finalOutcomeScore;
-    if (typeof stored === "number" && Number.isFinite(stored)) return Math.max(1, Math.min(5, Math.round(stored)));
-    const mode = String((outcomeScoreData as any)?.scoringMode || "targeted");
-    const W: Record<string, number> = { H: 6, M: 3, L: 1 };
-
-    const roundFinal1to5 = (score: number | null): number | null => {
-      if (score === null) return null;
-      const rounded = Math.round(score);
-      if (rounded < 1) return 1;
-      if (rounded > 5) return 5;
-      return rounded;
-    };
-
-    const weightedAvg = (items: { rating: number | null; priority: string; skipped: boolean }[]): number | null => {
-      let totalWeight = 0;
-      let totalScore = 0;
-      for (const item of items) {
-        if (item.skipped || item.rating === null) continue;
-        const w = W[item.priority] ?? 1;
-        totalWeight += w;
-        totalScore += item.rating * w;
-      }
-      if (totalWeight <= 0) return null;
-      return Math.round((totalScore / totalWeight) * 100) / 100;
-    };
-
-    if (mode === "overall") {
-      const overallMeasures: any[] = Array.isArray((outcomeScoreData as any)?.overallMeasures) ? (outcomeScoreData as any).overallMeasures : [];
-      const items = overallMeasures.map((m) => {
-        const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-        const rating = insts.length > 0 ? effectiveFromInstances(insts, globalFilter).score : null;
-        return { rating, priority: String(m?.priority || "M"), skipped: !!m?.skipped };
-      });
-      return roundFinal1to5(weightedAvg(items));
-    }
-
-    const items = computedTargetedOutcomes.map((o: any) => ({
-      rating: o?.calculatedScore ?? null,
-      priority: String(o?.priority || "M"),
-      skipped: !!o?.skipped,
-    }));
-    return roundFinal1to5(weightedAvg(items));
-  }, [computedTargetedOutcomes, globalFilter, outcomeScoreData]);
+    const osd = outcomeScoreData as any;
+    const rawMeasures: any[] = Array.isArray(osd?.measures) ? osd.measures : [];
+    const rawOverall: any[] = Array.isArray(osd?.overallMeasures) ? osd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> = osd?.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? osd.subDimensionWeights : {};
+    const score = calcOverallOutcomeScore(rawMeasures, rawOverall, weights, globalFilter);
+    if (score === null) return null;
+    return Math.max(1, Math.min(5, Math.round(score)));
+  }, [outcomeScoreData, globalFilter]);
 
   const realExperienceScore = useMemo(() => {
     if (!experienceScoreData) return null;
@@ -404,12 +303,55 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     };
   }, [experienceScoreData]);
 
-  const computedRingDesignDimensionScores = useMemo(() => {
-    const data: any = (comp as any)?.healthData?.ringDesignScoreData;
-    if (!data) return null;
-    const rsd = { ...data, filter: globalFilter } as any;
-    return calculateRingDesignDimensionScores(rsd as any);
+  const experienceEmergentDimensionScore = useMemo(() => {
+    const healthScore = (experienceScoreData as any)?.healthDimensionScore;
+    const behaviorScore = (experienceScoreData as any)?.behaviorDimensionScore;
+    const h = typeof healthScore === "number" ? healthScore : null;
+    const b = typeof behaviorScore === "number" ? behaviorScore : null;
+    if (h === null && b === null) return null;
+    if (h !== null && b === null) return h;
+    if (b !== null && h === null) return b;
+    const aims: any[] = ((comp as any)?.designedExperienceData?.keyDesignElements?.aims || []) as any[];
+    const leapCount = aims.filter((a) => a?.type === "leap").length;
+    let leapsWeight = 0;
+    if (leapCount >= 5) leapsWeight = 0.6;
+    else if (leapCount >= 3) leapsWeight = 0.5;
+    else if (leapCount >= 1) leapsWeight = 0.4;
+    const remaining = 1.0 - leapsWeight;
+    const hw = remaining / 2;
+    const bw = remaining / 2;
+    return Math.round((((h as number) * hw + (b as number) * bw) / (hw + bw)) * 100) / 100;
+  }, [comp, experienceScoreData]);
+
+  const computedRingDesignDimensionRows = useMemo(() => {
+    const data: any = (comp as any)?.healthData?.ringDesignScoreData || {};
+    const scores = calculateRingDesignMeasureDimensionScores({
+      ...data,
+      filter: globalFilter,
+    } as any);
+
+    return [
+      { key: "aims", label: "Richness/Robustness of Aims", score: scores.aimsScore },
+      { key: "experience-completeness", label: "Completeness of designed experience", score: scores.completenessDesignedExperienceScore },
+      { key: "srr-quality-completeness", label: "Quality & Completeness of SRR", score: scores.qualityCompletenessSrrScore },
+      { key: "coherence", label: "Coherence in the design experience", score: scores.coherenceDesignedExperienceScore },
+      { key: "alignment", label: "Alignment of the designed experience", score: scores.alignmentDesignedExperienceScore },
+    ] as const;
   }, [comp, globalFilter]);
+
+  const outcomeDimensionRows = useMemo(() => {
+    if (!outcomeScoreData) return OUTCOME_SUBDIMENSION_TREE.map((l1) => ({ key: l1.id, label: l1.label, score: null as number | null, count: 0 }));
+    const osd = outcomeScoreData as any;
+    const rawMeasures: any[] = Array.isArray(osd?.measures) ? osd.measures : [];
+    const rawOverall: any[] = Array.isArray(osd?.overallMeasures) ? osd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> = osd?.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? osd.subDimensionWeights : {};
+    return OUTCOME_SUBDIMENSION_TREE.map((l1) => {
+      const l2Ids = new Set(l1.children.map((c) => c.id));
+      const tagged = rawMeasures.filter((m: any) => Array.isArray(m?.subDimensionIds) && m.subDimensionIds.some((id: string) => l2Ids.has(id)));
+      const score = calcL1Score(l1, rawMeasures, rawOverall, weights, globalFilter);
+      return { key: l1.id, label: l1.label, score, count: tagged.length };
+    });
+  }, [outcomeScoreData, globalFilter]);
 
   const computedRingDesignScore = useMemo(() => {
     const data: any = (comp as any)?.healthData?.ringDesignScoreData;
@@ -477,9 +419,9 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     };
     const wVal = (w: unknown) => (w === "H" ? 4 : w === "M" ? 2 : 1);
 
-    if ((filter?.aggregation || "singleLatest") === "latestPerActor") {
-      const wanted = normActor(filter?.actorKey);
-      if (!wanted) return { score: null, weightLabel: null };
+    // If actorKey is set, filter to that actor only
+    if (filter?.actorKey && filter.actorKey !== "__unknown__") {
+      const wanted = normActor(filter.actorKey);
       const eligible = scored.filter((i) => normActor(i?.actor) === wanted);
       if (eligible.length === 0) return { score: null, weightLabel: null };
       const latest = [...eligible].sort((a, b) => safeDt(b?.asOfDate) - safeDt(a?.asOfDate))[0];
@@ -487,7 +429,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
       return { score: Number(latest?.score), weightLabel: w };
     }
 
-    // Single Latest (default): latest per actor, then weighted avg across actors.
+    // Default: latest per actor, then weighted avg across actors.
     const byActor = new Map<string, any>();
     for (const inst of scored) {
       const key = normActor(inst?.actor);
@@ -658,28 +600,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
       {/* Zone 1: Context Header */}
       <section className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
          <div className="space-y-1">
-            <h2 className="text-2xl font-serif font-bold text-gray-900">Performance & Status</h2>
-            <div className="flex items-center gap-2">
-               <span className="text-sm text-gray-500">As of:</span>
-               <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                     <Button variant="outline" size="sm" className="h-7 text-xs font-medium border-gray-300 bg-white hover:bg-gray-50">
-                        {asOfDate} <ChevronDown className="w-3 h-3 ml-2 text-gray-400" />
-                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                     {JOURNEY_SNAPSHOTS.map(date => (
-                        <DropdownMenuItem key={date} onClick={() => setAsOfDate(date)} className="text-xs">
-                           {date}
-                        </DropdownMenuItem>
-                     ))}
-                  </DropdownMenuContent>
-               </DropdownMenu>
-               <Separator orientation="vertical" className="h-4 mx-1" />
-               <Badge variant="secondary" className="bg-sky-100 text-sky-700 hover:bg-sky-200 border-sky-200 font-medium text-xs">
-                  {status}
-               </Badge>
-            </div>
+            <h2 className="text-2xl font-serif font-bold text-gray-900">Status &amp; Health</h2>
          </div>
       </section>
 
@@ -754,8 +675,9 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            <Badge
                              variant="outline"
                              className={cn(
-                               "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] h-5",
-                               canOpenDriverScoring && "cursor-pointer hover:bg-emerald-100"
+                              "text-[10px] h-5",
+                              scorePillClass(computedRingDesignScore),
+                              canOpenDriverScoring && "cursor-pointer hover:opacity-90"
                              )}
                            >
                              {(computedRingDesignScore ?? "—")}/5
@@ -774,8 +696,9 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            <Badge
                              variant="outline"
                              className={cn(
-                               "bg-red-50 text-red-700 border-red-200 text-[10px] h-5",
-                               canOpenDriverScoring && "cursor-pointer hover:bg-red-100"
+                              "text-[10px] h-5",
+                              scorePillClass(computedRingConditionsScore),
+                              canOpenDriverScoring && "cursor-pointer hover:opacity-90"
                              )}
                            >
                              {(computedRingConditionsScore ?? "—")}/5
@@ -812,8 +735,9 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                         <Badge
                           variant="outline"
                           className={cn(
-                            "bg-yellow-50 text-yellow-700 border-yellow-200 text-[10px] h-5",
-                            canOpenDriverScoring && "cursor-pointer hover:bg-yellow-100"
+                            "text-[10px] h-5",
+                            scorePillClass(computedRingImplementationScore),
+                            canOpenDriverScoring && "cursor-pointer hover:opacity-90"
                           )}
                         >
                           {(computedRingImplementationScore ?? "—")}/5
@@ -935,42 +859,24 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                     <ScoreFlags
                                       collapsible={false}
                                       overallScore={computedRingDesignScore}
-                                      items={[
-                                        { key: "aims", label: "Aims", score: (computedRingDesignDimensionScores as any)?.aimsScore ?? null },
-                                        { key: "experience", label: "Experience", score: (computedRingDesignDimensionScores as any)?.experienceScore ?? null },
-                                        { key: "resources", label: "Resources", score: (computedRingDesignDimensionScores as any)?.resourcesScore ?? null },
-                                      ]}
+                                      items={computedRingDesignDimensionRows.map((row) => ({
+                                        key: row.key,
+                                        label: row.label,
+                                        score: row.score,
+                                      }))}
                                       threshold={2}
                                       testId="health-design-flags"
                                     />
                                   ) : (
                                     <div className="space-y-1.5" data-testid="design-summary-rows">
-                                      {([
-                                        { key: "aimsScore", name: "Aims", weightKey: "aimsWeight" },
-                                        { key: "experienceScore", name: "Experience", weightKey: "experienceWeight" },
-                                        { key: "resourcesScore", name: "Resources", weightKey: "resourcesWeight" },
-                                      ] as const).map((row) => {
-                                        const score =
-                                          (computedRingDesignDimensionScores as any)?.[row.key] ??
-                                          (ringDesignScoreData as any)?.designDimensions?.[row.key] ??
-                                          null;
-                                        const rawW = ringDesignScoreData?.designWeights?.[row.weightKey];
-                                        const w =
-                                          rawW === "H" || rawW === "M" || rawW === "L"
-                                            ? rawW
-                                            : typeof rawW === "number"
-                                              ? rawW >= 4
-                                                ? "H"
-                                                : rawW >= 2
-                                                  ? "M"
-                                                  : "L"
-                                              : "M";
+                                      {computedRingDesignDimensionRows.map((row) => {
+                                        const score = row.score ?? null;
                                         const scoreLabel = score !== null ? String(score) : "—";
                                         return (
                                           <div
                                             key={row.key}
                                             className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0"
-                                            data-testid={`design-summary-row-${row.key}`}
+                                            data-testid={`design-summary-row-${String(row.key)}`}
                                           >
                                             <div className="flex items-center gap-2 min-w-0">
                                               <div
@@ -988,7 +894,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                                 {scoreLabel}
                                               </div>
                                               <span className="text-xs text-gray-700 truncate">
-                                                {row.name} (W: {w})
+                                                {row.label}
                                               </span>
                                             </div>
                                           </div>
@@ -1296,36 +1202,23 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                 ) : healthSummaryView === "flags" ? (
                                   (() => {
                                     const rows = [
-                                      { key: "studentsEnrollment", name: "Enrollment" },
-                                      { key: "feasibilitySustainability", name: "Feasibility" },
-                                      { key: "fidelityDesignedExperience", name: "Fidelity" },
-                                      { key: "qualityDelivery", name: "Delivery" },
-                                      { key: "measurementAdministrationQuality", name: "Measurement" },
+                                      { key: "studentsEnrollment", name: "Students involved / enrollment" },
+                                      { key: "feasibilitySustainability", name: "Perceived feasibility / sustainability" },
+                                      { key: "fidelityDesignedExperience", name: "Fidelity to designed experience" },
+                                      { key: "qualityDelivery", name: "Skillfulness of instruction & Facilitation" },
+                                      { key: "measurementAdministrationQuality", name: "Measurement administration quality" },
                                     ] as const;
 
                                     const implData: any = (comp as any)?.healthData?.ringImplementationScoreData || {};
-                                    const dims: any = implData.dimensions || {};
-                                    const legacyMap: Record<string, string> = {
-                                      studentsEnrollment: "scale",
-                                      feasibilitySustainability: "learnerDemand",
-                                      fidelityDesignedExperience: "fidelity",
-                                      qualityDelivery: "quality",
+                                    const d = calculateRingImplementationMeasureDimensionScores({ ...implData, filter: globalFilter } as any);
+                                    const byKey: Record<string, number | null> = {
+                                      studentsEnrollment: d.studentsEnrollmentScore,
+                                      feasibilitySustainability: d.feasibilitySustainabilityScore,
+                                      fidelityDesignedExperience: d.fidelityDesignedExperienceScore,
+                                      qualityDelivery: d.skillfulnessInstructionFacilitationScore,
+                                      measurementAdministrationQuality: d.measurementAdministrationQualityScore,
                                     };
-
-                                    const items = rows.map((row) => {
-                                      const legacyKey = legacyMap[row.key];
-                                      const dim: any = dims?.[row.key] || (legacyKey ? dims?.[legacyKey] : {}) || {};
-                                      const instances = Array.isArray(dim.instances) ? dim.instances : [];
-                                      const mode = dim?.scoringMode === "items" ? "items" : "overall";
-                                      const eff =
-                                        mode === "items"
-                                          ? { score: getImplEffectiveFromItems(dim.items, globalFilter).score, weightLabel: null as any }
-                                          : instances.length > 0
-                                            ? getImplEffectiveFromInstances(instances, globalFilter)
-                                            : { score: dim.score ?? null, weightLabel: null as any };
-                                      const score = eff.score ?? (dim.score ?? null);
-                                      return { key: row.key, label: row.name, score };
-                                    });
+                                    const items = rows.map((row) => ({ key: row.key, label: row.name, score: byKey[row.key] ?? null }));
 
                                     return (
                                       <ScoreFlags
@@ -1340,43 +1233,23 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                 ) : (
                                   <div className="space-y-1.5" data-testid="implementation-summary-rows">
                                     {([
-                                      { key: "studentsEnrollment", name: "Enrollment" },
-                                      { key: "feasibilitySustainability", name: "Feasibility" },
-                                      { key: "fidelityDesignedExperience", name: "Fidelity" },
-                                      { key: "qualityDelivery", name: "Delivery" },
-                                      { key: "measurementAdministrationQuality", name: "Measurement" },
+                                      { key: "studentsEnrollment", name: "Students involved / enrollment", weightKey: "studentsEnrollmentWeight" },
+                                      { key: "feasibilitySustainability", name: "Perceived feasibility / sustainability", weightKey: "feasibilitySustainabilityWeight" },
+                                      { key: "fidelityDesignedExperience", name: "Fidelity to designed experience", weightKey: "fidelityDesignedExperienceWeight" },
+                                      { key: "qualityDelivery", name: "Skillfulness of instruction & Facilitation", weightKey: "skillfulnessInstructionFacilitationWeight" },
+                                      { key: "measurementAdministrationQuality", name: "Measurement administration quality", weightKey: "measurementAdministrationQualityWeight" },
                                     ] as const).map((row) => {
                                       const implData: any = (comp as any)?.healthData?.ringImplementationScoreData || {};
-                                      const dims: any = implData.dimensions || {};
-                                      const legacyMap: Record<string, string> = {
-                                        studentsEnrollment: "scale",
-                                        feasibilitySustainability: "learnerDemand",
-                                        fidelityDesignedExperience: "fidelity",
-                                        qualityDelivery: "quality",
+                                      const d = calculateRingImplementationMeasureDimensionScores({ ...implData, filter: globalFilter } as any);
+                                      const scoreByKey: Record<string, number | null> = {
+                                        studentsEnrollment: d.studentsEnrollmentScore,
+                                        feasibilitySustainability: d.feasibilitySustainabilityScore,
+                                        fidelityDesignedExperience: d.fidelityDesignedExperienceScore,
+                                        qualityDelivery: d.skillfulnessInstructionFacilitationScore,
+                                        measurementAdministrationQuality: d.measurementAdministrationQualityScore,
                                       };
-                                      const legacyKey = legacyMap[row.key];
-                                      const dim: any = dims?.[row.key] || (legacyKey ? dims?.[legacyKey] : {}) || {};
-                                      const instances = Array.isArray(dim.instances) ? dim.instances : [];
-                                      const mode = dim?.scoringMode === "items" ? "items" : "overall";
-
-                                      const eff =
-                                        mode === "items"
-                                          ? {
-                                              score: getImplEffectiveFromItems(dim.items, globalFilter).score,
-                                              weightLabel: (dim.weight === "H" || dim.weight === "M" || dim.weight === "L" ? dim.weight : "M") as any,
-                                            }
-                                          : instances.length > 0
-                                            ? getImplEffectiveFromInstances(instances, globalFilter)
-                                            : { score: dim.score ?? null, weightLabel: null as any };
-
-                                      const score = eff.score ?? (dim.score ?? null);
-                                      const w =
-                                        mode === "items"
-                                          ? dim.weight === "H" || dim.weight === "M" || dim.weight === "L"
-                                            ? dim.weight
-                                            : "M"
-                                          : eff.weightLabel ??
-                                            (dim.weight === "H" || dim.weight === "M" || dim.weight === "L" ? dim.weight : "M");
+                                      const score = scoreByKey[row.key] ?? null;
+                                      const w = ((implData?.measureBasedImplementation?.weights || {}) as any)[row.weightKey] || "M";
                                       const scoreLabel = score !== null ? String(score) : "—";
 
                                       return (
@@ -1506,7 +1379,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            </div>
                            <div>
                               <h4 className="font-semibold text-gray-900 text-sm">Experience Score</h4>
-                              <p className="text-xs text-gray-500">3 dimensions</p>
+                              <p className="text-xs text-gray-500">2 dimensions</p>
                            </div>
                         </div>
                         <ChevronDown className="w-4 h-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
@@ -1525,62 +1398,61 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                 const remaining = 1.0 - leapsWeight;
                                 const base = { leaps: leapsWeight, health: remaining / 2, behavior: remaining / 2 };
 
+                                const leapsScore = (experienceScoreData as any)?.leapsDimensionScore ?? null;
+                                const healthScore = (experienceScoreData as any)?.healthDimensionScore ?? null;
+                                const behaviorScore = (experienceScoreData as any)?.behaviorDimensionScore ?? null;
+                                const hasLeaps = leapsScore !== null;
+                                const hasHealth = healthScore !== null;
+                                const hasBehavior = behaviorScore !== null;
+
+                                const scored3 = [
+                                  { key: "leaps", weight: base.leaps, scored: hasLeaps },
+                                  { key: "health", weight: base.health, scored: hasHealth },
+                                  { key: "behavior", weight: base.behavior, scored: hasBehavior },
+                                ];
+                                const scored3Count = scored3.filter((d) => d.scored).length;
+                                const missing3 = scored3.filter((d) => !d.scored).reduce((s, d) => s + d.weight, 0);
+                                const redist3 = scored3Count > 0 ? missing3 / scored3Count : 0;
+                                const adjusted3 = {
+                                  leaps: hasLeaps ? base.leaps + redist3 : 0,
+                                  health: hasHealth ? base.health + redist3 : 0,
+                                  behavior: hasBehavior ? base.behavior + redist3 : 0,
+                                };
+
                                 const dims = [
-                                  { key: "leaps" as const, name: "Leaps & Design Principles", dim: experienceDimensions.leaps, score: experienceScoreData?.leapsDimensionScore ?? null },
-                                  { key: "health" as const, name: "Mental & Physical Health", dim: experienceDimensions.health, score: experienceScoreData?.healthDimensionScore ?? null },
-                                  { key: "behavior" as const, name: "Behavior, Attendance & Engagement", dim: experienceDimensions.behavior, score: experienceScoreData?.behaviorDimensionScore ?? null },
+                                  { key: "leaps" as const, name: "Core Experience Tenants", dim: experienceDimensions.leaps, score: leapsScore },
+                                  {
+                                    key: "emergent" as const,
+                                    name: "Emergent States",
+                                    dim: { measures: [ ...(experienceDimensions.health?.measures || []), ...(experienceDimensions.behavior?.measures || []) ] },
+                                    score: experienceEmergentDimensionScore,
+                                  },
                                 ];
 
                                 const scored = dims.map((d) => {
-                                  const measures = d.dim?.measures || [];
-                                  const excluded = d.key !== "leaps" && measures.length === 0 && d.score === null;
-                                  const hasScore = d.key === "leaps" ? d.score !== null : d.score !== null && !excluded;
-                                  return { ...d, excluded, hasScore };
+                                  const hasScore = d.key === "leaps" ? hasLeaps : (hasHealth || hasBehavior);
+                                  return { ...d, excluded: !hasScore, hasScore };
                                 });
 
-                                const missingWeight = scored.filter((d) => !d.hasScore).reduce((s, d) => s + (base as any)[d.key], 0);
-                                const scoredCount = scored.filter((d) => d.hasScore).length;
-                                const redist = scoredCount > 0 ? missingWeight / scoredCount : 0;
-                                const adjusted: Record<string, number> = { leaps: 0, health: 0, behavior: 0 };
-                                for (const d of scored) {
-                                  adjusted[d.key] = d.hasScore ? (base as any)[d.key] + redist : 0;
-                                }
+                                const adjusted: Record<string, number> = {
+                                  leaps: adjusted3.leaps,
+                                  emergent: adjusted3.health + adjusted3.behavior,
+                                };
 
                                 if (healthSummaryView === "flags") {
                                   const leapsMode = String((experienceScoreData as any)?.leapsScoringMode || "across");
-                                  const items =
+                                  const leapItems =
                                     leapsMode === "individual"
                                       ? (((experienceScoreData as any)?.leapItems || []) as any[]).map((li: any) => ({
                                           key: `leap:${String(li?.id || Math.random())}`,
                                           label: String(li?.label || "Leap"),
                                           score: effectiveFromInstances((li?.instances || []) as any, globalFilter).score,
                                         }))
-                                      : [
-                                          ...(((experienceDimensions.leaps as any)?.measures || []) as any[]).filter((m: any) => m && !m?.skipped).map((m: any) => ({
-                                            key: String(m?.id || m?.name || Math.random()),
-                                            label: `Leaps: ${String(m?.name || "Measure")}`,
-                                            score: (() => {
-                                              const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-                                              return insts.length > 0 ? effectiveFromInstances(insts as any, globalFilter).score : null;
-                                            })(),
-                                          })),
-                                          ...(((experienceDimensions.health as any)?.measures || []) as any[]).filter((m: any) => m && !m?.skipped).map((m: any) => ({
-                                            key: String(m?.id || m?.name || Math.random()),
-                                            label: `Health: ${String(m?.name || "Measure")}`,
-                                            score: (() => {
-                                              const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-                                              return insts.length > 0 ? effectiveFromInstances(insts as any, globalFilter).score : null;
-                                            })(),
-                                          })),
-                                          ...(((experienceDimensions.behavior as any)?.measures || []) as any[]).filter((m: any) => m && !m?.skipped).map((m: any) => ({
-                                            key: String(m?.id || m?.name || Math.random()),
-                                            label: `Behavior: ${String(m?.name || "Measure")}`,
-                                            score: (() => {
-                                              const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-                                              return insts.length > 0 ? effectiveFromInstances(insts as any, globalFilter).score : null;
-                                            })(),
-                                          })),
-                                        ];
+                                      : [];
+                                  const items = [
+                                    ...leapItems,
+                                    { key: "dim:emergent", label: "Emergent States", score: experienceEmergentDimensionScore },
+                                  ];
 
                                   return (
                                     <ScoreFlags
@@ -1594,7 +1466,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                   );
                                 }
 
-                                return scored.map(({ key, name, dim, score, excluded }) => {
+                                return scored.map(({ key, name, dim, score }) => {
                                 const ratedCount = isOverall
                                   ? (() => {
                                       const insts: ScoreInstance[] = Array.isArray((dim as any)?.instances) ? ((dim as any).instances as ScoreInstance[]) : [];
@@ -1603,17 +1475,15 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                   : (() => {
                                       const measures = (dim as any)?.measures || [];
                                       return (measures as any[]).filter((m: any) => {
-                                        if (m?.skipped) return false;
                                         const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
                                         const eff = insts.length > 0 ? effectiveFromInstances(insts, globalFilter).score : null;
                                         return eff !== null;
                                       }).length;
                                     })();
-                                const isExcluded = !!dim?.excluded || excluded;
                                 const scoreLabel = score !== null ? String(Math.max(1, Math.min(5, Math.round(score)))) : "—";
                                 const wtLabel = `${Math.round((adjusted as any)[key] * 100)}%`;
                                 return (
-                                  <div key={key} className={cn("flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0", isExcluded && "opacity-50")} data-testid={`health-experience-dim-${key}`}>
+                                  <div key={key} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid={`health-experience-dim-${key}`}>
                                     <div className="flex items-center gap-2">
                                       <div className={cn(
                                         "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center",
@@ -1625,8 +1495,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                       )}>
                                         {scoreLabel}
                                       </div>
-                                      <span className={cn("text-xs text-gray-700", isExcluded && "line-through")}>{name} ({wtLabel})</span>
-                                      {isExcluded && <span className="text-[9px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Excluded</span>}
+                                      <span className="text-xs text-gray-700">{name} ({wtLabel})</span>
                                     </div>
                                   </div>
                                 );
@@ -1662,7 +1531,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            </div>
                            <div>
                               <h4 className="font-semibold text-gray-900 text-sm">Outcomes Score</h4>
-                              <p className="text-xs text-gray-500">{computedTargetedOutcomes.length} outcome{computedTargetedOutcomes.length !== 1 ? "s" : ""} tracked</p>
+                              <p className="text-xs text-gray-500">{outcomeDimensionRows.length} dimensions</p>
                            </div>
                         </div>
                         <ChevronDown className="w-4 h-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
@@ -1670,44 +1539,29 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                      <CollapsibleContent>
                         <div className="px-4 pb-4 pt-0 space-y-3">
                            <Separator />
-                           {computedTargetedOutcomes.length === 0 ? (
+                           {outcomeDimensionRows.every((r) => r.score === null) ? (
                               <div className="text-xs text-gray-400 italic py-2">No outcomes scored yet. Click the Outcomes box above to add and score outcomes.</div>
                            ) : (
                              healthSummaryView === "flags" ? (
                                <ScoreFlags
                                  collapsible={false}
                                  overallScore={realOutcomeScore}
-                                 items={computedTargetedOutcomes.map((o: any) => ({
-                                   key: String(o.id),
-                                   label: String(o.outcomeName || "Outcome"),
-                                   score: o.skipped ? null : (o.calculatedScore ?? null),
-                                 }))}
+                                items={outcomeDimensionRows.map((row) => ({
+                                  key: row.key,
+                                  label: row.label,
+                                  score: row.score,
+                                }))}
                                  threshold={2}
                                  testId="health-outcomes-flags"
                                />
                              ) : (
                                <div className="space-y-1.5">
-                                 {computedTargetedOutcomes.map((o: any) => {
-                                   const score = o.calculatedScore ?? null;
-                                   const priority = o.priority || "M";
-                                   const name = o.outcomeName || "Untitled";
+                                {outcomeDimensionRows.map((o: any) => {
+                                  const score = o.score ?? null;
+                                  const name = `${o.label || "Dimension"} (${o.count ?? 0})`;
                                    const scoreLabel = score !== null ? String(Math.max(1, Math.min(5, Math.round(score)))) : "—";
-                                   const ratedCount = isOverall
-                                     ? (() => {
-                                         const insts: ScoreInstance[] = Array.isArray((o as any)?.instances) ? ((o as any).instances as ScoreInstance[]) : [];
-                                         return insts.filter((i: any) => effectiveFromInstances([i] as any, globalFilter).score !== null).length;
-                                       })()
-                                     : (() => {
-                                         const measures: any[] = (o as any).measures || [];
-                                         return measures.filter((m: any) => {
-                                           if (m?.skipped) return false;
-                                           const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-                                           const eff = insts.length > 0 ? effectiveFromInstances(insts, globalFilter).score : null;
-                                           return eff !== null;
-                                         }).length;
-                                       })();
                                    return (
-                                     <div key={o.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid={`health-outcome-row-${o.id}`}>
+                                    <div key={o.key} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid={`health-outcome-row-${o.key}`}>
                                        <div className="flex items-center gap-2 min-w-0">
                                          <div
                                            className={cn(
@@ -1721,8 +1575,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                          >
                                            {scoreLabel}
                                          </div>
-                                         <span className={cn("text-xs text-gray-700 truncate", o.skipped && "line-through text-gray-400")}>{name} ({priority})</span>
-                                         {o.skipped && <span className="text-[9px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Skipped</span>}
+                                        <span className="text-xs text-gray-700 truncate">{name}</span>
                                        </div>
                                        <div className="flex items-center gap-2 shrink-0" />
                                      </div>

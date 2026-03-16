@@ -1,9 +1,9 @@
-import type { RingImplementationInstance, RingImplementationScoreData } from "./schema";
-import { getSchoolYearKey, getSemesterKey, parseIsoDate } from "./marking-period";
+import type { Measure, RingImplementationInstance, RingImplementationMeasureBased, RingImplementationScoreData, ScoreFilter } from "./schema";
+import { effectiveFromInstances as effectiveFromScoreInstances } from "./score-instances";
+import { deriveTreeOverallScore } from "./score-rollups";
 
 const WEIGHT_MEANING: Record<"H" | "M" | "L", number> = { H: 4, M: 2, L: 1 };
-const PRIORITY_WEIGHT: Record<"H" | "M" | "L", number> = { H: 6, M: 3, L: 1 };
-const UNKNOWN_ACTOR_KEY = "__unknown__";
+const ITEM_PRIORITY_WEIGHT: Record<"H" | "M" | "L", number> = { H: 6, M: 3, L: 1 };
 
 function clampInt1to5(value: number): number {
   const rounded = Math.round(value);
@@ -29,94 +29,139 @@ function weightValue(label: unknown): number {
   return WEIGHT_MEANING[l] ?? 1;
 }
 
-function priorityValue(label: unknown): number {
+function itemPriorityWeight(label: unknown): number {
   const l = safeWeightLabel(label);
-  return PRIORITY_WEIGHT[l] ?? 1;
-}
-
-function normActor(value: unknown): string {
-  const clean = String(value ?? "").trim();
-  if (!clean) return UNKNOWN_ACTOR_KEY;
-  return clean.toLowerCase();
-}
-
-function inSelectedPeriod(date: Date, filter: any): boolean {
-  const mode = filter?.mode || "none";
-  if (mode === "none") return true;
-  if (mode === "year") {
-    const key = String(filter?.yearKey || "");
-    if (!key) return true;
-    return getSchoolYearKey(date) === key;
-  }
-  if (mode === "semester") {
-    const key = String(filter?.semesterKey || "");
-    if (!key) return true;
-    return getSemesterKey(date) === key;
-  }
-  return true;
+  return ITEM_PRIORITY_WEIGHT[l] ?? 1;
 }
 
 function effectiveFromInstances(instances: RingImplementationInstance[], filter: any): { score: number | null; weight: number | null } {
-  const agg = filter?.aggregation || "singleLatest";
-  const list = Array.isArray(instances) ? instances : [];
-
-  const eligible: { actorKey: string; dt: number; score: number; weight: number }[] = [];
-  for (const inst of list) {
-    const d = parseIsoDate(String((inst as any)?.asOfDate || ""));
-    if (!d) continue;
-    if (!inSelectedPeriod(d, filter)) continue;
-    const score = safeScore((inst as any)?.score);
-    if (score === null) continue;
-    const actorKey = normActor((inst as any)?.actor);
-    eligible.push({ actorKey, dt: d.getTime(), score, weight: weightValue((inst as any)?.weight) });
-  }
-  if (eligible.length === 0) return { score: null, weight: null };
-
-  // Latest by Actor (selected actor key)
-  if (agg === "latestPerActor") {
-    const wanted = normActor(filter?.actorKey);
-    const filtered = eligible.filter((e) => e.actorKey === wanted);
-    if (filtered.length === 0) return { score: null, weight: null };
-    filtered.sort((a, b) => b.dt - a.dt);
-    return { score: filtered[0].score, weight: filtered[0].weight };
-  }
-
-  // Single Latest (default): latest per actor, then weighted average across actors.
-  const byActor = new Map<string, { dt: number; score: number; weight: number }>();
-  for (const e of eligible) {
-    const prev = byActor.get(e.actorKey);
-    if (!prev || e.dt > prev.dt) byActor.set(e.actorKey, { dt: e.dt, score: e.score, weight: e.weight });
-  }
-  const values = Array.from(byActor.values());
-  if (values.length === 0) return { score: null, weight: null };
-
-  let totalW = 0;
-  let total = 0;
-  for (const v of values) {
-    const w = v.weight;
-    if (w <= 0) continue;
-    totalW += w;
-    total += v.score * w;
-  }
-  if (totalW <= 0) return { score: null, weight: null };
-  return { score: clampInt1to5(total / totalW), weight: totalW };
+  return effectiveFromScoreInstances(instances as any, filter as any);
 }
 
-function effectiveFromItems(items: any[], filter: any): number | null {
-  const list = Array.isArray(items) ? items : [];
-  let totalWeight = 0;
-  let total = 0;
-  for (const it of list) {
-    const instances = Array.isArray((it as any)?.instances) ? ((it as any).instances as RingImplementationInstance[]) : [];
-    const score = instances.length > 0 ? effectiveFromInstances(instances, filter).score : null;
-    if (score === null) continue;
-    const w = priorityValue((it as any)?.priority);
-    if (w <= 0) continue;
-    totalWeight += w;
-    total += score * w;
+function periodRankFromFilter(filter: ScoreFilter | any): number | null {
+  const mode = String(filter?.mode || "none");
+  if (mode === "year") {
+    const y = Number(String(filter?.yearKey || ""));
+    return Number.isFinite(y) ? y * 10 : null;
   }
-  if (totalWeight <= 0) return null;
-  return clampInt1to5(total / totalWeight);
+  if (mode === "semester") {
+    const key = String(filter?.semesterKey || "");
+    const [yRaw, semRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const sem = semRaw === "Fall" ? 1 : semRaw === "Spring" ? 2 : null;
+    return sem ? y * 10 + sem : null;
+  }
+  if (mode === "quarter") {
+    const key = String(filter?.quarterKey || "");
+    const [yRaw, qRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const q = qRaw === "Q1" ? 1 : qRaw === "Q2" ? 2 : qRaw === "Q3" ? 3 : qRaw === "Q4" ? 4 : null;
+    return q ? y * 10 + q : null;
+  }
+  return null;
+}
+
+function periodRankFromMeasure(measure: Measure): number | null {
+  const mp: any = (measure as any)?.markingPeriod;
+  if (!mp) return null;
+  const mode = String(mp?.mode || "");
+  if (mode === "year") {
+    const y = Number(String(mp?.yearKey || ""));
+    return Number.isFinite(y) ? y * 10 : null;
+  }
+  if (mode === "semester") {
+    const key = String(mp?.semesterKey || "");
+    const [yRaw, semRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const sem = semRaw === "Fall" ? 1 : semRaw === "Spring" ? 2 : null;
+    return sem ? y * 10 + sem : null;
+  }
+  if (mode === "quarter") {
+    const key = String(mp?.quarterKey || "");
+    const [yRaw, qRaw] = key.split("-");
+    const y = Number(yRaw);
+    if (!Number.isFinite(y)) return null;
+    const q = qRaw === "Q1" ? 1 : qRaw === "Q2" ? 2 : qRaw === "Q3" ? 3 : qRaw === "Q4" ? 4 : null;
+    return q ? y * 10 + q : null;
+  }
+  return null;
+}
+
+function measuresForSelectedPeriod(measures: Measure[], filter: ScoreFilter | any): Measure[] {
+  const mode = String(filter?.mode || "none");
+  if (mode === "none") return measures;
+  const selected = periodRankFromFilter(filter);
+  if (selected === null) return measures;
+  const withRanks = measures
+    .map((m) => ({ measure: m, rank: periodRankFromMeasure(m) }))
+    .filter((x) => x.rank !== null && (x.rank as number) <= selected);
+  if (withRanks.length === 0) return [];
+  const target = Math.max(...withRanks.map((x) => x.rank as number));
+  return withRanks.filter((x) => x.rank === target).map((x) => x.measure);
+}
+
+function scoreFromMeasures(measures: Measure[], filter: ScoreFilter | any): number | null {
+  const selected = measuresForSelectedPeriod(measures, filter);
+  if (selected.length === 0) return null;
+  const rows: { score: number; weight: number }[] = [];
+  for (const m of selected) {
+    const score = effectiveFromScoreInstances(((m as any)?.instances || []) as any, filter as any).score;
+    if (score === null) continue;
+    rows.push({ score, weight: itemPriorityWeight((m as any)?.priority || "M") });
+  }
+  if (rows.length === 0) return null;
+  const totalW = rows.reduce((s, r) => s + r.weight, 0);
+  if (totalW <= 0) return null;
+  return clampInt1to5(rows.reduce((s, r) => s + r.score * r.weight, 0) / totalW);
+}
+
+export type RingImplementationMeasureDimensionScores = {
+  studentsEnrollmentScore: number | null;
+  feasibilitySustainabilityScore: number | null;
+  fidelityDesignedExperienceScore: number | null;
+  skillfulnessInstructionFacilitationScore: number | null;
+  measurementAdministrationQualityScore: number | null;
+  skillfulnessChildren: {
+    classroomManagementDeliveryOutcomesScore: number | null;
+    inspireMotivateEngagementScore: number | null;
+  };
+};
+
+export function calculateRingImplementationMeasureDimensionScores(
+  data: RingImplementationScoreData,
+): RingImplementationMeasureDimensionScores {
+  const filter: any = (data as any).filter || { mode: "none", aggregation: "singleLatest" };
+  const mb = (data as any).measureBasedImplementation as RingImplementationMeasureBased | undefined;
+  const dims: any = mb?.dimensions || {};
+  const studentsEnrollmentScore = scoreFromMeasures((dims?.studentsEnrollment?.measures || []) as Measure[], filter);
+  const feasibilitySustainabilityScore = scoreFromMeasures((dims?.feasibilitySustainability?.measures || []) as Measure[], filter);
+  const fidelityDesignedExperienceScore = scoreFromMeasures((dims?.fidelityDesignedExperience?.measures || []) as Measure[], filter);
+  const measurementAdministrationQualityScore = scoreFromMeasures((dims?.measurementAdministrationQuality?.measures || []) as Measure[], filter);
+  const skillA = scoreFromMeasures((dims?.skillfulnessInstructionFacilitation?.classroomManagementDeliveryOutcomes?.measures || []) as Measure[], filter);
+  const skillB = scoreFromMeasures((dims?.skillfulnessInstructionFacilitation?.inspireMotivateEngagement?.measures || []) as Measure[], filter);
+  const cw = dims?.skillfulnessInstructionFacilitation?.childWeights || {};
+  const childRows = [
+    { score: skillA, weight: weightValue(cw?.classroomManagementDeliveryOutcomesWeight ?? "M") },
+    { score: skillB, weight: weightValue(cw?.inspireMotivateEngagementWeight ?? "M") },
+  ].filter((x): x is { score: number; weight: number } => x.score !== null);
+  const skillfulnessInstructionFacilitationScore =
+    childRows.length > 0
+      ? clampInt1to5(childRows.reduce((s, r) => s + r.score * r.weight, 0) / Math.max(1, childRows.reduce((s, r) => s + r.weight, 0)))
+      : null;
+  return {
+    studentsEnrollmentScore,
+    feasibilitySustainabilityScore,
+    fidelityDesignedExperienceScore,
+    skillfulnessInstructionFacilitationScore,
+    measurementAdministrationQualityScore,
+    skillfulnessChildren: {
+      classroomManagementDeliveryOutcomesScore: skillA,
+      inspireMotivateEngagementScore: skillB,
+    },
+  };
 }
 
 export function calculateRingImplementationScore(
@@ -133,14 +178,41 @@ export function calculateRingImplementationScore(
   if (!data) return null;
 
   const filter: any = (data as any).filter || { mode: "none", aggregation: "singleLatest" };
+  const canonicalTree = Array.isArray((data as any).canonicalTree?.nodes) ? ((data as any).canonicalTree.nodes as any[]) : [];
 
   if ((data as any).implementationScoringMode === "overall") {
+    const overallMeasures = Array.isArray((data as any).overallMeasures) ? ((data as any).overallMeasures as Measure[]) : [];
+    if (overallMeasures.length > 0) {
+      return scoreFromMeasures(overallMeasures, filter);
+    }
     const overallInstances = ((data as any).overallInstances || []) as RingImplementationInstance[];
     if (Array.isArray(overallInstances) && overallInstances.length > 0) {
       const eff = effectiveFromInstances(overallInstances, filter);
       return eff.score;
     }
     return safeScore((data as any).overallImplementationScore);
+  }
+
+  if (canonicalTree.length > 0) {
+    const derived = deriveTreeOverallScore(canonicalTree as any, filter);
+    if (derived !== null) return derived;
+  }
+
+  const mb = (data as any).measureBasedImplementation as RingImplementationMeasureBased | undefined;
+  if (mb) {
+    const d = calculateRingImplementationMeasureDimensionScores(data);
+    const w = mb.weights || ({} as any);
+    const rows = [
+      { score: d.studentsEnrollmentScore, weight: weightValue((w as any).studentsEnrollmentWeight ?? "M") },
+      { score: d.feasibilitySustainabilityScore, weight: weightValue((w as any).feasibilitySustainabilityWeight ?? "M") },
+      { score: d.fidelityDesignedExperienceScore, weight: weightValue((w as any).fidelityDesignedExperienceWeight ?? "M") },
+      { score: d.skillfulnessInstructionFacilitationScore, weight: weightValue((w as any).skillfulnessInstructionFacilitationWeight ?? "M") },
+      { score: d.measurementAdministrationQualityScore, weight: weightValue((w as any).measurementAdministrationQualityWeight ?? "M") },
+    ].filter((x): x is { score: number; weight: number } => x.score !== null);
+    if (rows.length > 0) {
+      const totalW = rows.reduce((s, r) => s + r.weight, 0);
+      if (totalW > 0) return clampInt1to5(rows.reduce((s, r) => s + r.score * r.weight, 0) / totalW);
+    }
   }
 
   const dims: { score: number; weight: number }[] = [];
@@ -162,12 +234,22 @@ export function calculateRingImplementationScore(
     const legacyKey = legacyMap[key];
     const dim: any = dimsObj?.[key] || (legacyKey ? dimsObj?.[legacyKey] : {}) || {};
 
-    // New: itemized scoring mode
-    if ((dim as any)?.scoringMode === "items") {
-      const score = effectiveFromItems((dim as any)?.items || [], filter);
-      if (score === null) continue;
-      dims.push({ score, weight: weightValue((dim as any)?.weight) });
-      continue;
+    const itemScores: { score: number; weight: number }[] = [];
+    const items = Array.isArray(dim.items) ? dim.items : [];
+    for (const item of items) {
+      const itemInstances = (item?.instances || []) as RingImplementationInstance[];
+      if (!Array.isArray(itemInstances) || itemInstances.length === 0) continue;
+      const eff = effectiveFromInstances(itemInstances, filter);
+      if (eff.score === null) continue;
+      itemScores.push({ score: eff.score, weight: itemPriorityWeight((item as any)?.priority) });
+    }
+    if (itemScores.length > 0) {
+      const itemTotalWeight = itemScores.reduce((s, d) => s + d.weight, 0);
+      if (itemTotalWeight > 0) {
+        const itemWeighted = itemScores.reduce((s, d) => s + d.score * d.weight, 0) / itemTotalWeight;
+        dims.push({ score: clampInt1to5(itemWeighted), weight: weightValue(dim.weight) });
+        continue;
+      }
     }
 
     const instances = (dim.instances || []) as RingImplementationInstance[];

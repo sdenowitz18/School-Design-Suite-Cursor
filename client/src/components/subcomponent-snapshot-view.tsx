@@ -109,7 +109,9 @@ export default function SubcomponentSnapshotView({ sub, parentTitle, onUpdate }:
                 <Badge key={tag.id} variant="outline" className={cn("text-[11px] gap-1 px-2 py-0.5", tagStyles.outcome.bg)}>
                   <Target className="w-2.5 h-2.5 opacity-70" />
                   {tag.label}
-                  {tag.isPrimary && <span className="text-[9px] font-bold ml-0.5">(Primary)</span>}
+                  <span className="text-[9px] font-bold ml-0.5">
+                    (From: {String(tag.source || parentTitle || "Component")})
+                  </span>
                 </Badge>
               ))}
             </div>
@@ -127,6 +129,9 @@ export default function SubcomponentSnapshotView({ sub, parentTitle, onUpdate }:
                 <Badge key={tag.id} variant="outline" className={cn("text-[11px] gap-1 px-2 py-0.5", tagStyles.leap.bg)}>
                   <Sparkles className="w-2.5 h-2.5 opacity-70" />
                   {tag.label}
+                  <span className="text-[9px] font-bold ml-0.5">
+                    (From: {String(tag.source || parentTitle || "Component")})
+                  </span>
                 </Badge>
               ))}
             </div>

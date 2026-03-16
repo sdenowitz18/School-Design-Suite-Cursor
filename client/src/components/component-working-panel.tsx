@@ -235,14 +235,6 @@ export default function ComponentWorkingPanel({
           })()}
         </div>
 
-        <div className="p-4 border-t border-gray-100 bg-white flex justify-end gap-2 shrink-0">
-          <Button variant="outline" onClick={onClose} data-testid="button-back">
-            Back
-          </Button>
-          <Button className="bg-blue-900 hover:bg-blue-800" data-testid="button-save">
-            Save Changes
-          </Button>
-        </div>
       </div>
     </>
   );

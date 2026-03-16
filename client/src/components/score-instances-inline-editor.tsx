@@ -21,7 +21,10 @@ function normalizeInstance(partial?: Partial<ScoreInstance>): ScoreInstance {
     asOfDate: String(partial?.asOfDate || toIsoDateString(new Date())),
     score: partial?.score ?? null,
     weight: (partial?.weight === "H" || partial?.weight === "M" || partial?.weight === "L" ? partial.weight : "M") as any,
+    importance: ((partial as any)?.importance === "H" || (partial as any)?.importance === "M" || (partial as any)?.importance === "L" ? (partial as any).importance : "M") as "H" | "M" | "L",
+    confidence: ((partial as any)?.confidence === "H" || (partial as any)?.confidence === "M" || (partial as any)?.confidence === "L" ? (partial as any).confidence : "M") as "H" | "M" | "L",
     rationale: String((partial as any)?.rationale || ""),
+    retired: !!(partial as any)?.retired,
   };
 }
 

@@ -54,8 +54,7 @@ export default function PogLearnMoreView({ onBack }: { onBack: () => void }) {
               </div>
               <div>
                 <span className="font-semibold text-blue-700">Auto-add to Whole School outcomes</span>: Any linked outcome is added to Whole School outcomes.
-                The attribute link’s H/M/L emphasis does <span className="font-semibold">not</span> set the Whole School outcome priority — you’ll set that
-                separately.
+                Portrait links do not set or override center-level outcome priority.
               </div>
             </div>
           </div>

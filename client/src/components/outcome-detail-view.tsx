@@ -566,7 +566,10 @@ export default function OutcomeDetailView({
                                 asOfDate: toIsoDateString(new Date()),
                                 score: null,
                                 weight: "M",
+                                importance: "M",
+                                confidence: "M",
                                 rationale: "",
+                                retired: false,
                               };
                               const nextMeasures = measures.map((mm: any) =>
                                 mm.id === m.id ? { ...mm, rating: null, instances: [...insts, next] } : mm,
