@@ -44,6 +44,8 @@ import OutcomeSummaryView from "./outcome-summary-view";
 import OutcomeDetailView from "./outcome-detail-view";
 import OutcomeScoreView from "./outcome-score-view";
 import { SchemaPickerSheet } from "./de-schema-picker-sheet";
+import { ExpertViewShell } from "./expert-view/ExpertViewShell";
+import type { ElementsExpertData } from "./expert-view/expert-view-types";
 import { LEAP_SCHEMA, OUTCOME_SCHEMA, PRACTICE_SCHEMA, SUPPORT_SCHEMA } from "./designed-experience-schemas";
 import SupportGroupsHubView from "./support-groups-hub-view";
 import SupportGroupDetailView from "./support-group-detail-view";
@@ -1121,6 +1123,16 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     | { mode: "group"; groupKey: SupportGroupKey }
     | { mode: "detail"; groupKey: SupportGroupKey; label: string; backTo: "hub" | "group" }
   >({ mode: "none" });
+  const [elementsExpertData, setElementsExpertData] = useState<ElementsExpertData>({});
+  const [expertViewOpen, setExpertViewOpen] = useState(false);
+  const [expertViewInitialElement, setExpertViewInitialElement] = useState<string>("schedule");
+  const [expertViewNonce, setExpertViewNonce] = useState(0);
+
+  function openExpertView(elementId: string) {
+    setExpertViewInitialElement(elementId);
+    setExpertViewNonce((n) => n + 1);
+    setExpertViewOpen(true);
+  }
 
   const activeSubId = openSubId !== undefined ? openSubId : localOpenSubId;
   const setActiveSubId = (id: string | null) => {
@@ -1133,6 +1145,13 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   const updateMutation = useUpdateComponent();
   const deRef = useRef<DesignedExperienceData>({});
   const isOverall = String(nodeId || "") === "overall" || String((componentData as any)?.nodeId || "") === "overall";
+
+  const schoolWideElementsExpertData = useMemo(() => {
+    const list = (allComponents as any[]) || [];
+    const overall = list.find((c: any) => String(c?.nodeId || c?.node_id || "") === "overall");
+    return ((overall?.designedExperienceData as DesignedExperienceData)?.elementsExpertData ??
+      {}) as ElementsExpertData;
+  }, [allComponents]);
 
   useEffect(() => {
     deRef.current = (componentData as any)?.designedExperienceData || {};
@@ -1154,6 +1173,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       supports: s.supports || [],
     })));
     setPortraitOfGraduate(normalizePortrait((de as any)?.portraitOfGraduate));
+    setElementsExpertData((de as any)?.elementsExpertData ?? {});
     setPogReturnToDetailAttrId(null);
     setPogOutcomesFirstDraft({ selectedKeys: [], step: 1 });
     setPogNav({ mode: "hub" });
@@ -1220,9 +1240,10 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       keyDesignElements: keyDesignElementsToSave,
       subcomponents,
       portraitOfGraduate: isOverall ? portraitOfGraduate : (deRef.current as any)?.portraitOfGraduate,
+      elementsExpertData,
     };
     updateMutation.mutate({ nodeId, data: { designedExperienceData } });
-  }, [nodeId, description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, updateMutation, allComponents]);
+  }, [nodeId, description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, elementsExpertData, updateMutation, allComponents]);
 
   useEffect(() => {
     if (!nodeId || !componentData) return;
@@ -1234,7 +1255,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     }, 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, supportNav.mode]);
+  }, [description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, elementsExpertData, supportNav.mode]);
 
   const addSubcomponent = () => {
     if (!newSubName.trim()) return;
@@ -1412,6 +1433,21 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     );
   }
 
+  if (expertViewOpen) {
+    return (
+      <ExpertViewShell
+        key={`${expertViewNonce}-${nodeId ?? ""}`}
+        componentTitle={title || "Component"}
+        componentType={isOverall ? "center" : "ring"}
+        initialActiveElement={expertViewInitialElement}
+        data={elementsExpertData}
+        onChange={setElementsExpertData}
+        onBack={() => setExpertViewOpen(false)}
+        schoolWideElementsExpertData={schoolWideElementsExpertData}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-7xl mx-auto px-6 md:px-10 space-y-8 pb-24 pt-6">
@@ -1448,42 +1484,93 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           </ScrollArea>
         </section>
 
-        <KeyDesignElementsSummary
-          nodeId={nodeId}
-          isOverall={isOverall}
-          allComponents={(allComponents as any[]) || []}
-          subcomponents={subcomponents}
-          elements={keyDesignElements}
-          onChange={setKeyDesignElements}
-          onViewOutcomes={() => setShowOutcomeSummary(true)}
-          onOpenOutcome={(label) => setSelectedOutcomeLabel(label)}
-          onViewSupports={() => setSupportNav({ mode: "hub" })}
-        />
+        {/* ── Learners ─────────────────────────────────────────── */}
+        <section className="border border-gray-200 rounded-xl p-5 bg-gray-50/40">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Learners</h3>
+            <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200">Coming soon</span>
+          </div>
+          <p className="text-xs text-gray-400">Who are the young people whose growth & development is being supported in this component?</p>
+        </section>
 
-        <section className="mb-6">
-          {isOverall ? (
-            <PogHubView
-              portrait={portraitOfGraduate}
-              onChange={setPortraitOfGraduate}
-              onOpenAttribute={(attributeId) => setPogNav({ mode: "detail", attributeId })}
-              onViewAll={() => setPogNav({ mode: "all" })}
-              onStartWithOutcomes={() => {
-                setPogReturnToDetailAttrId(null);
-                setPogOutcomesFirstDraft((prev) => {
-                  const merged = new Set<string>([...prev.selectedKeys, ...linkedPogOutcomeKeys]);
-                  return { ...prev, selectedKeys: Array.from(merged) };
-                });
-                setPogNav({ mode: "outcomesFirst" });
-              }}
-            />
-          ) : (
-            <>
-              <SectionHeader
-                title="Subcomponents"
-                count={subcomponents.length}
-                onAdd={() => setAddingSubcomponent(true)}
-              />
+        {/* ── Targeted Impacts for Learners ────────────────────── */}
+        <section className="border border-gray-200 rounded-xl p-5 bg-white">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Targeted Impact for Learners</h3>
+          </div>
+          <div className="space-y-3">
+            {/* Leaps & Design Principles */}
+            <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-gray-700">Leaps &amp; Design Principles</span>
+                <Button variant="link" size="sm" className="text-xs text-gray-500 h-auto p-0" onClick={() => setShowOutcomeSummary(true)}>
+                  Manage
+                </Button>
+              </div>
+              {keyDesignElements.aims.filter(a => a.type === "leap").length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {keyDesignElements.aims.filter(a => a.type === "leap").map(tag => (
+                    <span key={tag.id} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                      {tag.label}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No leaps selected yet</p>
+              )}
+            </div>
+            {/* Outcomes */}
+            <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-gray-700">Targeted Outcomes</span>
+                <Button variant="link" size="sm" className="text-xs text-gray-500 h-auto p-0" onClick={() => setShowOutcomeSummary(true)}>
+                  Manage
+                </Button>
+              </div>
+              {keyDesignElements.aims.filter(a => a.type === "outcome").length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {keyDesignElements.aims.filter(a => a.type === "outcome").map(tag => (
+                    <span key={tag.id} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      {tag.label}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No outcomes selected yet</p>
+              )}
+            </div>
+            {/* Portrait of a Graduate — center component only */}
+            {isOverall && (
+              <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
+                <span className="text-xs font-medium text-gray-700 block mb-2">Portrait of a Graduate</span>
+                <PogHubView
+                  portrait={portraitOfGraduate}
+                  onChange={setPortraitOfGraduate}
+                  onOpenAttribute={(attributeId) => setPogNav({ mode: "detail", attributeId })}
+                  onViewAll={() => setPogNav({ mode: "all" })}
+                  onStartWithOutcomes={() => {
+                    setPogReturnToDetailAttrId(null);
+                    setPogOutcomesFirstDraft((prev) => {
+                      const merged = new Set<string>([...prev.selectedKeys, ...linkedPogOutcomeKeys]);
+                      return { ...prev, selectedKeys: Array.from(merged) };
+                    });
+                    setPogNav({ mode: "outcomesFirst" });
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </section>
 
+        {/* ── Learner Experience ───────────────────────────────── */}
+        <section className="border border-gray-200 rounded-xl p-5 bg-white">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Learner Experience</h3>
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-dashed border-gray-300 text-gray-500 hover:text-blue-600 hover:border-blue-300 bg-transparent" onClick={() => setAddingSubcomponent(true)}>
+              <Plus className="w-3 h-3" /> Add subcomponent
+            </Button>
+          </div>
+          <>
               <AnimatePresence>
                 {addingSubcomponent && (
                   <motion.div
@@ -1498,19 +1585,14 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                         onChange={(e) => setNewSubName(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") addSubcomponent();
-                          if (e.key === "Escape") {
-                            setNewSubName("");
-                            setAddingSubcomponent(false);
-                          }
+                          if (e.key === "Escape") { setNewSubName(""); setAddingSubcomponent(false); }
                         }}
                         placeholder="Subcomponent name..."
                         className="flex-1 h-8 text-sm"
                         autoFocus
                         data-testid="input-new-subcomponent-name"
                       />
-                      <Button size="sm" className="h-8" onClick={addSubcomponent} data-testid="button-confirm-add-subcomponent">
-                        Add
-                      </Button>
+                      <Button size="sm" className="h-8" onClick={addSubcomponent} data-testid="button-confirm-add-subcomponent">Add</Button>
                       <Button size="sm" variant="ghost" className="h-8" onClick={() => { setNewSubName(""); setAddingSubcomponent(false); }}>
                         <X className="w-4 h-4" />
                       </Button>
@@ -1518,38 +1600,195 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                   </motion.div>
                 )}
               </AnimatePresence>
-
-              {subcomponents.length === 0 && !addingSubcomponent && (
-                <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
-                  <div className="text-gray-400 mb-3">
-                    <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-medium">No subcomponents yet</p>
-                    <p className="text-xs mt-1">Add subcomponents to define the detailed experiences within this component.</p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs gap-1"
-                    onClick={() => setAddingSubcomponent(true)}
-                  >
+              {subcomponents.length === 0 && !addingSubcomponent ? (
+                <div className="text-center py-8 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
+                  <Target className="w-6 h-6 mx-auto mb-2 text-gray-300" />
+                  <p className="text-xs text-gray-400">No subcomponents yet</p>
+                  <Button variant="outline" size="sm" className="text-xs gap-1 mt-3" onClick={() => setAddingSubcomponent(true)}>
                     <Plus className="w-3 h-3" /> Add First Subcomponent
                   </Button>
                 </div>
+              ) : (
+                <div className="space-y-3">
+                  {subcomponents.map((sub) => (
+                    <SubcomponentCard key={sub.id} sub={sub} onUpdate={updateSubcomponent} onDelete={() => deleteSubcomponent(sub.id)} onOpen={() => setActiveSubId(sub.id)} />
+                  ))}
+                </div>
               )}
-
-              <div className="space-y-3">
-                {subcomponents.map((sub) => (
-                  <SubcomponentCard
-                    key={sub.id}
-                    sub={sub}
-                    onUpdate={updateSubcomponent}
-                    onDelete={() => deleteSubcomponent(sub.id)}
-                    onOpen={() => setActiveSubId(sub.id)}
-                  />
-                ))}
-              </div>
             </>
-          )}
+        </section>
+
+        {/* ── Adults & Adult Experience ────────────────────────── */}
+        <section className="border border-gray-200 rounded-xl p-5 bg-gray-50/40">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Adults &amp; the Adult Experience</h3>
+            <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200">Coming soon</span>
+          </div>
+          <p className="text-xs text-gray-400">What adults support learners in this component, and what does their experience look like?</p>
+        </section>
+
+        {/* ── Elements of the Designed Experience ─────────────── */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Elements of the Designed Experience</h3>
+          </div>
+          <button
+            onClick={() => openExpertView("schedule")}
+            className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-800 group-hover:text-purple-800 transition-colors">
+                    Schedule &amp; Use of Time
+                  </span>
+                  {Object.keys(elementsExpertData['schedule'] ?? {}).filter(k => k !== '__plain__').length > 0 && (
+                    <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                      In progress
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400">Time blocks, scheduling structures, tools &amp; resources</p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+            </div>
+          </button>
+          <div className="mt-2 grid grid-cols-1 gap-2">
+            <button
+              type="button"
+              onClick={() => openExpertView("learning")}
+              className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 group-hover:text-purple-800 transition-colors">
+                      Learning Activities, Instructional Practices, C&amp;A
+                    </span>
+                    {Object.keys(elementsExpertData["learning"] ?? {}).filter((k) => k !== "__plain__").length >
+                      0 && (
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                        In progress
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">Learning activities, facilitation, curriculum &amp; assessment</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => openExpertView("culture")}
+              className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 group-hover:text-purple-800 transition-colors">
+                      Systems &amp; Practices for School Culture
+                    </span>
+                    {Object.keys(elementsExpertData["culture"] ?? {}).filter((k) => k !== "__plain__").length >
+                      0 && (
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                        In progress
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">Culture &amp; community activities, touchstones, adult materials</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => openExpertView("facilitator")}
+              className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 group-hover:text-purple-800 transition-colors">
+                      Facilitator Roles &amp; Configurations
+                    </span>
+                    {Object.keys(elementsExpertData["facilitator"] ?? {}).filter((k) => k !== "__plain__").length > 0 && (
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                        In progress
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">Staffing configurations, ratios, roles &amp; adult practices</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => openExpertView("partnerships")}
+              className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 group-hover:text-purple-800 transition-colors">
+                      Community &amp; Family Partnerships
+                    </span>
+                    {Object.keys(elementsExpertData["partnerships"] ?? {}).filter((k) => k !== "__plain__").length > 0 && (
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                        In progress
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">Community partnerships, family communications &amp; coordination systems</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => openExpertView("ops")}
+              className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 group-hover:text-purple-800 transition-colors">
+                      Operations, Budget &amp; Infrastructure
+                    </span>
+                    {Object.keys(elementsExpertData["ops"] ?? {}).filter((k) => k !== "__plain__").length > 0 && (
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                        In progress
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">Physical & digital space, transportation, food, cost & funding, and operational systems</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => openExpertView("improvement")}
+              className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 group-hover:text-purple-800 transition-colors">
+                      Continuous Improvement &amp; Design
+                    </span>
+                    {Object.keys(elementsExpertData["improvement"] ?? {}).filter((k) => k !== "__plain__").length > 0 && (
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                        In progress
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">Who drives improvement, what practices are used &amp; what tools support them</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </button>
+          </div>
         </section>
       </div>
     </div>
