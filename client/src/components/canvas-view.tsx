@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Bot, Library, X } from "lucide-react";
+import { Bot, Hand, Library, X } from "lucide-react";
 import { LearnerModuleLibraryProvider, useLearnerModuleLibrary } from "@/contexts/learner-module-library-context";
 import LearnerModuleLibraryStrip from "@/components/learner-module-library-strip";
 import { LML_STRIP_HEIGHT_CLAMP } from "@/lib/learner-module-library-layout";
@@ -789,6 +789,9 @@ function CanvasViewInner() {
   const { open: libraryOpen, toggleLibrary, moduleLibraryAudience } = useLearnerModuleLibrary();
   const [blueprintDropActive, setBlueprintDropActive] = useState(false);
   const [sheetPanelDropActive, setSheetPanelDropActive] = useState(false);
+  const [handToolActive, setHandToolActive] = useState(false);
+  const [blueprintPan, setBlueprintPan] = useState({ x: 0, y: 0 });
+  const blueprintPanSessionRef = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null);
   const { data: componentsRaw, isSuccess } = useQuery(componentQueries.all);
   const seedMutation = useSeedComponents();
   const updateMutation = useUpdateComponent();
@@ -843,6 +846,15 @@ function CanvasViewInner() {
     };
   }, [libraryOpen]);
 
+  useEffect(() => {
+    if (!handToolActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHandToolActive(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handToolActive]);
+
   const ringListForDrop = useMemo(
     () => (Array.isArray(componentsRaw) ? componentsRaw.filter((c: any) => String(c?.nodeId || "") !== "overall") : []),
     [componentsRaw],
@@ -867,12 +879,24 @@ function CanvasViewInner() {
     );
   };
 
-  const onSheetPanelDrop = (e: React.DragEvent) => {
+  const onSheetPanelDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setSheetPanelDropActive(false);
     const resolved = resolveCatalogPickFromDrop(e.dataTransfer);
     if (!resolved || !selectedNode) return;
-    if (selectedNode.nodeId === "overall" && resolved.audience !== "adult") return;
+
+    if (selectedNode.nodeId === "overall") {
+      const idSet = new Set(ringListForDrop.map((c: any) => String(c.nodeId)));
+      const slot = ringListForDrop.length;
+      await addRingComponentFromCatalogPick(
+        resolved.pick,
+        (body) => createMutation.mutateAsync(body),
+        { slot, existingNodeIds: idSet, colorIndex: slot },
+        resolved.audience,
+      );
+      return;
+    }
+
     const raw = Array.isArray(componentsRaw)
       ? componentsRaw.find((c: any) => String(c?.nodeId) === selectedNode.nodeId)
       : undefined;
@@ -934,7 +958,7 @@ function CanvasViewInner() {
 
       <div
         className={cn(
-          "absolute inset-0 flex items-center justify-center transform scale-90 origin-center transition-[box-shadow] rounded-[inherit]",
+          "absolute inset-0 overflow-hidden transition-[box-shadow] rounded-[inherit]",
           blueprintDropActive && "ring-4 ring-emerald-500 ring-offset-2 ring-offset-[#F8F9FA]",
         )}
         onDragEnter={(e) => {
@@ -953,12 +977,62 @@ function CanvasViewInner() {
         }}
         onDrop={onBlueprintDrop}
       >
-        {blueprintDropActive ? (
-          <div className="pointer-events-none absolute top-8 left-1/2 z-20 -translate-x-1/2 rounded-full border border-emerald-400 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-emerald-900 shadow-md">
-            Drop to add component to blueprint
-          </div>
+        {handToolActive ? (
+          <div
+            className="absolute inset-0 z-0 cursor-grab touch-none select-none active:cursor-grabbing"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              blueprintPanSessionRef.current = {
+                pointerId: e.pointerId,
+                lastX: e.clientX,
+                lastY: e.clientY,
+              };
+            }}
+            onPointerMove={(e) => {
+              const s = blueprintPanSessionRef.current;
+              if (!s || s.pointerId !== e.pointerId) return;
+              const dx = e.clientX - s.lastX;
+              const dy = e.clientY - s.lastY;
+              s.lastX = e.clientX;
+              s.lastY = e.clientY;
+              setBlueprintPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+            }}
+            onPointerUp={(e) => {
+              const s = blueprintPanSessionRef.current;
+              if (!s || s.pointerId !== e.pointerId) return;
+              try {
+                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              } catch {
+                /* ignore */
+              }
+              blueprintPanSessionRef.current = null;
+            }}
+            onPointerCancel={(e) => {
+              const s = blueprintPanSessionRef.current;
+              if (!s || s.pointerId !== e.pointerId) return;
+              try {
+                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              } catch {
+                /* ignore */
+              }
+              blueprintPanSessionRef.current = null;
+            }}
+          />
         ) : null}
-         {derivedNodes.map((node) => (
+        <div
+          className="pointer-events-none absolute inset-0 z-[1]"
+          style={{
+            transform: `translate(${blueprintPan.x}px, ${blueprintPan.y}px) scale(${CANVAS_STAGE_SCALE})`,
+            transformOrigin: "center center",
+          }}
+        >
+          {blueprintDropActive ? (
+            <div className="pointer-events-none absolute top-8 left-1/2 z-20 -translate-x-1/2 rounded-full border border-emerald-400 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-emerald-900 shadow-md">
+              Drop to add component to blueprint
+            </div>
+          ) : null}
+          {derivedNodes.map((node) => (
             <OctagonNode
               key={node.nodeId}
               node={node}
@@ -998,16 +1072,43 @@ function CanvasViewInner() {
               }}
             />
           ))}
+        </div>
       </div>
 
-      <div className="absolute bottom-6 right-6 flex items-center bg-white rounded-full shadow-lg border border-gray-200 px-4 py-2 gap-4">
-         <button className="text-gray-500 hover:text-gray-900 font-bold">-</button>
-         <span className="text-xs font-medium text-gray-600">50%</span>
-         <button className="text-gray-500 hover:text-gray-900 font-bold">+</button>
-      </div>
-
-      <div className="absolute bottom-6 right-36 bg-blue-900 text-white p-3 rounded-full shadow-lg cursor-pointer hover:bg-blue-800 transition-colors">
+      <div className="absolute bottom-6 right-6 z-20 flex flex-row-reverse items-center gap-3">
+        <div className="flex items-center bg-white rounded-full shadow-lg border border-gray-200 px-2 py-2 gap-1">
+          <button
+            type="button"
+            title={handToolActive ? "Pan the blueprint (Esc to exit)" : "Pan the blueprint — drag empty space"}
+            aria-pressed={handToolActive}
+            onClick={() => setHandToolActive((v) => !v)}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+              handToolActive
+                ? "bg-sky-100 text-sky-900 ring-2 ring-sky-400 shadow-inner"
+                : "text-gray-600 hover:bg-gray-100",
+            )}
+            data-testid="button-blueprint-hand-tool"
+          >
+            <Hand className="h-4 w-4" />
+          </button>
+          <div className="mx-1 h-6 w-px bg-gray-200" />
+          <button type="button" className="px-2 text-gray-500 hover:text-gray-900 font-bold">
+            -
+          </button>
+          <span className="text-xs font-medium text-gray-600 min-w-[2.5rem] text-center">50%</span>
+          <button type="button" className="px-2 text-gray-500 hover:text-gray-900 font-bold">
+            +
+          </button>
+        </div>
+        <button
+          type="button"
+          title="AI companion (prototype)"
+          className="shrink-0 bg-blue-900 text-white p-3 rounded-full shadow-lg cursor-pointer hover:bg-blue-800 transition-colors"
+          data-testid="button-ai-companion-fab"
+        >
           <Bot className="w-5 h-5" />
+        </button>
       </div>
 
       <Sheet
@@ -1039,20 +1140,15 @@ function CanvasViewInner() {
           <div
             className={cn(
               "relative flex h-full min-h-0 flex-col transition-[box-shadow,background-color]",
-              sheetPanelDropActive &&
-                selectedNode?.nodeId &&
-                (selectedNode.nodeId !== "overall" || moduleLibraryAudience === "adult") &&
-                "ring-4 ring-inset ring-sky-500 bg-sky-50/30",
+              sheetPanelDropActive && selectedNode?.nodeId && "ring-4 ring-inset ring-sky-500 bg-sky-50/30",
             )}
             onDragEnter={(e) => {
               if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
-              if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
               e.preventDefault();
               setSheetPanelDropActive(true);
             }}
             onDragOver={(e) => {
               if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
-              if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "copy";
               setSheetPanelDropActive(true);
@@ -1066,7 +1162,7 @@ function CanvasViewInner() {
               <div className="pointer-events-none absolute inset-x-0 top-14 z-10 flex justify-center px-4">
                 <div className="rounded-full border border-sky-300 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-sky-900 shadow-md">
                   {selectedNode.nodeId === "overall"
-                    ? `Drop to add adult experience module to whole school`
+                    ? `Drop to add ${moduleLibraryAudience === "adult" ? "adult" : "learner"} experience component to the blueprint`
                     : moduleLibraryAudience === "adult"
                       ? `Drop to add adult subcomponent to “${selectedNode.title}”`
                       : `Drop to add learner subcomponent to “${selectedNode.title}”`}

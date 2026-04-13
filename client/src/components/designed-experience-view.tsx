@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AnimatePresence, motion } from "framer-motion";
-import { componentQueries, useUpdateComponent } from "@/lib/api";
+import { componentQueries, useCreateComponent, useDeleteComponent, useUpdateComponent } from "@/lib/api";
 import { useMergedComponent } from "@/lib/useMergedComponent";
 import OutcomeSummaryView from "./outcome-summary-view";
 import LeapSummaryView from "./leap-summary-view";
@@ -90,6 +90,8 @@ import {
   priorityToLevel as rollupPriorityToLevel,
   type TargetingScenario,
 } from "./targeting-rollup-utils";
+import { isAdultRingComponent, isLearnerRingComponent } from "@/lib/ring-experience-audience";
+import { scheduleMigrateLegacyOverallAdultSubcomponents } from "@/lib/legacy-overall-adult-subs-migration";
 
 import artifactDoc from "@/assets/images/artifact-doc.png";
 import artifactSlide from "@/assets/images/artifact-slide.png";
@@ -819,6 +821,21 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   const componentData = useMergedComponent(nodeId);
   const { data: allComponents } = useQuery(componentQueries.all);
   const updateMutation = useUpdateComponent();
+  const createRingMutation = useCreateComponent();
+  const deleteRingMutation = useDeleteComponent();
+
+  const blueprintRingComponents = useMemo(
+    () => (allComponents as any[] | undefined)?.filter((c) => String(c?.nodeId || "") !== "overall") ?? [],
+    [allComponents],
+  );
+  const learnerBlueprintRings = useMemo(
+    () => blueprintRingComponents.filter((c) => isLearnerRingComponent(c)),
+    [blueprintRingComponents],
+  );
+  const adultBlueprintRings = useMemo(
+    () => blueprintRingComponents.filter((c) => isAdultRingComponent(c)),
+    [blueprintRingComponents],
+  );
   const deRef = useRef<DesignedExperienceData>({});
   const descRef = useRef(description);
   const kdeRef = useRef(keyDesignElements);
@@ -833,6 +850,17 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   kdeRef.current = keyDesignElements;
   elementsExpertRef.current = elementsExpertData;
   const isOverall = String(nodeId || "") === "overall" || String((componentData as any)?.nodeId || "") === "overall";
+
+  useEffect(() => {
+    if (!isOverall || !componentData) return;
+    const de = (componentData as any)?.designedExperienceData;
+    scheduleMigrateLegacyOverallAdultSubcomponents({
+      overallDesignedExperience: de,
+      allRings: blueprintRingComponents,
+      createMutateAsync: (body) => createRingMutation.mutateAsync(body),
+      updateMutateAsync: (args) => updateMutation.mutateAsync(args),
+    });
+  }, [isOverall, componentData, blueprintRingComponents, createRingMutation, updateMutation]);
 
   const schoolWideElementsExpertData = useMemo(() => {
     const list = (allComponents as any[]) || [];
@@ -1397,7 +1425,15 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   }
 
   if (showSchoolAdultExperienceView && isOverall) {
-    return <SchoolAdultExperienceView onBack={() => setShowSchoolAdultExperienceView(false)} />;
+    return (
+      <SchoolAdultExperienceView
+        onBack={() => setShowSchoolAdultExperienceView(false)}
+        onOpenComponent={(targetNodeId) => {
+          setShowSchoolAdultExperienceView(false);
+          onRequestOpenComponent?.(targetNodeId);
+        }}
+      />
+    );
   }
 
   if (showComponentAdultManage && !isOverall && nodeId) {
@@ -1920,31 +1956,47 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           {isOverall ? (
             <>
               <p className="text-xs text-gray-500 mb-3">
-                Whole-school view: components appear as octagons on the canvas. Use Module library to open the top catalog
-                strip; use Manage for scratch adds, descriptions, and bulk editing in one place.
+                Whole-school learner components are octagons on the blueprint. Open the module library strip, drag here or
+                onto the canvas, or use Manage — same list everywhere.
               </p>
-              {(() => {
-                const ring = (allComponents as any[] | undefined)?.filter((c) => String(c?.nodeId || "") !== "overall") ?? [];
-                return ring.length === 0 ? (
-                  <div className="text-center py-8 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
-                    <Target className="w-6 h-6 mx-auto mb-2 text-gray-300" />
-                    <p className="text-xs text-gray-400">No components yet</p>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {ring.map((c: any) => (
+              {learnerBlueprintRings.length === 0 ? (
+                <div className="text-center py-8 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
+                  <Target className="w-6 h-6 mx-auto mb-2 text-gray-300" />
+                  <p className="text-xs text-gray-400">No learner components yet</p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {learnerBlueprintRings.map((c: any) => (
+                    <div
+                      key={c.nodeId}
+                      className="inline-flex items-stretch gap-0 rounded-lg border border-sky-200 bg-sky-50 text-sky-900 max-w-[220px] overflow-hidden"
+                    >
                       <button
-                        key={c.nodeId}
                         type="button"
                         onClick={() => onRequestOpenComponent?.(String(c.nodeId))}
-                        className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100 transition-colors max-w-[200px]"
+                        className="text-left text-[11px] font-medium px-2.5 py-1.5 hover:bg-sky-100 transition-colors min-w-0 flex-1"
                       >
                         <span className="line-clamp-2">{c.title || c.nodeId}</span>
                       </button>
-                    ))}
-                  </div>
-                );
-              })()}
+                      <button
+                        type="button"
+                        title="Remove from blueprint"
+                        className="shrink-0 px-2 border-l border-sky-200 text-red-600 hover:bg-red-50 transition-colors flex items-center justify-center"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const label = String(c.title || c.nodeId);
+                          if (confirm(`Delete “${label}” from the blueprint?`)) {
+                            deleteRingMutation.mutate(String(c.nodeId));
+                          }
+                        }}
+                        data-testid={`button-delete-learner-blueprint-ring-${c.nodeId}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -2130,27 +2182,46 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
             </div>
             <p className="text-xs text-gray-600 mb-3">
               {isOverall
-                ? "Whole-school adult modules live on this overview. Open the strip on Adult, then drag onto this panel while Overview is open — or use Manage for scratch adds and bulk editing."
+                ? "Whole-school adult components are octagons on the blueprint. Open the strip on Adult, drag here or onto the canvas, or use Manage — same list everywhere."
                 : "Adult modules for this ring: strip on Adult, drag onto the working panel here or the blueprint. Use Manage for scratch adds and bulk editing."}
             </p>
             {isOverall ? (
               <>
-                {adultSubcomponents.length === 0 ? (
+                {adultBlueprintRings.length === 0 ? (
                   <div className="text-center py-8 border border-dashed border-violet-200 rounded-lg bg-white/60">
                     <Target className="w-6 h-6 mx-auto mb-2 text-violet-200" />
-                    <p className="text-xs text-gray-400">No adult modules yet</p>
+                    <p className="text-xs text-gray-400">No adult components yet</p>
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {adultSubcomponents.map((sub) => (
-                      <button
-                        key={sub.id}
-                        type="button"
-                        onClick={() => setShowSchoolAdultExperienceView(true)}
-                        className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 transition-colors max-w-[200px]"
+                    {adultBlueprintRings.map((c: any) => (
+                      <div
+                        key={c.nodeId}
+                        className="inline-flex items-stretch gap-0 rounded-lg border border-violet-200 bg-violet-50 text-violet-900 max-w-[220px] overflow-hidden"
                       >
-                        <span className="line-clamp-2">{sub.name}</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => onRequestOpenComponent?.(String(c.nodeId))}
+                          className="text-left text-[11px] font-medium px-2.5 py-1.5 hover:bg-violet-100 transition-colors min-w-0 flex-1"
+                        >
+                          <span className="line-clamp-2">{c.title || c.nodeId}</span>
+                        </button>
+                        <button
+                          type="button"
+                          title="Remove from blueprint"
+                          className="shrink-0 px-2 border-l border-violet-200 text-red-600 hover:bg-red-50 transition-colors flex items-center justify-center"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const label = String(c.title || c.nodeId);
+                            if (confirm(`Delete “${label}” from the blueprint?`)) {
+                              deleteRingMutation.mutate(String(c.nodeId));
+                            }
+                          }}
+                          data-testid={`button-delete-adult-blueprint-ring-${c.nodeId}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}

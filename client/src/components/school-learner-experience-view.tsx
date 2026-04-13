@@ -14,6 +14,7 @@ import {
   LEARNER_COMPONENT_COLOR_ROTATION,
 } from "@/lib/learner-experience-create";
 import { useLearnerModuleLibrary } from "@/contexts/learner-module-library-context";
+import { isLearnerRingComponent } from "@/lib/ring-experience-audience";
 
 function prototypeGeneratedDescription(comp: any): string {
   const title = String(comp?.title || "Component");
@@ -45,12 +46,17 @@ export default function SchoolLearnerExperienceView({
   const deleteMutation = useDeleteComponent();
   const updateMutation = useUpdateComponent();
 
-  const ringComponents = useMemo(
+  const allRings = useMemo(
     () =>
       Array.isArray(componentsRaw)
         ? componentsRaw.filter((c: any) => String(c?.nodeId || "") !== "overall")
         : [],
     [componentsRaw],
+  );
+
+  const ringComponents = useMemo(
+    () => allRings.filter((c: any) => isLearnerRingComponent(c)),
+    [allRings],
   );
 
   const [scratchName, setScratchName] = useState("");
@@ -72,14 +78,13 @@ export default function SchoolLearnerExperienceView({
     setDraftDescs(nextD);
   }, [ringComponents]);
 
-  const existingNodeIds = useMemo(() => new Set(ringComponents.map((c: any) => String(c.nodeId))), [ringComponents]);
-
   const addFromScratch = async () => {
     const name = scratchName.trim();
     if (!name) return;
-    const start = ringComponents.length;
+    const idSet = new Set(allRings.map((c: any) => String(c.nodeId)));
+    const start = allRings.length;
     const pos = computeRingPositions(start, 1)[0]!;
-    const nodeId = uniqueNodeIdFromLabel(name, new Set(existingNodeIds));
+    const nodeId = uniqueNodeIdFromLabel(name, idSet);
     const color = LEARNER_COMPONENT_COLOR_ROTATION[start % LEARNER_COMPONENT_COLOR_ROTATION.length];
     const base = defaultSnapshotForLearnerComponent(name);
     await createMutation.mutateAsync({
@@ -90,7 +95,7 @@ export default function SchoolLearnerExperienceView({
       canvasX: pos.canvasX,
       canvasY: pos.canvasY,
       snapshotData: { ...base, description: scratchDesc.trim() || base.description },
-      designedExperienceData: { description: scratchDesc.trim() },
+      designedExperienceData: { description: scratchDesc.trim(), experienceAudience: "learner" },
       healthData: {},
     });
     setScratchName("");

@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
+  addRingComponentFromCatalogPick,
   dataTransferHasLearnerModule,
   resolveCatalogPickFromDrop,
   subcomponentFromCatalogPick,
 } from "@/lib/learner-module-drop";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { useUpdateComponent } from "@/lib/api";
+import { useCreateComponent, useUpdateComponent } from "@/lib/api";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import ComponentWorkingPanel, { type ComponentWorkingPanelNode } from "./component-working-panel";
 import AICompanionPanel from "./ai-companion-panel";
@@ -90,8 +91,14 @@ export default function ComponentWorkingSpaceOverlay({
     (componentData as any) ?? listComponent;
 
   const updateMutation = useUpdateComponent();
+  const createMutation = useCreateComponent();
   const { moduleLibraryAudience } = useLearnerModuleLibrary();
   const [panelDropActive, setPanelDropActive] = useState(false);
+
+  const ringListForDrop = useMemo(
+    () => (Array.isArray(componentsRaw) ? componentsRaw.filter((c: any) => String(c?.nodeId || "") !== "overall") : []),
+    [componentsRaw],
+  );
 
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [pane2Tool, setPane2Tool] = useState<ToolId | null>(null);
@@ -187,14 +194,27 @@ export default function ComponentWorkingSpaceOverlay({
   };
 
   const onWorkingPanelDrop = useCallback(
-    (e: React.DragEvent) => {
+    async (e: React.DragEvent) => {
       e.preventDefault();
       setPanelDropActive(false);
       const parentId = selectedNode?.nodeId;
       if (!parentId) return;
       const resolved = resolveCatalogPickFromDrop(e.dataTransfer);
-      if (!resolved || !componentInFocus) return;
-      if (parentId === "overall" && resolved.audience !== "adult") return;
+      if (!resolved) return;
+
+      if (parentId === "overall") {
+        const idSet = new Set(ringListForDrop.map((c: any) => String(c.nodeId)));
+        const slot = ringListForDrop.length;
+        await addRingComponentFromCatalogPick(
+          resolved.pick,
+          (body) => createMutation.mutateAsync(body),
+          { slot, existingNodeIds: idSet, colorIndex: slot },
+          resolved.audience,
+        );
+        return;
+      }
+
+      if (!componentInFocus) return;
       const de: any = componentInFocus.designedExperienceData || {};
       if (resolved.audience === "adult") {
         const adultSubs = [...(de.adultSubcomponents || [])];
@@ -212,7 +232,7 @@ export default function ComponentWorkingSpaceOverlay({
         });
       }
     },
-    [selectedNode?.nodeId, componentInFocus, updateMutation],
+    [selectedNode?.nodeId, componentInFocus, updateMutation, ringListForDrop, createMutation],
   );
 
   return (
@@ -241,20 +261,15 @@ export default function ComponentWorkingSpaceOverlay({
                 <div
                   className={cn(
                     "relative h-full w-full flex flex-col border-r border-gray-200 bg-white transition-[box-shadow,background-color]",
-                    panelDropActive &&
-                      selectedNode?.nodeId &&
-                      (selectedNode.nodeId !== "overall" || moduleLibraryAudience === "adult") &&
-                      "ring-4 ring-inset ring-sky-500 bg-sky-50/40",
+                    panelDropActive && selectedNode?.nodeId && "ring-4 ring-inset ring-sky-500 bg-sky-50/40",
                   )}
                   onDragEnter={(e) => {
                     if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
-                    if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
                     e.preventDefault();
                     setPanelDropActive(true);
                   }}
                   onDragOver={(e) => {
                     if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
-                    if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "copy";
                     setPanelDropActive(true);
@@ -270,7 +285,7 @@ export default function ComponentWorkingSpaceOverlay({
                     <div className="pointer-events-none absolute inset-x-0 top-12 z-10 flex justify-center px-4">
                       <div className="rounded-full border border-sky-300 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-sky-900 shadow-md">
                         {selectedNode.nodeId === "overall"
-                          ? "Drop to add adult experience module to whole school"
+                          ? `Drop to add ${moduleLibraryAudience === "adult" ? "adult" : "learner"} experience component to the blueprint`
                           : moduleLibraryAudience === "adult"
                             ? `Drop to add adult subcomponent to “${selectedNode.title}”`
                             : `Drop to add learner subcomponent to “${selectedNode.title}”`}
