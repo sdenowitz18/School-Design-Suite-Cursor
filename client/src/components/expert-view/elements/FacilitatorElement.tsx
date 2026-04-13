@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QuestionSection } from '../QuestionSection';
 import { FACILITATOR_ELEMENT } from '../facilitator-element-schema';
 import type { BucketValue, ComponentType, ElementSection, ElementsExpertData } from '../expert-view-types';
@@ -16,7 +16,12 @@ const SECTION_TABS: { id: ElementSection; label: string }[] = [
 
 export function FacilitatorElement({ componentType, data, onChange }: FacilitatorElementProps) {
   const [activeSection, setActiveSection] = useState<ElementSection>('practices');
+  const [openQuestionId, setOpenQuestionId] = useState<string | null>(null);
   const elementData = data['facilitator'] ?? {};
+
+  useEffect(() => {
+    setOpenQuestionId(null);
+  }, [activeSection]);
 
   function handleBucketChange(questionId: string, bucketId: string, value: BucketValue) {
     const key = `${questionId}__${bucketId}`;
@@ -66,6 +71,10 @@ export function FacilitatorElement({ componentType, data, onChange }: Facilitato
               data={getQuestionData(question.id)}
               componentType={componentType}
               onChange={(bucketId, value) => handleBucketChange(question.id, bucketId, value)}
+              bucketsExpanded={openQuestionId === question.id}
+              onToggleBuckets={() =>
+                setOpenQuestionId((cur) => (cur === question.id ? null : question.id))
+              }
             />
           </div>
         ))}

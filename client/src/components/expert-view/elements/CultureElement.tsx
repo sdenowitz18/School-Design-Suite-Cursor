@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QuestionSection } from '../QuestionSection';
 import { CULTURE_ELEMENT } from '../culture-element-schema';
 import type { BucketValue, ComponentType, ElementSection, ElementsExpertData } from '../expert-view-types';
@@ -18,7 +18,12 @@ const SECTION_TABS: { id: ElementSection; label: string }[] = [
 
 export function CultureElement({ componentType, data, onChange, schoolWideElementsExpertData }: CultureElementProps) {
   const [activeSection, setActiveSection] = useState<ElementSection>('practices');
+  const [openQuestionId, setOpenQuestionId] = useState<string | null>(null);
   const elementData = data['culture'] ?? {};
+
+  useEffect(() => {
+    setOpenQuestionId(null);
+  }, [activeSection]);
   const sharedData = (data['__shared__'] ?? {}) as Record<string, BucketValue>;
 
   function handleBucketChange(questionId: string, bucketId: string, value: BucketValue) {
@@ -76,6 +81,10 @@ export function CultureElement({ componentType, data, onChange, schoolWideElemen
               data={getQuestionData(question.id)}
               componentType={componentType}
               onChange={(bucketId, value) => handleBucketChange(question.id, bucketId, value)}
+              bucketsExpanded={openQuestionId === question.id}
+              onToggleBuckets={() =>
+                setOpenQuestionId((cur) => (cur === question.id ? null : question.id))
+              }
               elementId="culture"
               schoolWideElementsExpertData={schoolWideElementsExpertData}
               sharedData={sharedData}

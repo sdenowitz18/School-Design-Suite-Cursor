@@ -59,3 +59,35 @@ export function useSeedComponents() {
     },
   });
 }
+
+export function useCreateComponent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      return fetchJson("/api/components", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["components"] });
+    },
+  });
+}
+
+export function useDeleteComponent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (nodeId: string) => {
+      const res = await fetch(`/api/components/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(`Delete failed: ${res.status}`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["components"] });
+    },
+  });
+}

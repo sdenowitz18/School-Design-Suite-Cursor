@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -41,6 +41,7 @@ export default function ComponentWorkingPanel({
   onClose,
   onExpand,
   showExpandButton = false,
+  onRequestOpenComponent,
 }: {
   selectedNode: ComponentWorkingPanelNode | null;
   componentsRaw: any[] | undefined;
@@ -55,6 +56,8 @@ export default function ComponentWorkingPanel({
   onClose: () => void;
   onExpand?: () => void;
   showExpandButton?: boolean;
+  /** Whole-school learner experience: open another component’s working panel (snapshot tab). */
+  onRequestOpenComponent?: (nodeId: string) => void;
 }) {
   const updateMutation = useUpdateComponent();
   const nodeId = selectedNode?.nodeId || "";
@@ -175,7 +178,7 @@ export default function ComponentWorkingPanel({
                 : [
                     { label: "Snapshot", value: "snapshot" },
                     { label: "Designed Experience", value: "designed-experience" },
-                    { label: "Status and Health", value: "status-and-health" },
+                    ...(!openSubId ? [{ label: "Status and Health", value: "status-and-health" }] : []),
                   ]
               ).map((tab) => (
                 <TabsTrigger
@@ -225,6 +228,7 @@ export default function ComponentWorkingPanel({
                   onSubIdConsumed={onInitialSubIdConsumed}
                   openSubId={openSubId}
                   onOpenSubIdChange={onOpenSubIdChange}
+                  onRequestOpenComponent={onRequestOpenComponent}
                 />
               );
             }

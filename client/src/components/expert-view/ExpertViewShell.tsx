@@ -89,7 +89,9 @@ export function ExpertViewShell({
   onBack,
   schoolWideElementsExpertData,
 }: ExpertViewShellProps) {
-  const [activeElement, setActiveElement] = useState<string>(initialActiveElement);
+  const [activeElement, setActiveElement] = useState<string>(() =>
+    initialActiveElement === 'learners' ? 'schedule' : initialActiveElement,
+  );
   // Demo-only toggle for switching center/ring
   const [componentType, setComponentType] = useState<ComponentType>(initialType);
 

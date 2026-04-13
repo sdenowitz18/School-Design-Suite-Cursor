@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Plus,
+  Library,
   X,
   Star,
   Trash2,
@@ -28,7 +29,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
@@ -40,13 +40,25 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AnimatePresence, motion } from "framer-motion";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
+import { useMergedComponent } from "@/lib/useMergedComponent";
 import OutcomeSummaryView from "./outcome-summary-view";
+import LeapSummaryView from "./leap-summary-view";
+import LearnersView from "./learners-view";
+import AdultsView from "./adults-view";
+import SchoolLearnerExperienceView from "./school-learner-experience-view";
+import SchoolAdultExperienceView from "./school-adult-experience-view";
+import ComponentLearnerExperienceView from "./component-learner-experience-view";
+import ComponentAdultExperienceView from "./component-adult-experience-view";
+import { useLearnerModuleLibraryOptional } from "@/contexts/learner-module-library-context";
 import OutcomeDetailView from "./outcome-detail-view";
+import LeapDetailView from "./leap-detail-view";
 import OutcomeScoreView from "./outcome-score-view";
 import { SchemaPickerSheet } from "./de-schema-picker-sheet";
 import { ExpertViewShell } from "./expert-view/ExpertViewShell";
 import type { ElementsExpertData } from "./expert-view/expert-view-types";
 import { LEAP_SCHEMA, OUTCOME_SCHEMA, PRACTICE_SCHEMA, SUPPORT_SCHEMA } from "./designed-experience-schemas";
+import { formatLearnerSelectionPreview, learnerSelectionIsKey } from "./learner-design-schema";
+import { adultLeafChipsFromSelections } from "./adult-design-schema";
 import SupportGroupsHubView from "./support-groups-hub-view";
 import SupportGroupDetailView from "./support-group-detail-view";
 import SupportDetailView from "./support-detail-view";
@@ -83,6 +95,12 @@ export interface Tag {
   source?: string;
 }
 
+export interface KeyDesignElements {
+  aims: Tag[];
+  practices: Tag[];
+  supports: Tag[];
+}
+
 export interface DESubcomponent {
   id: string;
   name: string;
@@ -90,18 +108,18 @@ export interface DESubcomponent {
   aims: Tag[];
   practices: Tag[];
   supports: Tag[];
-}
-
-export interface KeyDesignElements {
-  aims: Tag[];
-  practices: Tag[];
-  supports: Tag[];
+  keyDesignElements?: KeyDesignElements;
+  elementsExpertData?: ElementsExpertData;
+  learnersProfile?: any;
+  adultsProfile?: any;
 }
 
 export interface DesignedExperienceData {
   description?: string;
   keyDesignElements?: KeyDesignElements;
   subcomponents?: DESubcomponent[];
+  /** Same shape as subcomponents; modules dragged from the adult catalog land here. */
+  adultSubcomponents?: DESubcomponent[];
   // Additional nested pages may store extra fields here (e.g. support group workflow).
   // This view must preserve unknown fields when saving.
   [key: string]: any;
@@ -125,12 +143,6 @@ const FEATURED_ARTIFACTS: Artifact[] = [
 
 let deIdCounter = 0;
 const generateId = () => `de_${Date.now()}_${++deIdCounter}`;
-
-const levelToHml = (level: TagLevel | undefined): "H" | "M" | "L" => {
-  if (level === "High") return "H";
-  if (level === "Low") return "L";
-  return "M";
-};
 
 const Chip = ({ 
   type, 
@@ -233,483 +245,93 @@ const ArtifactCard = ({ artifact }: { artifact: Artifact }) => (
   </div>
 );
 
-function CompactTagRow({
-  aims,
-  practices,
-  supports,
-  onToggleAim,
-  onSetAimLevel,
-  getAimLevel,
-  onRemoveAim,
-  onTogglePractice,
-  onRemovePractice,
-  onToggleSupport,
-  onRemoveSupport,
+function SubcomponentCard({
+  sub,
+  onUpdate,
+  onDelete,
+  onOpen,
 }: {
-  aims: Tag[];
-  practices: Tag[];
-  supports: Tag[];
-  onToggleAim: (label: string, type: TagType) => void;
-  onSetAimLevel?: (label: string, type: "outcome" | "leap", level: TagLevel) => void;
-  getAimLevel?: (label: string, type: "outcome" | "leap") => TagLevel | undefined;
-  onRemoveAim: (id: string) => void;
-  onTogglePractice: (label: string) => void;
-  onRemovePractice: (id: string) => void;
-  onToggleSupport: (label: string) => void;
-  onRemoveSupport: (id: string) => void;
-}) {
-  const aimLabels = aims.map(a => a.label);
-  const practiceLabels = practices.map(p => p.label);
-  const supportLabels = supports.map(s => s.label);
-
-  return (
-    <div className="space-y-2.5">
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 min-w-[70px]">
-            <Target className="w-3 h-3 text-emerald-600" />
-            <span className="text-[10px] font-semibold uppercase text-gray-500">Aims</span>
-          </div>
-          <div className="flex flex-wrap gap-1 flex-1">
-            {aims.map(tag => (
-              <Chip
-                key={tag.id}
-                type={tag.type}
-                label={tag.label}
-                isPrimary={tag.isPrimary}
-                meta={tag.type === "outcome" || tag.type === "leap" ? levelToHml(tag.level) : undefined}
-                onRemove={() => onRemoveAim(tag.id)}
-              />
-            ))}
-            <SchemaPickerSheet
-              title="Select Outcomes"
-              description="Choose outcome aims for this subcomponent."
-              schema={OUTCOME_SCHEMA}
-              selectedLabels={aimLabels}
-              onToggle={(label) => onToggleAim(label, "outcome")}
-              getLevel={getAimLevel ? (label) => getAimLevel(label, "outcome") : undefined}
-              onSetLevel={onSetAimLevel ? (label, level) => onSetAimLevel(label, "outcome", level) : undefined}
-              type="outcome"
-              triggerLabel="Outcomes"
-              triggerIcon={Target}
-            />
-            <SchemaPickerSheet
-              title="Select Leaps"
-              description="Choose leap aims for this subcomponent."
-              schema={LEAP_SCHEMA}
-              selectedLabels={aimLabels}
-              onToggle={(label) => onToggleAim(label, "leap")}
-              getLevel={getAimLevel ? (label) => getAimLevel(label, "leap") : undefined}
-              onSetLevel={onSetAimLevel ? (label, level) => onSetAimLevel(label, "leap", level) : undefined}
-              type="leap"
-              triggerLabel="Leaps"
-              triggerIcon={Sparkles}
-            />
-          </div>
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 min-w-[70px]">
-            <RotateCw className="w-3 h-3 text-orange-600" />
-            <span className="text-[10px] font-semibold uppercase text-gray-500">Practices</span>
-          </div>
-          <div className="flex flex-wrap gap-1 flex-1">
-            {practices.map(tag => (
-              <Chip key={tag.id} type="practice" label={tag.label} onRemove={() => onRemovePractice(tag.id)} />
-            ))}
-            <SchemaPickerSheet
-              title="Select Practices"
-              description="Choose instructional practices for this subcomponent."
-              schema={PRACTICE_SCHEMA}
-              selectedLabels={practiceLabels}
-              onToggle={onTogglePractice}
-              type="practice"
-              triggerLabel="Practices"
-              triggerIcon={RotateCw}
-            />
-          </div>
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 min-w-[70px]">
-            <Wrench className="w-3 h-3 text-sky-600" />
-            <span className="text-[10px] font-semibold uppercase text-gray-500">Supports</span>
-          </div>
-          <div className="flex flex-wrap gap-1 flex-1">
-            {supports.map(tag => (
-              <Chip key={tag.id} type="support" label={tag.label} onRemove={() => onRemoveSupport(tag.id)} />
-            ))}
-            <SchemaPickerSheet
-              title="Select Supports"
-              description="Choose supports and resources for this subcomponent."
-              schema={SUPPORT_SCHEMA}
-              selectedLabels={supportLabels}
-              onToggle={onToggleSupport}
-              type="support"
-              triggerLabel="Supports"
-              triggerIcon={Wrench}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SubcomponentCard({ 
-  sub, 
-  onUpdate, 
-  onDelete, 
-  onOpen 
-}: { 
-  sub: DESubcomponent; 
-  onUpdate: (updated: DESubcomponent) => void; 
-  onDelete: () => void;
-  onOpen: () => void;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [editingDesc, setEditingDesc] = useState(false);
-  const [nameVal, setNameVal] = useState(sub.name);
-  const [descVal, setDescVal] = useState(sub.description);
-
-  useEffect(() => {
-    setNameVal(sub.name);
-    setDescVal(sub.description);
-  }, [sub.name, sub.description]);
-
-  const toggleAim = (label: string, type: TagType) => {
-    const existing = sub.aims.find(a => a.label === label);
-    if (existing) {
-      onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== existing.id) });
-    } else {
-      onUpdate({ ...sub, aims: [...sub.aims, { id: generateId(), type, label, level: "Medium" }] });
-    }
-  };
-
-  const togglePractice = (label: string) => {
-    const existing = sub.practices.find(p => p.label === label);
-    if (existing) {
-      onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== existing.id) });
-    } else {
-      onUpdate({ ...sub, practices: [...sub.practices, { id: generateId(), type: "practice", label }] });
-    }
-  };
-
-  const toggleSupport = (label: string) => {
-    const existing = sub.supports.find(s => s.label === label);
-    if (existing) {
-      onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== existing.id) });
-    } else {
-      onUpdate({ ...sub, supports: [...sub.supports, { id: generateId(), type: "support", label }] });
-    }
-  };
-
-  const saveName = () => {
-    if (nameVal.trim()) {
-      onUpdate({ ...sub, name: nameVal.trim() });
-    }
-    setEditingName(false);
-  };
-
-  const saveDesc = () => {
-    onUpdate({ ...sub, description: descVal });
-    setEditingDesc(false);
-  };
-
-  return (
-    <motion.div 
-      initial={false}
-      className={cn(
-        "border rounded-lg bg-white transition-all duration-200 overflow-hidden", 
-        isOpen ? "shadow-sm ring-1 ring-black/5 border-gray-300" : "border-gray-200 hover:border-gray-300",
-      )}
-      data-testid={`card-subcomponent-${sub.id}`}
-    >
-      <div className="px-4 py-3 cursor-pointer select-none" onClick={() => setIsOpen(!isOpen)}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              {editingName ? (
-                <div className="flex items-center gap-1.5 flex-1" onClick={(e) => e.stopPropagation()}>
-                  <Input 
-                    value={nameVal} 
-                    onChange={(e) => setNameVal(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setNameVal(sub.name); setEditingName(false); } }}
-                    className="h-7 text-sm font-semibold"
-                    autoFocus
-                    data-testid={`input-subcomponent-name-${sub.id}`}
-                  />
-                  <Button size="sm" className="h-7 text-xs px-2" onClick={saveName}>Save</Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 group/name">
-                  <h4 className="font-semibold text-sm text-gray-900" data-testid={`text-subcomponent-name-${sub.id}`}>{sub.name}</h4>
-                  <button
-                    className="opacity-0 group-hover/name:opacity-100 transition-opacity p-0.5"
-                    onClick={(e) => { e.stopPropagation(); setEditingName(true); }}
-                    data-testid={`button-edit-name-${sub.id}`}
-                  >
-                    <Pencil className="w-3 h-3 text-gray-400 hover:text-gray-600" />
-                  </button>
-                </div>
-              )}
-            </div>
-            {!isOpen && (
-              <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
-                <span>{sub.aims.length} aims</span>
-                <span>·</span>
-                <span>{sub.practices.length} practices</span>
-                <span>·</span>
-                <span>{sub.supports.length} supports</span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-6 text-[11px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
-              onClick={(e) => { e.stopPropagation(); onOpen(); }}
-              data-testid={`button-open-subcomponent-${sub.id}`}
-            >
-              Open
-            </Button>
-            <ChevronDown className={cn("w-4 h-4 text-gray-400 transition-transform duration-200", isOpen && "rotate-180")} />
-          </div>
-        </div>
-      </div>
-
-      <Collapsible open={isOpen}>
-        <CollapsibleContent>
-          <div className="px-4 pb-3 pt-0 space-y-3">
-            <Separator className="mb-2" />
-            
-            <div onClick={(e) => e.stopPropagation()}>
-              {editingDesc ? (
-                <div className="space-y-1.5">
-                  <Textarea 
-                    value={descVal} 
-                    onChange={(e) => setDescVal(e.target.value)}
-                    className="text-xs min-h-[50px] resize-none"
-                    placeholder="Describe this subcomponent..."
-                    autoFocus
-                    data-testid={`input-subcomponent-desc-${sub.id}`}
-                  />
-                  <div className="flex justify-end gap-1">
-                    <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => { setDescVal(sub.description); setEditingDesc(false); }}>Cancel</Button>
-                    <Button size="sm" className="h-6 text-[11px]" onClick={saveDesc}>Save</Button>
-                  </div>
-                </div>
-              ) : (
-                <p 
-                  className="text-xs text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded p-1 -m-1 transition-colors"
-                  onClick={() => setEditingDesc(true)}
-                  data-testid={`text-subcomponent-desc-${sub.id}`}
-                >
-                  {sub.description || <span className="italic text-gray-400">Click to add description...</span>}
-                </p>
-              )}
-            </div>
-
-            <div onClick={(e) => e.stopPropagation()}>
-              <CompactTagRow
-                aims={sub.aims}
-                practices={sub.practices}
-                supports={sub.supports}
-                onToggleAim={toggleAim}
-                getAimLevel={(label, type) => sub.aims.find(a => a.type === type && a.label === label)?.level}
-                onSetAimLevel={(label, type, level) =>
-                  onUpdate({ ...sub, aims: sub.aims.map(a => (a.type === type && a.label === label ? { ...a, level } : a)) })
-                }
-                onRemoveAim={(id) => onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== id) })}
-                onTogglePractice={togglePractice}
-                onRemovePractice={(id) => onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== id) })}
-                onToggleSupport={toggleSupport}
-                onRemoveSupport={(id) => onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== id) })}
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-gray-100">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-[11px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1 h-6 px-2"
-                onClick={(e) => { e.stopPropagation(); onOpen(); }}
-                data-testid={`button-view-full-${sub.id}`}
-              >
-                View full page <ChevronRight className="w-3 h-3" />
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-[11px] text-red-500 hover:text-red-700 hover:bg-red-50 gap-1 h-6 px-2"
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                data-testid={`button-delete-subcomponent-${sub.id}`}
-              >
-                <Trash2 className="w-3 h-3" /> Remove
-              </Button>
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </motion.div>
-  );
-}
-
-function SubcomponentDetailPage({ 
-  sub, 
-  parentTitle, 
-  onBack, 
-  onUpdate 
-}: { 
-  sub: DESubcomponent; 
-  parentTitle: string; 
-  onBack: () => void; 
+  sub: DESubcomponent;
   onUpdate: (updated: DESubcomponent) => void;
+  onDelete: () => void;
+  /** Omit to hide “Open” (e.g. adult modules v1 — name/remove only). */
+  onOpen?: () => void;
 }) {
   const [editingName, setEditingName] = useState(false);
-  const [editingDesc, setEditingDesc] = useState(false);
   const [nameVal, setNameVal] = useState(sub.name);
-  const [descVal, setDescVal] = useState(sub.description);
 
   useEffect(() => {
     setNameVal(sub.name);
-    setDescVal(sub.description);
-  }, [sub.name, sub.description]);
-
-  const toggleAim = (label: string, type: TagType) => {
-    const existing = sub.aims.find(a => a.label === label);
-    if (existing) {
-      onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== existing.id) });
-    } else {
-      onUpdate({ ...sub, aims: [...sub.aims, { id: generateId(), type, label, level: "Medium" }] });
-    }
-  };
-
-  const togglePractice = (label: string) => {
-    const existing = sub.practices.find(p => p.label === label);
-    if (existing) {
-      onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== existing.id) });
-    } else {
-      onUpdate({ ...sub, practices: [...sub.practices, { id: generateId(), type: "practice", label }] });
-    }
-  };
-
-  const toggleSupport = (label: string) => {
-    const existing = sub.supports.find(s => s.label === label);
-    if (existing) {
-      onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== existing.id) });
-    } else {
-      onUpdate({ ...sub, supports: [...sub.supports, { id: generateId(), type: "support", label }] });
-    }
-  };
+  }, [sub.name]);
 
   const saveName = () => {
     if (nameVal.trim()) onUpdate({ ...sub, name: nameVal.trim() });
     setEditingName(false);
   };
 
-  const saveDesc = () => {
-    onUpdate({ ...sub, description: descVal });
-    setEditingDesc(false);
-  };
-
   return (
-    <div className="min-h-screen bg-white">
-      <div className="max-w-7xl mx-auto px-6 md:px-10 space-y-8 pb-24 pt-6">
-        <section className="space-y-4">
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              {editingName ? (
-                <div className="flex items-center gap-2 flex-1">
-                  <Input 
-                    value={nameVal} 
-                    onChange={(e) => setNameVal(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setNameVal(sub.name); setEditingName(false); } }}
-                    className="h-10 text-xl font-serif font-bold max-w-md"
-                    autoFocus
-                    data-testid="input-subcomponent-detail-name"
-                  />
-                  <Button size="sm" onClick={saveName}>Save</Button>
-                  <Button size="sm" variant="outline" onClick={() => { setNameVal(sub.name); setEditingName(false); }}>Cancel</Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 group">
-                  <h2 className="text-2xl font-serif font-bold text-gray-900" data-testid="text-subcomponent-detail-name">{sub.name}</h2>
-                  <Button variant="ghost" size="sm" className="h-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setEditingName(true)}>
-                    <Pencil className="w-3 h-3" />
-                  </Button>
-                </div>
-              )}
-            </div>
-            {editingDesc ? (
-              <div className="space-y-2 max-w-2xl">
-                <Textarea 
-                  value={descVal} 
-                  onChange={(e) => setDescVal(e.target.value)}
-                  className="text-sm min-h-[80px]"
-                  autoFocus
-                  data-testid="input-subcomponent-detail-desc"
-                />
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={saveDesc}>Save</Button>
-                  <Button size="sm" variant="outline" onClick={() => { setDescVal(sub.description); setEditingDesc(false); }}>Cancel</Button>
-                </div>
-              </div>
-            ) : (
-              <div className="group flex items-start gap-2 max-w-2xl">
-                <p className="text-gray-600 leading-relaxed" data-testid="text-subcomponent-detail-desc">
-                  {sub.description || <span className="italic text-gray-400">Click to add a description...</span>}
-                </p>
-                <Button variant="ghost" size="sm" className="h-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={() => setEditingDesc(true)}>
-                  <Pencil className="w-3 h-3" />
-                </Button>
-              </div>
-            )}
+    <div
+      className="border rounded-lg bg-white border-gray-200 px-4 py-3 flex items-center justify-between gap-3"
+      data-testid={`card-subcomponent-${sub.id}`}
+    >
+      <div className="flex-1 min-w-0">
+        {editingName ? (
+          <div className="flex items-center gap-1.5 flex-1">
+            <Input
+              value={nameVal}
+              onChange={(e) => setNameVal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveName();
+                if (e.key === "Escape") {
+                  setNameVal(sub.name);
+                  setEditingName(false);
+                }
+              }}
+              className="h-7 text-sm font-semibold max-w-md"
+              autoFocus
+              data-testid={`input-subcomponent-name-${sub.id}`}
+            />
+            <Button size="sm" className="h-7 text-xs px-2" onClick={saveName}>
+              Save
+            </Button>
           </div>
-        </section>
-
-        <section>
-          <SectionHeader title="Featured Artifacts" />
-          <ScrollArea className="w-full whitespace-nowrap pb-4">
-            <div className="flex gap-4">
-              {FEATURED_ARTIFACTS.slice(0, 2).map(artifact => (
-                <ArtifactCard key={artifact.id} artifact={artifact} />
-              ))}
-              <div className="flex flex-col w-[160px] group cursor-pointer">
-                <div className="relative aspect-[4/3] bg-gray-50 rounded-md border border-dashed border-gray-300 flex items-center justify-center transition-colors group-hover:bg-gray-100 group-hover:border-gray-400">
-                  <div className="flex flex-col items-center gap-1 text-gray-400">
-                    <Plus className="w-6 h-6" />
-                    <span className="text-[10px] font-medium">Add Artifact</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <ScrollBar orientation="horizontal" />
-          </ScrollArea>
-        </section>
-
-        <section className="space-y-6">
-          <SectionHeader title="Key Design Elements" />
-          <CompactTagRow
-            aims={sub.aims}
-            practices={sub.practices}
-            supports={sub.supports}
-            onToggleAim={toggleAim}
-            getAimLevel={(label, type) => sub.aims.find(a => a.type === type && a.label === label)?.level}
-            onSetAimLevel={(label, type, level) =>
-              onUpdate({ ...sub, aims: sub.aims.map(a => (a.type === type && a.label === label ? { ...a, level } : a)) })
-            }
-            onRemoveAim={(id) => onUpdate({ ...sub, aims: sub.aims.filter(a => a.id !== id) })}
-            onTogglePractice={togglePractice}
-            onRemovePractice={(id) => onUpdate({ ...sub, practices: sub.practices.filter(p => p.id !== id) })}
-            onToggleSupport={toggleSupport}
-            onRemoveSupport={(id) => onUpdate({ ...sub, supports: sub.supports.filter(s => s.id !== id) })}
-          />
-        </section>
+        ) : (
+          <div className="flex items-center gap-1.5 group/name">
+            <h4 className="font-semibold text-sm text-gray-900" data-testid={`text-subcomponent-name-${sub.id}`}>
+              {sub.name}
+            </h4>
+            <button
+              type="button"
+              className="opacity-0 group-hover/name:opacity-100 transition-opacity p-0.5"
+              onClick={() => setEditingName(true)}
+              data-testid={`button-edit-name-${sub.id}`}
+            >
+              <Pencil className="w-3 h-3 text-gray-400 hover:text-gray-600" />
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {onOpen ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-[11px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
+            onClick={() => onOpen()}
+            data-testid={`button-open-subcomponent-${sub.id}`}
+          >
+            Open
+          </Button>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 text-[11px] text-red-500 hover:text-red-700 hover:bg-red-50 gap-1 px-2"
+          onClick={onDelete}
+          data-testid={`button-delete-subcomponent-${sub.id}`}
+        >
+          <Trash2 className="w-3 h-3" /> Remove
+        </Button>
       </div>
     </div>
   );
@@ -1102,10 +724,11 @@ function KeyDesignElementsSummary({
   );
 }
 
-export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void }) {
+export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange, onRequestOpenComponent }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void, onRequestOpenComponent?: (nodeId: string) => void }) {
   const [description, setDescription] = useState("");
   const [keyDesignElements, setKeyDesignElements] = useState<KeyDesignElements>({ aims: [], practices: [], supports: [] });
   const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
+  const [adultSubcomponents, setAdultSubcomponents] = useState<DESubcomponent[]>([]);
   const [portraitOfGraduate, setPortraitOfGraduate] = useState<PortraitOfGraduate>({ attributes: [], linksByAttributeId: {} });
   const [pogNav, setPogNav] = useState<{ mode: "hub" } | { mode: "detail"; attributeId: string } | { mode: "outcomesFirst" } | { mode: "all" }>({ mode: "hub" });
   const [pogReturnToDetailAttrId, setPogReturnToDetailAttrId] = useState<string | null>(null);
@@ -1114,9 +737,34 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   const [localOpenSubId, setLocalOpenSubId] = useState<string | null>(null);
   const [addingSubcomponent, setAddingSubcomponent] = useState(false);
   const [newSubName, setNewSubName] = useState("");
+  const [addingAdultSubcomponent, setAddingAdultSubcomponent] = useState(false);
+  const [newAdultSubName, setNewAdultSubName] = useState("");
   const [showOutcomeSummary, setShowOutcomeSummary] = useState(false);
+  const [showLeapSummary, setShowLeapSummary] = useState(false);
+  const [showLearnersView, setShowLearnersView] = useState(false);
+  const [showAdultsView, setShowAdultsView] = useState(false);
+  /** When opening Adults from a role chip, land on that slice's detail page. */
+  const [adultsInitialSliceKey, setAdultsInitialSliceKey] = useState<string | null>(null);
+  const [showSchoolLearnerExperienceView, setShowSchoolLearnerExperienceView] = useState(false);
+  const [showSchoolAdultExperienceView, setShowSchoolAdultExperienceView] = useState(false);
+  const [showComponentLearnerManage, setShowComponentLearnerManage] = useState(false);
+  const [showComponentAdultManage, setShowComponentAdultManage] = useState(false);
+  /** When opening ring adult Manage from a pill, scroll to this module on the manage page. */
+  const [componentAdultFocusSubId, setComponentAdultFocusSubId] = useState<string | null>(null);
+  const [showPortraitOfGraduateManage, setShowPortraitOfGraduateManage] = useState(false);
+  const [leapSummaryFocusLabel, setLeapSummaryFocusLabel] = useState<string | null>(null);
+  const learnerModuleLibrary = useLearnerModuleLibraryOptional();
+  const openLearnerLibrary = useCallback(() => {
+    learnerModuleLibrary?.setModuleLibraryAudience("learner");
+    learnerModuleLibrary?.toggleLibrary();
+  }, [learnerModuleLibrary]);
+  const openAdultLibrary = useCallback(() => {
+    learnerModuleLibrary?.setModuleLibraryAudience("adult");
+    learnerModuleLibrary?.toggleLibrary();
+  }, [learnerModuleLibrary]);
   const [showOutcomeScore, setShowOutcomeScore] = useState(false);
   const [selectedOutcomeLabel, setSelectedOutcomeLabel] = useState<string | null>(null);
+  const [selectedLeapLabel, setSelectedLeapLabel] = useState<string | null>(null);
   const [supportNav, setSupportNav] = useState<
     | { mode: "none" }
     | { mode: "hub" }
@@ -1140,10 +788,22 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     else setLocalOpenSubId(id);
   };
 
-  const { data: componentData } = useQuery(componentQueries.byNodeId(nodeId || ""));
+  const componentData = useMergedComponent(nodeId);
   const { data: allComponents } = useQuery(componentQueries.all);
   const updateMutation = useUpdateComponent();
   const deRef = useRef<DesignedExperienceData>({});
+  const descRef = useRef(description);
+  const kdeRef = useRef(keyDesignElements);
+  const elementsExpertRef = useRef(elementsExpertData);
+  const subEditStashRef = useRef<{
+    parentDescription: string;
+    parentKeyDesignElements: KeyDesignElements;
+    parentElementsExpertData: ElementsExpertData;
+  } | null>(null);
+  const prevActiveSubIdRef = useRef<string | null>(null);
+  descRef.current = description;
+  kdeRef.current = keyDesignElements;
+  elementsExpertRef.current = elementsExpertData;
   const isOverall = String(nodeId || "") === "overall" || String((componentData as any)?.nodeId || "") === "overall";
 
   const schoolWideElementsExpertData = useMemo(() => {
@@ -1162,10 +822,19 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     // Only hydrate local state once per nodeId; otherwise refetches from our own PATCHes
     // will overwrite local state and can cause save/refetch loops.
     if (loadedNodeId === nodeId) return;
+    prevActiveSubIdRef.current = null;
+    subEditStashRef.current = null;
     const de: DesignedExperienceData = (componentData as any).designedExperienceData || {};
     setDescription(de.description || "");
     setKeyDesignElements(de.keyDesignElements || { aims: [], practices: [], supports: [] });
     setSubcomponents((de.subcomponents || []).map((s: any) => ({
+      ...s,
+      id: s.id || generateId(),
+      aims: s.aims || [],
+      practices: s.practices || [],
+      supports: s.supports || [],
+    })));
+    setAdultSubcomponents((de.adultSubcomponents || []).map((s: any) => ({
       ...s,
       id: s.id || generateId(),
       aims: s.aims || [],
@@ -1179,6 +848,44 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     setPogNav({ mode: "hub" });
     setLoadedNodeId(nodeId);
   }, [componentData, loadedNodeId, nodeId]);
+
+  useEffect(() => {
+    if (loadedNodeId !== nodeId || !componentData) return;
+    const serverSubs: any[] =
+      (componentData as any)?.designedExperienceData?.subcomponents || [];
+    setSubcomponents((prev) => {
+      const localIds = new Set(prev.map((s) => s.id));
+      const additions = serverSubs
+        .filter((s: any) => s.id && !localIds.has(s.id))
+        .map((s: any) => ({
+          ...s,
+          aims: s.aims || [],
+          practices: s.practices || [],
+          supports: s.supports || [],
+        }));
+      if (additions.length === 0) return prev;
+      return [...prev, ...additions];
+    });
+  }, [loadedNodeId, nodeId, componentData]);
+
+  useEffect(() => {
+    if (loadedNodeId !== nodeId || !componentData) return;
+    const serverAdult: any[] =
+      (componentData as any)?.designedExperienceData?.adultSubcomponents || [];
+    setAdultSubcomponents((prev) => {
+      const localIds = new Set(prev.map((s) => s.id));
+      const additions = serverAdult
+        .filter((s: any) => s.id && !localIds.has(s.id))
+        .map((s: any) => ({
+          ...s,
+          aims: s.aims || [],
+          practices: s.practices || [],
+          supports: s.supports || [],
+        }));
+      if (additions.length === 0) return prev;
+      return [...prev, ...additions];
+    });
+  }, [loadedNodeId, nodeId, componentData]);
 
   useEffect(() => {
     if (!isOverall) return;
@@ -1211,8 +918,158 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     }
   }, [initialSubId, subcomponents]);
 
+  useEffect(() => {
+    if (isOverall || loadedNodeId !== nodeId || !nodeId) return;
+
+    const prev = prevActiveSubIdRef.current;
+    const cur = activeSubId;
+    if (prev === cur) return;
+
+    const flushPatch = (): Pick<DESubcomponent, "description" | "aims" | "practices" | "supports" | "keyDesignElements" | "elementsExpertData"> => {
+      const kde = kdeRef.current;
+      return {
+        description: descRef.current,
+        aims: kde.aims,
+        practices: kde.practices,
+        supports: kde.supports,
+        keyDesignElements: {
+          ...kde,
+          aims: [...kde.aims],
+          practices: [...kde.practices],
+          supports: [...kde.supports],
+        },
+        elementsExpertData: { ...elementsExpertRef.current },
+      };
+    };
+
+    let mergedSubs = subcomponents;
+
+    if (prev && prev !== cur) {
+      mergedSubs = subcomponents.map((s) => (s.id === prev ? { ...s, ...flushPatch() } : s));
+      setSubcomponents(mergedSubs);
+    } else if (prev && !cur) {
+      mergedSubs = subcomponents.map((s) => (s.id === prev ? { ...s, ...flushPatch() } : s));
+      setSubcomponents(mergedSubs);
+      const stash = subEditStashRef.current;
+      if (stash) {
+        setDescription(stash.parentDescription);
+        setKeyDesignElements(stash.parentKeyDesignElements);
+        setElementsExpertData(stash.parentElementsExpertData);
+        subEditStashRef.current = null;
+      }
+      prevActiveSubIdRef.current = cur;
+      return;
+    }
+
+    if (!cur) {
+      prevActiveSubIdRef.current = cur;
+      return;
+    }
+
+    if (!prev) {
+      subEditStashRef.current = {
+        parentDescription: descRef.current,
+        parentKeyDesignElements: {
+          ...kdeRef.current,
+          aims: [...kdeRef.current.aims],
+          practices: [...kdeRef.current.practices],
+          supports: [...kdeRef.current.supports],
+        },
+        parentElementsExpertData: { ...elementsExpertRef.current },
+      };
+    }
+
+    const sub = (prev && prev !== cur ? mergedSubs : subcomponents).find((s) => s.id === cur);
+    if (sub) {
+      const kde = sub.keyDesignElements || {
+        aims: sub.aims || [],
+        practices: sub.practices || [],
+        supports: sub.supports || [],
+      };
+      setDescription(sub.description || "");
+      setKeyDesignElements({
+        aims: [...kde.aims],
+        practices: [...kde.practices],
+        supports: [...kde.supports],
+      });
+      setElementsExpertData({ ...(sub.elementsExpertData ?? {}) });
+    }
+
+    prevActiveSubIdRef.current = cur;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSubId, isOverall, loadedNodeId, nodeId, subcomponents]);
+
   const saveData = useCallback(() => {
     if (!nodeId) return;
+    const deCurrent = (deRef.current || {}) as DesignedExperienceData;
+
+    if (!isOverall && activeSubId) {
+      const focus = subcomponents.find((s) => s.id === activeSubId);
+      if (!focus) return;
+
+      const stash = subEditStashRef.current;
+      const parentKde: KeyDesignElements =
+        stash?.parentKeyDesignElements ??
+        (deCurrent.keyDesignElements as KeyDesignElements) ?? { aims: [], practices: [], supports: [] };
+
+      // Sub save: scenarios use only this sub's aims — no parent ring aims or sibling rollup.
+      const subsForScenario = [
+        {
+          ...focus,
+          aims: keyDesignElements.aims,
+          practices: keyDesignElements.practices,
+          supports: keyDesignElements.supports,
+        },
+      ];
+
+      const baseAims = (keyDesignElements as any)?.aims || [];
+      const outcomeScenarios = buildRingScenarios({
+        topAims: keyDesignElements.aims,
+        subcomponents: subsForScenario,
+        type: "outcome",
+      });
+      const leapScenarios = buildRingScenarios({
+        topAims: keyDesignElements.aims,
+        subcomponents: subsForScenario,
+        type: "leap",
+      });
+
+      const aimsWithResolvedLevels = applyScenarioLevelsToAims(
+        applyScenarioLevelsToAims(baseAims, outcomeScenarios, "outcome"),
+        leapScenarios,
+        "leap",
+      );
+      const keyDesignElementsWithLevels: KeyDesignElements = {
+        ...keyDesignElements,
+        aims: aimsWithResolvedLevels as any,
+      };
+
+      const updatedSub: DESubcomponent = {
+        ...focus,
+        description,
+        aims: keyDesignElementsWithLevels.aims,
+        practices: keyDesignElementsWithLevels.practices,
+        supports: keyDesignElementsWithLevels.supports,
+        keyDesignElements: keyDesignElementsWithLevels,
+        elementsExpertData,
+      };
+
+      const newSubs = subcomponents.map((s) => (s.id === activeSubId ? updatedSub : s));
+
+      const designedExperienceData: DesignedExperienceData = {
+        ...deCurrent,
+        description: stash?.parentDescription ?? deCurrent.description,
+        keyDesignElements: parentKde,
+        subcomponents: newSubs,
+        adultSubcomponents,
+        portraitOfGraduate: deCurrent.portraitOfGraduate,
+        elementsExpertData: stash?.parentElementsExpertData ?? deCurrent.elementsExpertData,
+      };
+
+      updateMutation.mutate({ nodeId, data: { designedExperienceData } });
+      return;
+    }
+
     const baseAims = (keyDesignElements as any)?.aims || [];
     const ringList = ((allComponents as any[]) || []).filter((c: any) => String(c?.nodeId || c?.node_id || "") !== "overall");
     const outcomeScenarios = isOverall
@@ -1239,11 +1096,24 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       description,
       keyDesignElements: keyDesignElementsToSave,
       subcomponents,
+      adultSubcomponents,
       portraitOfGraduate: isOverall ? portraitOfGraduate : (deRef.current as any)?.portraitOfGraduate,
       elementsExpertData,
     };
     updateMutation.mutate({ nodeId, data: { designedExperienceData } });
-  }, [nodeId, description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, elementsExpertData, updateMutation, allComponents]);
+  }, [
+    nodeId,
+    description,
+    isOverall,
+    activeSubId,
+    keyDesignElements,
+    portraitOfGraduate,
+    subcomponents,
+    adultSubcomponents,
+    elementsExpertData,
+    updateMutation,
+    allComponents,
+  ]);
 
   useEffect(() => {
     if (!nodeId || !componentData) return;
@@ -1255,7 +1125,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     }, 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [description, isOverall, keyDesignElements, portraitOfGraduate, subcomponents, elementsExpertData, supportNav.mode]);
+  }, [description, isOverall, activeSubId, keyDesignElements, portraitOfGraduate, subcomponents, adultSubcomponents, elementsExpertData, supportNav.mode]);
 
   const addSubcomponent = () => {
     if (!newSubName.trim()) return;
@@ -1276,12 +1146,65 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     setSubcomponents(prev => prev.map(s => s.id === updated.id ? updated : s));
   };
 
+  const addAdultSubcomponent = () => {
+    if (!newAdultSubName.trim()) return;
+    const newSub: DESubcomponent = {
+      id: generateId(),
+      name: newAdultSubName.trim(),
+      description: "",
+      aims: [],
+      practices: [],
+      supports: [],
+    };
+    setAdultSubcomponents((prev) => [...prev, newSub]);
+    setNewAdultSubName("");
+    setAddingAdultSubcomponent(false);
+  };
+
+  const updateAdultSubcomponent = (updated: DESubcomponent) => {
+    setAdultSubcomponents((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+  };
+
+  const deleteAdultSubcomponent = (id: string) => {
+    setAdultSubcomponents((prev) => prev.filter((s) => s.id !== id));
+  };
+
   const deleteSubcomponent = (id: string) => {
     setSubcomponents(prev => prev.filter(s => s.id !== id));
     if (activeSubId === id) setActiveSubId(null);
   };
 
-  const openSub = activeSubId ? subcomponents.find(s => s.id === activeSubId) : null;
+  const focusSub =
+    !isOverall && activeSubId ? subcomponents.find((s) => s.id === activeSubId) ?? null : null;
+  const isEditingSub = !!focusSub;
+
+  const serverDeForProfiles = (componentData as any)?.designedExperienceData || {};
+  const serverSubForProfiles =
+    !isOverall && activeSubId
+      ? (serverDeForProfiles.subcomponents || []).find((s: any) => s.id === activeSubId)
+      : null;
+
+  const subProfileContext =
+    isEditingSub && nodeId && activeSubId ? { parentNodeId: nodeId, subId: activeSubId } : null;
+
+  /** While editing a sub, chips reflect that sub only (no fallback to the ring component). */
+  const designedExperienceProfileSelections = useMemo(() => {
+    if (isEditingSub) {
+      const adults = serverSubForProfiles?.adultsProfile?.selections;
+      const learners = serverSubForProfiles?.learnersProfile?.selections;
+      return {
+        adults: Array.isArray(adults) ? adults : [],
+        learners: Array.isArray(learners) ? learners : [],
+      };
+    }
+    const adults = serverDeForProfiles?.adultsProfile?.selections;
+    const learners = serverDeForProfiles?.learnersProfile?.selections;
+    return {
+      adults: Array.isArray(adults) ? adults : [],
+      learners: Array.isArray(learners) ? learners : [],
+    };
+  }, [isEditingSub, serverDeForProfiles, serverSubForProfiles]);
+
   const linkedPogOutcomeKeys = useMemo(() => {
     const keys = new Set<string>();
     const linksByAttr = (portraitOfGraduate as any)?.linksByAttributeId || {};
@@ -1310,6 +1233,173 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     );
   }
 
+  if (selectedLeapLabel) {
+    return (
+      <LeapDetailView
+        nodeId={nodeId}
+        title={title}
+        leapLabel={selectedLeapLabel}
+        onBack={() => setSelectedLeapLabel(null)}
+      />
+    );
+  }
+
+  if (showSchoolLearnerExperienceView && isOverall) {
+    return (
+      <SchoolLearnerExperienceView
+        onBack={() => setShowSchoolLearnerExperienceView(false)}
+        onOpenComponent={(targetNodeId) => {
+          setShowSchoolLearnerExperienceView(false);
+          onRequestOpenComponent?.(targetNodeId);
+        }}
+      />
+    );
+  }
+
+  if (showComponentLearnerManage && !isOverall && nodeId) {
+    return (
+      <ComponentLearnerExperienceView
+        nodeId={nodeId}
+        componentTitle={title || "Component"}
+        initialSubcomponents={subcomponents}
+        onBack={() => {
+          const latestDe: any = (componentData as any)?.designedExperienceData || {};
+          deRef.current = latestDe;
+          setShowComponentLearnerManage(false);
+        }}
+        onOpenSubcomponent={(subId) => {
+          setShowComponentLearnerManage(false);
+          setActiveSubId(subId);
+        }}
+        onSubcomponentsUpdated={(subs) => setSubcomponents(subs)}
+      />
+    );
+  }
+
+  if (showSchoolAdultExperienceView && isOverall) {
+    return <SchoolAdultExperienceView onBack={() => setShowSchoolAdultExperienceView(false)} />;
+  }
+
+  if (showComponentAdultManage && !isOverall && nodeId) {
+    return (
+      <ComponentAdultExperienceView
+        nodeId={nodeId}
+        componentTitle={title || "Component"}
+        initialAdultSubcomponents={adultSubcomponents}
+        focusSubId={componentAdultFocusSubId}
+        onBack={() => {
+          const latestDe: any = (componentData as any)?.designedExperienceData || {};
+          deRef.current = latestDe;
+          setComponentAdultFocusSubId(null);
+          setShowComponentAdultManage(false);
+        }}
+        onAdultSubcomponentsUpdated={(subs) => setAdultSubcomponents(subs)}
+      />
+    );
+  }
+
+  if (showPortraitOfGraduateManage && isOverall) {
+    return (
+      <div className="min-h-screen bg-white" data-testid="portrait-of-graduate-manage-page">
+        <div className="max-w-4xl mx-auto px-6 py-6 pb-20 space-y-6">
+          <button
+            type="button"
+            onClick={() => setShowPortraitOfGraduateManage(false)}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+          >
+            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            Back to Designed Experience
+          </button>
+          <h1 className="text-xl font-bold text-gray-900">Portrait of a Graduate</h1>
+          <PogHubView
+            portrait={portraitOfGraduate}
+            onChange={setPortraitOfGraduate}
+            onOpenAttribute={(attributeId) => {
+              setShowPortraitOfGraduateManage(false);
+              setPogNav({ mode: "detail", attributeId });
+            }}
+            onViewAll={() => {
+              setShowPortraitOfGraduateManage(false);
+              setPogNav({ mode: "all" });
+            }}
+            onStartWithOutcomes={() => {
+              setShowPortraitOfGraduateManage(false);
+              setPogReturnToDetailAttrId(null);
+              setPogOutcomesFirstDraft((prev) => {
+                const merged = new Set<string>([...prev.selectedKeys, ...linkedPogOutcomeKeys]);
+                return { ...prev, selectedKeys: Array.from(merged) };
+              });
+              setPogNav({ mode: "outcomesFirst" });
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (showAdultsView) {
+    return (
+      <AdultsView
+        nodeId={nodeId}
+        title={title}
+        subProfileContext={subProfileContext}
+        initialSliceKey={adultsInitialSliceKey}
+        onBack={() => {
+          const latestDe: any = (componentData as any)?.designedExperienceData || {};
+          deRef.current = latestDe;
+          setAdultsInitialSliceKey(null);
+          setShowAdultsView(false);
+        }}
+      />
+    );
+  }
+
+  if (showLearnersView) {
+    return (
+      <LearnersView
+        nodeId={nodeId}
+        title={title}
+        subProfileContext={subProfileContext}
+        onBack={() => {
+          const latestDe: any = (componentData as any)?.designedExperienceData || {};
+          deRef.current = latestDe;
+          setShowLearnersView(false);
+        }}
+      />
+    );
+  }
+
+  if (showLeapSummary) {
+    return (
+      <LeapSummaryView
+        nodeId={nodeId}
+        title={title}
+        focusLeapLabel={leapSummaryFocusLabel}
+        onOpenLeapDetail={(label) => {
+          setShowLeapSummary(false);
+          setLeapSummaryFocusLabel(null);
+          setSelectedLeapLabel(label);
+        }}
+        onBack={() => {
+          const latestDe: any = (componentData as any)?.designedExperienceData || {};
+          let latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
+          if (!isOverall && activeSubId) {
+            const sub = (latestDe.subcomponents || []).find((s: any) => s.id === activeSubId);
+            latestKde =
+              sub?.keyDesignElements || { aims: sub?.aims || [], practices: sub?.practices || [], supports: sub?.supports || [] };
+          }
+          setKeyDesignElements({
+            aims: Array.isArray(latestKde?.aims) ? latestKde.aims : [],
+            practices: Array.isArray(latestKde?.practices) ? latestKde.practices : [],
+            supports: Array.isArray(latestKde?.supports) ? latestKde.supports : [],
+          });
+          setLeapSummaryFocusLabel(null);
+          setShowLeapSummary(false);
+        }}
+      />
+    );
+  }
+
   if (showOutcomeSummary) {
     return (
       <OutcomeSummaryView
@@ -1317,7 +1407,12 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         title={title}
         onBack={() => {
           const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          const latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
+          let latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
+          if (!isOverall && activeSubId) {
+            const sub = (latestDe.subcomponents || []).find((s: any) => s.id === activeSubId);
+            latestKde =
+              sub?.keyDesignElements || { aims: sub?.aims || [], practices: sub?.practices || [], supports: sub?.supports || [] };
+          }
           setKeyDesignElements({
             aims: Array.isArray(latestKde?.aims) ? latestKde.aims : [],
             practices: Array.isArray(latestKde?.practices) ? latestKde.practices : [],
@@ -1422,22 +1517,11 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     );
   }
 
-  if (openSub) {
-    return (
-      <SubcomponentDetailPage
-        sub={openSub}
-        parentTitle={title || "Component"}
-        onBack={() => setActiveSubId(null)}
-        onUpdate={(updated) => updateSubcomponent(updated)}
-      />
-    );
-  }
-
   if (expertViewOpen) {
     return (
       <ExpertViewShell
         key={`${expertViewNonce}-${nodeId ?? ""}`}
-        componentTitle={title || "Component"}
+        componentTitle={isEditingSub && focusSub?.name ? focusSub.name : title || "Component"}
         componentType={isOverall ? "center" : "ring"}
         initialActiveElement={expertViewInitialElement}
         data={elementsExpertData}
@@ -1453,6 +1537,17 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       <div className="max-w-7xl mx-auto px-6 md:px-10 space-y-8 pb-24 pt-6">
         
         <section className="space-y-4">
+          {isEditingSub && focusSub && (
+            <div className="flex flex-wrap items-center gap-2 pb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Subcomponent</span>
+              <Input
+                value={focusSub.name}
+                onChange={(e) => updateSubcomponent({ ...focusSub, name: e.target.value })}
+                className="h-8 text-sm font-medium max-w-md"
+                data-testid="input-subcomponent-focus-name"
+              />
+            </div>
+          )}
           <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -1484,15 +1579,6 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           </ScrollArea>
         </section>
 
-        {/* ── Learners ─────────────────────────────────────────── */}
-        <section className="border border-gray-200 rounded-xl p-5 bg-gray-50/40">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Learners</h3>
-            <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200">Coming soon</span>
-          </div>
-          <p className="text-xs text-gray-400">Who are the young people whose growth & development is being supported in this component?</p>
-        </section>
-
         {/* ── Targeted Impacts for Learners ────────────────────── */}
         <section className="border border-gray-200 rounded-xl p-5 bg-white">
           <div className="flex items-center justify-between mb-3">
@@ -1503,16 +1589,29 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
             <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-gray-700">Leaps &amp; Design Principles</span>
-                <Button variant="link" size="sm" className="text-xs text-gray-500 h-auto p-0" onClick={() => setShowOutcomeSummary(true)}>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="text-xs text-gray-500 h-auto p-0"
+                  onClick={() => {
+                    setLeapSummaryFocusLabel(null);
+                    setShowLeapSummary(true);
+                  }}
+                >
                   Manage
                 </Button>
               </div>
               {keyDesignElements.aims.filter(a => a.type === "leap").length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                   {keyDesignElements.aims.filter(a => a.type === "leap").map(tag => (
-                    <span key={tag.id} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors"
+                      onClick={() => setSelectedLeapLabel(tag.label)}
+                    >
                       {tag.label}
-                    </span>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -1530,9 +1629,14 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
               {keyDesignElements.aims.filter(a => a.type === "outcome").length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                   {keyDesignElements.aims.filter(a => a.type === "outcome").map(tag => (
-                    <span key={tag.id} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                      onClick={() => setSelectedOutcomeLabel(tag.label)}
+                    >
                       {tag.label}
-                    </span>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -1542,35 +1646,137 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
             {/* Portrait of a Graduate — center component only */}
             {isOverall && (
               <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
-                <span className="text-xs font-medium text-gray-700 block mb-2">Portrait of a Graduate</span>
-                <PogHubView
-                  portrait={portraitOfGraduate}
-                  onChange={setPortraitOfGraduate}
-                  onOpenAttribute={(attributeId) => setPogNav({ mode: "detail", attributeId })}
-                  onViewAll={() => setPogNav({ mode: "all" })}
-                  onStartWithOutcomes={() => {
-                    setPogReturnToDetailAttrId(null);
-                    setPogOutcomesFirstDraft((prev) => {
-                      const merged = new Set<string>([...prev.selectedKeys, ...linkedPogOutcomeKeys]);
-                      return { ...prev, selectedKeys: Array.from(merged) };
-                    });
-                    setPogNav({ mode: "outcomesFirst" });
-                  }}
-                />
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <span className="text-xs font-medium text-gray-700">Portrait of a Graduate</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="text-xs text-gray-500 h-auto p-0"
+                    onClick={() => setShowPortraitOfGraduateManage(true)}
+                    data-testid="button-manage-portrait-of-graduate"
+                  >
+                    Manage
+                  </Button>
+                </div>
+                {(portraitOfGraduate.attributes || []).length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {(portraitOfGraduate.attributes || []).map((attr) => (
+                      <button
+                        key={attr.id}
+                        type="button"
+                        className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100 transition-colors"
+                        onClick={() => setPogNav({ mode: "detail", attributeId: attr.id })}
+                      >
+                        {attr.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 italic">No graduate portrait attributes yet — open Manage to add them.</p>
+                )}
               </div>
             )}
           </div>
         </section>
 
         {/* ── Learner Experience ───────────────────────────────── */}
+        {!isEditingSub && (
         <section className="border border-gray-200 rounded-xl p-5 bg-white">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Learner Experience</h3>
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-dashed border-gray-300 text-gray-500 hover:text-blue-600 hover:border-blue-300 bg-transparent" onClick={() => setAddingSubcomponent(true)}>
-              <Plus className="w-3 h-3" /> Add subcomponent
-            </Button>
+            <h3 className="text-sm font-semibold text-gray-800">Learner experience</h3>
+            {isOverall ? (
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {learnerModuleLibrary ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1 border-gray-200 text-gray-700 hover:text-sky-800 hover:border-sky-300 bg-white"
+                    onClick={openLearnerLibrary}
+                  >
+                    <Library className="w-3 h-3" />
+                    Module library
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1 border-dashed border-gray-300 text-gray-500 hover:text-blue-600 hover:border-blue-300 bg-transparent"
+                  onClick={() => setShowSchoolLearnerExperienceView(true)}
+                >
+                  <Plus className="w-3 h-3" /> Add component
+                </Button>
+                <Button variant="link" size="sm" className="text-xs text-gray-500 h-auto p-0" onClick={() => setShowSchoolLearnerExperienceView(true)}>
+                  Manage
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {learnerModuleLibrary ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1 border-gray-200 text-gray-700 hover:text-sky-800 hover:border-sky-300 bg-white"
+                    onClick={openLearnerLibrary}
+                  >
+                    <Library className="w-3 h-3" />
+                    Module library
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1 border-dashed border-gray-300 text-gray-500 hover:text-blue-600 hover:border-blue-300 bg-transparent"
+                  onClick={() => setAddingSubcomponent(true)}
+                >
+                  <Plus className="w-3 h-3" /> Add subcomponent
+                </Button>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="text-xs text-gray-500 h-auto p-0"
+                  onClick={() => setShowComponentLearnerManage(true)}
+                  data-testid="button-manage-ring-learner-experience"
+                >
+                  Manage
+                </Button>
+              </div>
+            )}
           </div>
-          <>
+          {isOverall ? (
+            <>
+              <p className="text-xs text-gray-500 mb-3">
+                Whole-school view: components appear as octagons on the canvas. Use Module library to open the top catalog
+                strip; use Manage for scratch adds, descriptions, and bulk editing in one place.
+              </p>
+              {(() => {
+                const ring = (allComponents as any[] | undefined)?.filter((c) => String(c?.nodeId || "") !== "overall") ?? [];
+                return ring.length === 0 ? (
+                  <div className="text-center py-8 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
+                    <Target className="w-6 h-6 mx-auto mb-2 text-gray-300" />
+                    <p className="text-xs text-gray-400">No components yet</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {ring.map((c: any) => (
+                      <button
+                        key={c.nodeId}
+                        type="button"
+                        onClick={() => onRequestOpenComponent?.(String(c.nodeId))}
+                        className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100 transition-colors max-w-[200px]"
+                      >
+                        <span className="line-clamp-2">{c.title || c.nodeId}</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-gray-500 mb-3">
+                Subcomponents organize learner experience within this ring. Use Manage for scratch adds, descriptions, and
+                bulk editing in one place — similar to whole-school learner experience, scoped to this component.
+              </p>
               <AnimatePresence>
                 {addingSubcomponent && (
                   <motion.div
@@ -1604,27 +1810,284 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                 <div className="text-center py-8 border border-dashed border-gray-200 rounded-lg bg-gray-50/50">
                   <Target className="w-6 h-6 mx-auto mb-2 text-gray-300" />
                   <p className="text-xs text-gray-400">No subcomponents yet</p>
-                  <Button variant="outline" size="sm" className="text-xs gap-1 mt-3" onClick={() => setAddingSubcomponent(true)}>
-                    <Plus className="w-3 h-3" /> Add First Subcomponent
-                  </Button>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
                   {subcomponents.map((sub) => (
-                    <SubcomponentCard key={sub.id} sub={sub} onUpdate={updateSubcomponent} onDelete={() => deleteSubcomponent(sub.id)} onOpen={() => setActiveSubId(sub.id)} />
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => setActiveSubId(sub.id)}
+                      className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100 transition-colors max-w-[200px]"
+                      data-testid={`button-open-subcomponent-${sub.id}`}
+                    >
+                      <span className="line-clamp-2">{sub.name}</span>
+                    </button>
                   ))}
                 </div>
               )}
             </>
+          )}
+        </section>
+        )}
+
+        {/* ── Adults ───────────────────────────────────────────── */}
+        <section className="border border-gray-200 rounded-xl p-5 bg-white">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Adults</h3>
+            <Button
+              variant="link"
+              size="sm"
+              className="text-xs text-gray-500 h-auto p-0"
+              onClick={() => {
+                setAdultsInitialSliceKey(null);
+                setShowAdultsView(true);
+              }}
+            >
+              Manage
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            Which adult roles this component is designed for, and demographics, skills, background, and staffing for each
+            role — separate from learner-facing design below.
+          </p>
+          {(() => {
+            const adultSels = designedExperienceProfileSelections.adults;
+            const chips = adultLeafChipsFromSelections(adultSels);
+            return chips.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {chips.map((c) => (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => {
+                      setAdultsInitialSliceKey(c.key);
+                      setShowAdultsView(true);
+                    }}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-medium cursor-pointer hover:opacity-90",
+                      c.isKey
+                        ? "bg-amber-50 border-amber-200 text-amber-900"
+                        : "bg-sky-50 border-sky-200 text-sky-800",
+                    )}
+                  >
+                    {c.isKey && <Star className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />}
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 italic">No adult roles yet — open Manage to add roles and detail.</p>
+            );
+          })()}
         </section>
 
-        {/* ── Adults & Adult Experience ────────────────────────── */}
-        <section className="border border-gray-200 rounded-xl p-5 bg-gray-50/40">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Adults &amp; the Adult Experience</h3>
-            <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200">Coming soon</span>
+        {/* ── Adult experience (catalog + manage) ─────────────── */}
+        {!isEditingSub && (
+          <section className="border border-violet-200/80 rounded-xl p-5 bg-violet-50/25">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <h3 className="text-sm font-semibold text-gray-800">Adult experience</h3>
+              {isOverall ? (
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {learnerModuleLibrary ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1 border-violet-200 text-violet-900 hover:bg-violet-100 bg-white"
+                      onClick={openAdultLibrary}
+                    >
+                      <Library className="w-3 h-3" />
+                      Module library
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1 border-dashed border-violet-300 text-violet-800 hover:bg-violet-100 bg-transparent"
+                    onClick={() => setShowSchoolAdultExperienceView(true)}
+                  >
+                    <Plus className="w-3 h-3" /> Add component
+                  </Button>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="text-xs text-violet-800 h-auto p-0"
+                    onClick={() => setShowSchoolAdultExperienceView(true)}
+                  >
+                    Manage
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {learnerModuleLibrary ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1 border-violet-200 text-violet-900 hover:bg-violet-100 bg-white"
+                      onClick={openAdultLibrary}
+                    >
+                      <Library className="w-3 h-3" />
+                      Module library
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1 border-dashed border-violet-300 text-violet-800 hover:bg-violet-100 bg-transparent"
+                    onClick={() => setAddingAdultSubcomponent(true)}
+                  >
+                    <Plus className="w-3 h-3" /> Add subcomponent
+                  </Button>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="text-xs text-violet-800 h-auto p-0"
+                    onClick={() => {
+                      setComponentAdultFocusSubId(null);
+                      setShowComponentAdultManage(true);
+                    }}
+                    data-testid="button-manage-ring-adult-experience"
+                  >
+                    Manage
+                  </Button>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-600 mb-3">
+              {isOverall
+                ? "Whole-school adult modules live on this overview. Open the strip on Adult, then drag onto this panel while Overview is open — or use Manage for scratch adds and bulk editing."
+                : "Adult modules for this ring: strip on Adult, drag onto the working panel here or the blueprint. Use Manage for scratch adds and bulk editing."}
+            </p>
+            {isOverall ? (
+              <>
+                {adultSubcomponents.length === 0 ? (
+                  <div className="text-center py-8 border border-dashed border-violet-200 rounded-lg bg-white/60">
+                    <Target className="w-6 h-6 mx-auto mb-2 text-violet-200" />
+                    <p className="text-xs text-gray-400">No adult modules yet</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {adultSubcomponents.map((sub) => (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => setShowSchoolAdultExperienceView(true)}
+                        className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 transition-colors max-w-[200px]"
+                      >
+                        <span className="line-clamp-2">{sub.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <AnimatePresence>
+                  {addingAdultSubcomponent && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mb-4 overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 p-3 bg-violet-50 border border-violet-200 rounded-lg">
+                        <Input
+                          value={newAdultSubName}
+                          onChange={(e) => setNewAdultSubName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") addAdultSubcomponent();
+                            if (e.key === "Escape") {
+                              setNewAdultSubName("");
+                              setAddingAdultSubcomponent(false);
+                            }
+                          }}
+                          placeholder="Adult module name..."
+                          className="flex-1 h-8 text-sm"
+                          autoFocus
+                          data-testid="input-new-adult-subcomponent-name"
+                        />
+                        <Button size="sm" className="h-8" onClick={addAdultSubcomponent} data-testid="button-confirm-add-adult-subcomponent">
+                          Add
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8"
+                          onClick={() => {
+                            setNewAdultSubName("");
+                            setAddingAdultSubcomponent(false);
+                          }}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                {adultSubcomponents.length === 0 && !addingAdultSubcomponent ? (
+                  <div className="text-center py-8 border border-dashed border-violet-200 rounded-lg bg-white/60">
+                    <Target className="w-6 h-6 mx-auto mb-2 text-violet-200" />
+                    <p className="text-xs text-gray-400">No adult modules yet</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {adultSubcomponents.map((sub) => (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => {
+                          setComponentAdultFocusSubId(sub.id);
+                          setShowComponentAdultManage(true);
+                        }}
+                        className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 transition-colors max-w-[200px]"
+                        data-testid={`button-open-adult-subcomponent-${sub.id}`}
+                      >
+                        <span className="line-clamp-2">{sub.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        )}
+
+        {/* ── Learners (schema root — not an “element” row) ─────── */}
+        <section className="border border-gray-200 rounded-xl p-5 bg-white">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Learners</h3>
+            <Button variant="link" size="sm" className="text-xs text-gray-500 h-auto p-0" onClick={() => setShowLearnersView(true)}>
+              Manage
+            </Button>
           </div>
-          <p className="text-xs text-gray-400">What adults support learners in this component, and what does their experience look like?</p>
+          <p className="text-xs text-gray-500 mb-3">
+            Demographics, incoming skills and mindsets, and selection gating — who experiences this component. Plain
+            language and structured tags are separate from the other design elements below.
+          </p>
+          {designedExperienceProfileSelections.learners.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {designedExperienceProfileSelections.learners.map(
+                (sel: { primaryId: string; isKey?: boolean; secondaryIds?: string[]; description?: string }) => (
+                  <span
+                    key={sel.primaryId}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-medium",
+                      learnerSelectionIsKey(sel)
+                        ? "bg-amber-50 border-amber-200 text-amber-900"
+                        : "bg-purple-50 border-purple-200 text-purple-800",
+                    )}
+                  >
+                    {learnerSelectionIsKey(sel) && (
+                      <Star className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />
+                    )}
+                    {formatLearnerSelectionPreview(sel)}
+                  </span>
+                ),
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 italic">No learner tags yet — open Manage to add tags.</p>
+          )}
         </section>
 
         {/* ── Elements of the Designed Experience ─────────────── */}
@@ -1634,7 +2097,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           </div>
           <button
             onClick={() => openExpertView("schedule")}
-            className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group"
+            className="w-full text-left border border-gray-200 rounded-xl p-5 bg-white hover:border-purple-300 hover:bg-purple-50/20 transition-all group mt-2"
           >
             <div className="flex items-center justify-between">
               <div className="space-y-1">

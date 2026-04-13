@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CalendarDays, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { QuestionSection } from '../QuestionSection';
@@ -87,11 +87,96 @@ function generateCalendarSummary(
   return '';
 }
 
+function ScheduleSchoolCalendarCard({
+  summary,
+  structureTab,
+  setStructureTab,
+  calendarCollapsed,
+  setCalendarCollapsed,
+  yearlyScheduleValue,
+  markingPeriodsValue,
+  onYearlyChange,
+  onMarkingChange,
+}: {
+  summary: string;
+  structureTab: StructureTab;
+  setStructureTab: (t: StructureTab) => void;
+  calendarCollapsed: boolean;
+  setCalendarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  yearlyScheduleValue: YearlyScheduleValue;
+  markingPeriodsValue: MarkingPeriodsValue;
+  onYearlyChange: (v: YearlyScheduleValue) => void;
+  onMarkingChange: (v: MarkingPeriodsValue) => void;
+}) {
+  return (
+    <div className="mt-6 border border-gray-200 rounded-xl bg-white overflow-hidden">
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
+        <CalendarDays className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        <span className="text-sm font-semibold text-gray-800">School Calendar</span>
+
+        {!calendarCollapsed && (
+          <div className="ml-auto flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
+            {STRUCTURE_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStructureTab(tab.id)}
+                className={cn(
+                  'px-3.5 py-1.5 rounded-full text-xs font-medium transition-all',
+                  structureTab === tab.id
+                    ? 'bg-white text-gray-800 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700',
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setCalendarCollapsed((c) => !c)}
+          className={cn(
+            'p-1 text-gray-400 hover:text-gray-600 transition-colors rounded',
+            !calendarCollapsed && 'ml-2',
+          )}
+        >
+          {calendarCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {!calendarCollapsed && (
+        <div className="p-5">
+          {structureTab === 'yearly' && (
+            <YearlyScheduleBucket value={yearlyScheduleValue} onChange={onYearlyChange} />
+          )}
+          {structureTab === 'marking' && (
+            <MarkingPeriodsBucket value={markingPeriodsValue} onChange={onMarkingChange} />
+          )}
+        </div>
+      )}
+
+      <div className="flex items-start gap-2 px-5 py-3.5 bg-gray-50/80 border-t border-gray-100">
+        <Sparkles className="w-3.5 h-3.5 text-purple-400 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-gray-500 leading-relaxed italic">
+          {summary || 'Add dates above to generate a calendar summary.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function ScheduleElement({ componentType, data, onChange }: ScheduleElementProps) {
   const [activeSection, setActiveSection] = useState<ElementSection>('practices');
+  const [openQuestionId, setOpenQuestionId] = useState<string | null>(null);
   const [structureTab, setStructureTab] = useState<StructureTab>('yearly');
   const [calendarCollapsed, setCalendarCollapsed] = useState(false);
   const elementData = data['schedule'] ?? {};
+
+  useEffect(() => {
+    setOpenQuestionId(null);
+  }, [activeSection]);
 
   function handleBucketChange(questionId: string, bucketId: string, value: BucketValue) {
     const key = `${questionId}__${bucketId}`;
@@ -153,85 +238,40 @@ export function ScheduleElement({ componentType, data, onChange }: ScheduleEleme
 
       {/* Questions for active section */}
       <div className="space-y-12">
-        {visibleQuestions.map((question, i) => (
-          <div key={question.id}>
-            {i > 0 && <div className="border-t border-gray-100 mb-12" />}
-            <QuestionSection
-              index={i + 1}
-              question={question}
-              data={getQuestionData(question.id)}
-              componentType={componentType}
-              onChange={(bucketId, value) => handleBucketChange(question.id, bucketId, value)}
-            />
+        {visibleQuestions.map((question, i) => {
+          const displayIndex = i + 1;
+          const calendarSummary = generateCalendarSummary(yearlyScheduleValue, markingPeriodsValue);
+          return (
+            <div key={question.id}>
+              {i > 0 && <div className="border-t border-gray-100 mb-12" />}
+              <QuestionSection
+                index={displayIndex}
+                question={question}
+                data={getQuestionData(question.id)}
+                componentType={componentType}
+                onChange={(bucketId, value) => handleBucketChange(question.id, bucketId, value)}
+                bucketsExpanded={openQuestionId === question.id}
+                onToggleBuckets={() =>
+                  setOpenQuestionId((cur) => (cur === question.id ? null : question.id))
+                }
+              />
 
-            {/* Center-only School Calendar card */}
-            {question.id === 'schedule-q2' && componentType === 'center' && (() => {
-              const summary = generateCalendarSummary(yearlyScheduleValue, markingPeriodsValue);
-              return (
-                <div className="mt-6 border border-gray-200 rounded-xl bg-white overflow-hidden">
-                  {/* Card header */}
-                  <div className="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
-                    <CalendarDays className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <span className="text-sm font-semibold text-gray-800">School Calendar</span>
-
-                    {/* Pill toggle — only when expanded */}
-                    {!calendarCollapsed && (
-                      <div className="ml-auto flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
-                        {STRUCTURE_TABS.map((tab) => (
-                          <button
-                            key={tab.id}
-                            onClick={() => setStructureTab(tab.id)}
-                            className={cn(
-                              'px-3.5 py-1.5 rounded-full text-xs font-medium transition-all',
-                              structureTab === tab.id
-                                ? 'bg-white text-gray-800 shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700',
-                            )}
-                          >
-                            {tab.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <button
-                      onClick={() => setCalendarCollapsed((c) => !c)}
-                      className={cn('p-1 text-gray-400 hover:text-gray-600 transition-colors rounded', !calendarCollapsed && 'ml-2')}
-                    >
-                      {calendarCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                    </button>
-                  </div>
-
-                  {/* Tab content */}
-                  {!calendarCollapsed && (
-                    <div className="p-5">
-                      {structureTab === 'yearly' && (
-                        <YearlyScheduleBucket
-                          value={yearlyScheduleValue}
-                          onChange={handleYearlyChange}
-                        />
-                      )}
-                      {structureTab === 'marking' && (
-                        <MarkingPeriodsBucket
-                          value={markingPeriodsValue}
-                          onChange={handleMarkingChange}
-                        />
-                      )}
-                    </div>
-                  )}
-
-                  {/* Auto-summary — always visible */}
-                  <div className="flex items-start gap-2 px-5 py-3.5 bg-gray-50/80 border-t border-gray-100">
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-gray-500 leading-relaxed italic">
-                      {summary || 'Add dates above to generate a calendar summary.'}
-                    </p>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        ))}
+              {question.id === 'schedule-q2' && componentType === 'center' && (
+                <ScheduleSchoolCalendarCard
+                  summary={calendarSummary}
+                  structureTab={structureTab}
+                  setStructureTab={setStructureTab}
+                  calendarCollapsed={calendarCollapsed}
+                  setCalendarCollapsed={setCalendarCollapsed}
+                  yearlyScheduleValue={yearlyScheduleValue}
+                  markingPeriodsValue={markingPeriodsValue}
+                  onYearlyChange={handleYearlyChange}
+                  onMarkingChange={handleMarkingChange}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

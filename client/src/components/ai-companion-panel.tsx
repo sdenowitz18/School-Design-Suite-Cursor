@@ -452,17 +452,21 @@ export default function AICompanionPanel({
 
     if (looksLikeSchemaQuestion && !isCommandLike) {
       // Domain filter example: "related to STEM"
-      if (askedOutcomes && (q.includes("stem") || q.includes("humanities") || q.includes("well-being") || q.includes("wellbeing") || q.includes("cross-cutting") || q.includes("wayfinding"))) {
+      if (askedOutcomes && (q.includes("stem") || q.includes("humanities") || q.includes("well-being") || q.includes("wellbeing") || q.includes("conduct") || q.includes("engagement") || q.includes("thinking") || q.includes("relating") || q.includes("advancement") || q.includes("professional") || q.includes("practical"))) {
         const domain =
           q.includes("stem")
             ? "STEM"
             : q.includes("humanities")
-              ? "Humanities"
-              : q.includes("wayfinding")
-                ? "Wayfinding"
-                : q.includes("cross-cutting") || q.includes("cross cutting")
-                  ? "Cross-cutting"
-                  : "Well-being";
+              ? "Arts & Humanities"
+              : q.includes("conduct") || q.includes("engagement")
+                ? "Conduct & Engagement"
+                : q.includes("thinking") || q.includes("relating")
+                  ? "Thinking & Relating"
+                  : q.includes("advancement")
+                    ? "Advancement"
+                    : q.includes("professional") || q.includes("practical")
+                      ? "Professional & Practical"
+                      : "Wellbeing";
         const { items, total } = listOutcomesByDomain(domain, 20);
         pushAssistantText(formatSchemaResults(`Outcomes related to ${domain}`, items, total));
         return;

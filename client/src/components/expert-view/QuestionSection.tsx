@@ -408,6 +408,10 @@ interface QuestionSectionProps {
   data: Record<string, BucketValue>;
   componentType: ComponentType;
   onChange: (bucketId: string, value: BucketValue) => void;
+  /** Choice buckets expanded; parent keeps at most one question open (accordion). */
+  bucketsExpanded: boolean;
+  /** Toggle this question’s buckets; parent closes others when opening this one. */
+  onToggleBuckets: () => void;
   /** e.g. `culture` — used with school-wide expert data for ring mirrors. */
   elementId?: string;
   schoolWideElementsExpertData?: ElementsExpertData;
@@ -423,6 +427,8 @@ export function QuestionSection({
   data,
   componentType,
   onChange,
+  bucketsExpanded,
+  onToggleBuckets,
   elementId,
   schoolWideElementsExpertData,
   sharedData,
@@ -431,6 +437,12 @@ export function QuestionSection({
   const [plainText, setPlainText] = React.useState(
     data['__plain__']?.plainLanguageAnswer ?? '',
   );
+  const rootRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!bucketsExpanded) return;
+    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [bucketsExpanded]);
 
   function handlePlainChange(v: string) {
     setPlainText(v);
@@ -438,19 +450,25 @@ export function QuestionSection({
   }
 
   return (
-    <div className="space-y-5">
+    <div ref={rootRef} className="space-y-5">
       {/* Question header */}
       <div className="flex items-start gap-3">
-        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 text-xs font-bold flex items-center justify-center mt-0.5">
+        <button
+          type="button"
+          onClick={onToggleBuckets}
+          className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 text-xs font-bold flex items-center justify-center mt-0.5 hover:bg-purple-200 transition-colors cursor-pointer"
+          title={bucketsExpanded ? 'Collapse choice buckets' : 'Expand choice buckets'}
+        >
           {index}
-        </span>
+        </button>
         <p className="text-sm font-medium text-gray-800 leading-relaxed pt-0.5">{question.question}</p>
       </div>
 
       {/* Plain language AI input */}
       <PlainLanguageInput value={plainText} onChange={handlePlainChange} />
 
-      {/* Buckets */}
+      {/* Buckets — hidden when collapsed (Key Design style: question + PL stay visible) */}
+      {bucketsExpanded && (
       <div className="space-y-3">
         {question.buckets.map((bucket) => {
           const isShared = !!bucket.syncedBucketId;
@@ -474,6 +492,7 @@ export function QuestionSection({
           );
         })}
       </div>
+      )}
     </div>
   );
 }

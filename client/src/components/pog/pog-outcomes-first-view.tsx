@@ -61,13 +61,9 @@ export default function PogOutcomesFirstView({
   const L1_AREAS: Area[] = useMemo(
     () => [
       { key: "all", label: "All" },
-      { key: "STEM", label: "STEM" },
-      { key: "Humanities", label: "Arts & Humanities" },
-      { key: "Cross-cutting", label: "Learning & Life" },
-      { key: "Well-being", label: "Wellbeing" },
-      { key: "Wayfinding", label: "Wayfinding" },
+      ...Object.keys(outcomeSchema || {}).map((key) => ({ key, label: key })),
     ],
-    [],
+    [outcomeSchema],
   );
 
   const allOutcomes = useMemo(() => {

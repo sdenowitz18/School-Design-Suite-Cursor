@@ -1,19 +1,29 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Bot } from "lucide-react";
+import { Bot, Library, X } from "lucide-react";
+import { LearnerModuleLibraryProvider, useLearnerModuleLibrary } from "@/contexts/learner-module-library-context";
+import LearnerModuleLibraryStrip from "@/components/learner-module-library-strip";
+import { LML_STRIP_HEIGHT_CLAMP } from "@/lib/learner-module-library-layout";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { componentQueries, useSeedComponents } from "@/lib/api";
+import { componentQueries, useCreateComponent, useDeleteComponent, useSeedComponents, useUpdateComponent } from "@/lib/api";
+import {
+  addRingComponentFromCatalogPick,
+  dataTransferHasLearnerModule,
+  resolveCatalogPickFromDrop,
+  subcomponentFromCatalogPick,
+} from "@/lib/learner-module-drop";
 import ComponentWorkingPanel from "./component-working-panel";
 import ComponentWorkingSpaceOverlay from "./component-working-space-overlay";
 import OctagonCard from "./octagon-card";
+import { shouldIgnoreOutsideInteraction } from "@/lib/learner-module-library-dismiss-guard";
 
 interface CanvasNode {
   id: string;
@@ -36,7 +46,7 @@ interface CanvasNode {
   }
 }
 
-function componentToCanvasNode(comp: any): CanvasNode {
+export function componentToCanvasNode(comp: any): CanvasNode {
   const snap = comp.snapshotData || {};
   const ocd: any = (snap as any).overviewContextData || {};
   const studentCount = ocd?.studentCount ?? ocd?.students ?? undefined;
@@ -103,6 +113,135 @@ type OverallNavTarget =
 
 type OverallCardRoute = OverallNavTarget;
 
+/** Matches `transform scale-90` on the canvas stage (tailwind scale-90 = 0.9). */
+const CANVAS_STAGE_SCALE = 0.9;
+const DRAG_THRESHOLD_PX = 8;
+
+function DraggableRingOctagon({
+  node,
+  canvasStageScale,
+  onOpenPanel,
+  onCommitCanvasPosition,
+  onDeleteNode,
+}: {
+  node: CanvasNode;
+  canvasStageScale: number;
+  onOpenPanel: () => void;
+  onCommitCanvasPosition: (nodeId: string, x: number, y: number) => void;
+  onDeleteNode: (nodeId: string) => void;
+}) {
+  const [draggingPos, setDraggingPos] = useState<{ x: number; y: number } | null>(null);
+  const sessionRef = useRef<{
+    pointerId: number;
+    originX: number;
+    originY: number;
+    startClientX: number;
+    startClientY: number;
+    moved: boolean;
+  } | null>(null);
+
+  const displayX = draggingPos?.x ?? node.x;
+  const displayY = draggingPos?.y ?? node.y;
+
+  const endDrag = (e: React.PointerEvent, el: HTMLElement) => {
+    const s = sessionRef.current;
+    if (!s || s.pointerId !== e.pointerId) return;
+    try {
+      el.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    sessionRef.current = null;
+    const dx = e.clientX - s.startClientX;
+    const dy = e.clientY - s.startClientY;
+    const moved = s.moved || Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX;
+    const nx = Math.round(s.originX + dx / canvasStageScale);
+    const ny = Math.round(s.originY + dy / canvasStageScale);
+    setDraggingPos(null);
+    if (moved) {
+      onCommitCanvasPosition(node.nodeId, nx, ny);
+    } else {
+      onOpenPanel();
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ scale: 0.9, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      whileHover={draggingPos ? undefined : { scale: 1.04 }}
+      className="group absolute cursor-grab active:cursor-grabbing flex flex-col items-center justify-center w-[220px] h-[220px] touch-none select-none"
+      style={{ left: displayX, top: displayY, transform: "translate(-50%, -50%)" }}
+      data-testid={`node-${node.nodeId}`}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest("[data-octagon-delete]")) return;
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        sessionRef.current = {
+          pointerId: e.pointerId,
+          originX: node.x,
+          originY: node.y,
+          startClientX: e.clientX,
+          startClientY: e.clientY,
+          moved: false,
+        };
+      }}
+      onPointerMove={(e) => {
+        const s = sessionRef.current;
+        if (!s || s.pointerId !== e.pointerId) return;
+        const dx = e.clientX - s.startClientX;
+        const dy = e.clientY - s.startClientY;
+        if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) s.moved = true;
+        setDraggingPos({
+          x: s.originX + dx / canvasStageScale,
+          y: s.originY + dy / canvasStageScale,
+        });
+      }}
+      onPointerUp={(e) => endDrag(e, e.currentTarget as HTMLElement)}
+      onPointerCancel={(e) => {
+        const s = sessionRef.current;
+        if (!s || s.pointerId !== e.pointerId) return;
+        try {
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+        sessionRef.current = null;
+        setDraggingPos(null);
+      }}
+    >
+      <button
+        type="button"
+        data-octagon-delete
+        title={`Remove ${node.title} from blueprint`}
+        className={cn(
+          "pointer-events-auto absolute -right-1 -top-1 z-20 flex h-7 w-7 items-center justify-center rounded-full",
+          "border border-red-200 bg-white text-red-600 shadow-md transition-opacity",
+          "opacity-0 group-hover:opacity-100 hover:bg-red-50 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300",
+        )}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (window.confirm(`Remove “${node.title}” from the blueprint?`)) {
+            onDeleteNode(node.nodeId);
+          }
+        }}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+      <OctagonCard
+        title={node.title}
+        subtitle={node.subtitle}
+        centerVariant="pill"
+        centerText={node.stats.left > 0 ? `${node.stats.left} subcomponents` : "No subcomponents"}
+        bgClassName={node.color}
+        leftStat={{ label: node.stats.leftLabel, value: String(node.stats.left) }}
+        rightStat={{ label: node.stats.rightLabel, value: String(node.stats.right) }}
+        className="pointer-events-none"
+      />
+    </motion.div>
+  );
+}
+
 const OctagonNode = ({
   node,
   onClick,
@@ -112,6 +251,10 @@ const OctagonNode = ({
   onOpenOverallTab,
   overallCardRoute,
   onSetOverallCardRoute,
+  persistLayout = false,
+  canvasStageScale = CANVAS_STAGE_SCALE,
+  onCommitCanvasPosition,
+  onDeleteNode,
 }: {
   node: CanvasNode;
   onClick: () => void;
@@ -121,6 +264,10 @@ const OctagonNode = ({
   onOpenOverallTab: (tab: "overview-and-context" | "designed-experience" | "status-and-health") => void;
   overallCardRoute: OverallCardRoute;
   onSetOverallCardRoute: (route: OverallCardRoute) => void;
+  persistLayout?: boolean;
+  canvasStageScale?: number;
+  onCommitCanvasPosition?: (nodeId: string, x: number, y: number) => void;
+  onDeleteNode?: (nodeId: string) => void;
 }) => {
   const isOverall = node.nodeId === "overall";
 
@@ -594,6 +741,18 @@ const OctagonNode = ({
      );
   }
 
+  if (persistLayout && onCommitCanvasPosition && onDeleteNode) {
+    return (
+      <DraggableRingOctagon
+        node={node}
+        canvasStageScale={canvasStageScale}
+        onOpenPanel={onClick}
+        onCommitCanvasPosition={onCommitCanvasPosition}
+        onDeleteNode={onDeleteNode}
+      />
+    );
+  }
+
   return (
     <motion.div
       initial={{ scale: 0.9, opacity: 0 }}
@@ -617,7 +776,7 @@ const OctagonNode = ({
   );
 };
 
-export default function CanvasView() {
+function CanvasViewInner() {
   const [selectedNode, setSelectedNode] = useState<CanvasNode | null>(null);
   const [activeTab, setActiveTab] = useState("snapshot");
   const [initialSubId, setInitialSubId] = useState<string | null>(null);
@@ -626,9 +785,18 @@ export default function CanvasView() {
   const [overallCenterMode, setOverallCenterMode] = useState<OverallCenterMode>("overview");
   const [overallNavTarget, setOverallNavTarget] = useState<OverallNavTarget | null>(null);
   const [overallCardRoute, setOverallCardRoute] = useState<OverallCardRoute>({ level: "L1" });
-  
-  const { data: componentsRaw, isLoading } = useQuery(componentQueries.all);
+
+  const { open: libraryOpen, toggleLibrary, moduleLibraryAudience } = useLearnerModuleLibrary();
+  const [blueprintDropActive, setBlueprintDropActive] = useState(false);
+  const [sheetPanelDropActive, setSheetPanelDropActive] = useState(false);
+  const { data: componentsRaw, isSuccess } = useQuery(componentQueries.all);
   const seedMutation = useSeedComponents();
+  const updateMutation = useUpdateComponent();
+  const createMutation = useCreateComponent();
+  const deleteMutation = useDeleteComponent();
+  const autoSeedAttempted = useRef(false);
+
+  const persistRingLayout = Boolean(isSuccess && Array.isArray(componentsRaw) && componentsRaw.length > 0);
 
   const nodes: CanvasNode[] = componentsRaw && Array.isArray(componentsRaw) && componentsRaw.length > 0
     ? componentsRaw.map(componentToCanvasNode)
@@ -636,34 +804,23 @@ export default function CanvasView() {
 
   const derivedNodes: CanvasNode[] = useMemo(() => {
     const list = [...nodes];
-    const overallIdx = list.findIndex((n) => n.nodeId === "overall");
-    const others = list.filter((n) => n.nodeId !== "overall");
-    if (overallIdx >= 0 && others.length > 0) {
-      const centerX = others.reduce((s, n) => s + n.x, 0) / others.length;
-      const centerY = others.reduce((s, n) => s + n.y, 0) / others.length;
-
-      // Keep overall in the true center.
-      list[overallIdx] = { ...list[overallIdx], x: centerX, y: centerY };
-
-      // Push outer components outward to ensure nothing overlaps the center card.
-      const EXPAND = 1.22;
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].nodeId === "overall") continue;
-        const dx = list[i].x - centerX;
-        const dy = list[i].y - centerY;
-        list[i] = { ...list[i], x: centerX + dx * EXPAND, y: centerY + dy * EXPAND };
-      }
-    }
-    // Render overall last so it never gets covered.
+    // Overall uses its stored canvas position only — never re-anchor to ring centroid when ring nodes move.
     list.sort((a, b) => (a.nodeId === "overall" ? 1 : 0) - (b.nodeId === "overall" ? 1 : 0));
     return list;
   }, [nodes]);
 
   useEffect(() => {
-    if (componentsRaw && Array.isArray(componentsRaw) && componentsRaw.length === 0) {
-      seedMutation.mutate();
-    }
-  }, [componentsRaw]);
+    if (!isSuccess || !Array.isArray(componentsRaw) || componentsRaw.length > 0) return;
+    if (autoSeedAttempted.current) return;
+    autoSeedAttempted.current = true;
+    seedMutation.mutate(undefined, {
+      onError: () => {
+        autoSeedAttempted.current = false;
+      },
+    });
+    // seedMutation.mutate is stable; omit from deps to avoid re-running on mutation identity changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuccess, componentsRaw]);
 
   useEffect(() => {
     if (selectedNode?.nodeId === "overall") {
@@ -679,10 +836,80 @@ export default function CanvasView() {
     if (activeTab === "status-and-health") setOverallCenterMode("status");
   }, [activeTab, selectedNode?.nodeId]);
 
+  useEffect(() => {
+    document.documentElement.style.setProperty("--lml-strip-offset", libraryOpen ? LML_STRIP_HEIGHT_CLAMP : "0px");
+    return () => {
+      document.documentElement.style.removeProperty("--lml-strip-offset");
+    };
+  }, [libraryOpen]);
+
+  const ringListForDrop = useMemo(
+    () => (Array.isArray(componentsRaw) ? componentsRaw.filter((c: any) => String(c?.nodeId || "") !== "overall") : []),
+    [componentsRaw],
+  );
+
+  const onBlueprintDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setBlueprintDropActive(false);
+    const resolved = resolveCatalogPickFromDrop(e.dataTransfer);
+    if (!resolved) return;
+    const idSet = new Set(ringListForDrop.map((c: any) => String(c.nodeId)));
+    const slot = ringListForDrop.length;
+    await addRingComponentFromCatalogPick(
+      resolved.pick,
+      (body) => createMutation.mutateAsync(body),
+      {
+        slot,
+        existingNodeIds: idSet,
+        colorIndex: slot,
+      },
+      resolved.audience,
+    );
+  };
+
+  const onSheetPanelDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setSheetPanelDropActive(false);
+    const resolved = resolveCatalogPickFromDrop(e.dataTransfer);
+    if (!resolved || !selectedNode) return;
+    if (selectedNode.nodeId === "overall" && resolved.audience !== "adult") return;
+    const raw = Array.isArray(componentsRaw)
+      ? componentsRaw.find((c: any) => String(c?.nodeId) === selectedNode.nodeId)
+      : undefined;
+    if (!raw) return;
+    const de: any = raw.designedExperienceData || {};
+    if (resolved.audience === "adult") {
+      const adultSubs = [...(de.adultSubcomponents || [])];
+      adultSubs.push(subcomponentFromCatalogPick(resolved.pick, "adult"));
+      updateMutation.mutate({
+        nodeId: selectedNode.nodeId,
+        data: { designedExperienceData: { ...de, adultSubcomponents: adultSubs } },
+      });
+    } else {
+      const subs = [...(de.subcomponents || [])];
+      subs.push(subcomponentFromCatalogPick(resolved.pick, "learner"));
+      updateMutation.mutate({
+        nodeId: selectedNode.nodeId,
+        data: { designedExperienceData: { ...de, subcomponents: subs } },
+      });
+    }
+  };
+
   return (
-    <div className="w-full h-screen bg-[#F8F9FA] relative overflow-hidden font-sans">
+    <div className="w-full h-screen bg-[#F8F9FA] flex flex-col overflow-hidden font-sans">
+      <LearnerModuleLibraryStrip />
+      <div className="relative flex-1 min-h-0 overflow-hidden">
       <div className="absolute top-4 left-0 right-0 px-6 flex justify-between items-center z-10">
          <div className="flex items-center gap-2">
+           <button
+             type="button"
+             onClick={toggleLibrary}
+             className="flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+             title="Open or close learner module library"
+           >
+             <Library className="w-3.5 h-3.5" />
+             Module library
+           </button>
          </div>
          
          <div className="bg-gray-900 text-white px-4 py-2 rounded-full shadow-lg text-sm font-medium">
@@ -705,8 +932,33 @@ export default function CanvasView() {
          <div className="w-2 h-2 rounded-full bg-white/50" />
       </div>
 
-      <div className="absolute inset-0 flex items-center justify-center transform scale-90 origin-center">
-         {derivedNodes.map(node => (
+      <div
+        className={cn(
+          "absolute inset-0 flex items-center justify-center transform scale-90 origin-center transition-[box-shadow] rounded-[inherit]",
+          blueprintDropActive && "ring-4 ring-emerald-500 ring-offset-2 ring-offset-[#F8F9FA]",
+        )}
+        onDragEnter={(e) => {
+          if (!dataTransferHasLearnerModule(e.dataTransfer)) return;
+          e.preventDefault();
+          setBlueprintDropActive(true);
+        }}
+        onDragOver={(e) => {
+          if (!dataTransferHasLearnerModule(e.dataTransfer)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setBlueprintDropActive(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setBlueprintDropActive(false);
+        }}
+        onDrop={onBlueprintDrop}
+      >
+        {blueprintDropActive ? (
+          <div className="pointer-events-none absolute top-8 left-1/2 z-20 -translate-x-1/2 rounded-full border border-emerald-400 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-emerald-900 shadow-md">
+            Drop to add component to blueprint
+          </div>
+        ) : null}
+         {derivedNodes.map((node) => (
             <OctagonNode
               key={node.nodeId}
               node={node}
@@ -732,8 +984,20 @@ export default function CanvasView() {
               }}
               overallCardRoute={overallCardRoute}
               onSetOverallCardRoute={setOverallCardRoute}
+              persistLayout={persistRingLayout && node.nodeId !== "overall"}
+              canvasStageScale={CANVAS_STAGE_SCALE}
+              onCommitCanvasPosition={(nodeId, x, y) => {
+                updateMutation.mutate({ nodeId, data: { canvasX: x, canvasY: y } });
+              }}
+              onDeleteNode={(nodeId) => {
+                deleteMutation.mutate(nodeId, {
+                  onSuccess: () => {
+                    setSelectedNode((prev) => (prev?.nodeId === nodeId ? null : prev));
+                  },
+                });
+              }}
             />
-         ))}
+          ))}
       </div>
 
       <div className="absolute bottom-6 right-6 flex items-center bg-white rounded-full shadow-lg border border-gray-200 px-4 py-2 gap-4">
@@ -748,6 +1012,7 @@ export default function CanvasView() {
 
       <Sheet
         open={!!selectedNode && !isExpandedWorkingSpace}
+        modal={false}
         onOpenChange={(open) => {
           if (!open) {
             setSelectedNode(null);
@@ -756,7 +1021,58 @@ export default function CanvasView() {
           }
         }}
       >
-        <SheetContent className="w-full sm:max-w-[800px] p-0 border-l border-gray-200 shadow-2xl flex flex-col bg-white" side="right">
+        <SheetContent
+          className={cn(
+            "w-full sm:max-w-[800px] p-0 border-l border-gray-200 shadow-2xl flex flex-col bg-white !inset-y-auto !right-0 !bottom-0 !top-[var(--lml-strip-offset,0px)] !h-[calc(100vh-var(--lml-strip-offset,0px))] !max-h-[calc(100vh-var(--lml-strip-offset,0px))]",
+          )}
+          side="right"
+          onPointerDownOutside={(e) => {
+            if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
+          }}
+          onInteractOutside={(e) => {
+            if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
+          }}
+          onFocusOutside={(e) => {
+            if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
+          }}
+        >
+          <div
+            className={cn(
+              "relative flex h-full min-h-0 flex-col transition-[box-shadow,background-color]",
+              sheetPanelDropActive &&
+                selectedNode?.nodeId &&
+                (selectedNode.nodeId !== "overall" || moduleLibraryAudience === "adult") &&
+                "ring-4 ring-inset ring-sky-500 bg-sky-50/30",
+            )}
+            onDragEnter={(e) => {
+              if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
+              if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
+              e.preventDefault();
+              setSheetPanelDropActive(true);
+            }}
+            onDragOver={(e) => {
+              if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
+              if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+              setSheetPanelDropActive(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setSheetPanelDropActive(false);
+            }}
+            onDrop={onSheetPanelDrop}
+          >
+            {sheetPanelDropActive && selectedNode?.nodeId ? (
+              <div className="pointer-events-none absolute inset-x-0 top-14 z-10 flex justify-center px-4">
+                <div className="rounded-full border border-sky-300 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-sky-900 shadow-md">
+                  {selectedNode.nodeId === "overall"
+                    ? `Drop to add adult experience module to whole school`
+                    : moduleLibraryAudience === "adult"
+                      ? `Drop to add adult subcomponent to “${selectedNode.title}”`
+                      : `Drop to add learner subcomponent to “${selectedNode.title}”`}
+                </div>
+              </div>
+            ) : null}
           <ComponentWorkingPanel
             selectedNode={selectedNode ? { nodeId: selectedNode.nodeId, title: selectedNode.title, color: selectedNode.color } : null}
             componentsRaw={componentsRaw}
@@ -775,7 +1091,16 @@ export default function CanvasView() {
             }}
             onExpand={() => setIsExpandedWorkingSpace(true)}
             showExpandButton
+            onRequestOpenComponent={(targetNodeId) => {
+              const raw = Array.isArray(componentsRaw) ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId) : undefined;
+              if (raw) {
+                setSelectedNode(componentToCanvasNode(raw));
+                setActiveTab("snapshot");
+                setOpenSubId(null);
+              }
+            }}
           />
+          </div>
         </SheetContent>
       </Sheet>
 
@@ -792,7 +1117,24 @@ export default function CanvasView() {
         onOpenSubIdChange={setOpenSubId}
         overallNavTarget={overallNavTarget}
         onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
+        onRequestOpenComponent={(targetNodeId) => {
+          const raw = Array.isArray(componentsRaw) ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId) : undefined;
+          if (raw) {
+            setSelectedNode(componentToCanvasNode(raw));
+            setActiveTab("snapshot");
+            setOpenSubId(null);
+          }
+        }}
       />
+      </div>
     </div>
+  );
+}
+
+export default function CanvasView() {
+  return (
+    <LearnerModuleLibraryProvider>
+      <CanvasViewInner />
+    </LearnerModuleLibraryProvider>
   );
 }

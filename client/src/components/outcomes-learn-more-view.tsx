@@ -1,14 +1,9 @@
 "use client";
 
 import { ChevronLeft, BookOpen, Link2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { OUTCOME_DESCRIPTIONS } from "./designed-experience-schemas";
-
-function normKey(s: string) {
-  return (s || "").trim().toLowerCase();
-}
+import { LEAP_DESCRIPTIONS, OUTCOME_DESCRIPTIONS } from "./designed-experience-schemas";
 
 function outcomeDescription(label: string): string {
   const clean = String(label || "").trim();
@@ -16,6 +11,14 @@ function outcomeDescription(label: string): string {
   const direct = (OUTCOME_DESCRIPTIONS as any)?.[clean];
   if (typeof direct === "string" && direct.trim()) return direct.trim();
   return `${clean} is an outcome focus area describing what learners should develop over time. Use the notes on the outcome page to clarify what “${clean}” looks like in practice here.`;
+}
+
+function leapDescription(label: string): string {
+  const clean = String(label || "").trim();
+  if (!clean) return "This leap names a design principle for how learning is structured and supported.";
+  const direct = LEAP_DESCRIPTIONS[clean];
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  return `${clean} is a design principle for this component. Use the notes on the leap page to say how it shows up in practice.`;
 }
 
 const PLACEHOLDER_LINKS = [
@@ -29,10 +32,12 @@ const PLACEHOLDER_LINKS = [
 export default function OutcomesLearnMoreView({
   mode,
   outcomeLabel,
+  leapLabel,
   onBack,
 }: {
-  mode: "schema" | "outcome";
+  mode: "schema" | "outcome" | "leap";
   outcomeLabel?: string;
+  leapLabel?: string;
   onBack: () => void;
 }) {
   return (
@@ -49,11 +54,19 @@ export default function OutcomesLearnMoreView({
               <div className="flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-blue-600" />
                 <h2 className="text-lg font-bold text-gray-900 truncate">
-                  {mode === "schema" ? "Learn about Outcomes" : `Learn about: ${String(outcomeLabel || "").trim() || "Outcome"}`}
+                  {mode === "schema"
+                    ? "Learn about Outcomes"
+                    : mode === "leap"
+                      ? `Learn about: ${String(leapLabel || "").trim() || "Leap"}`
+                      : `Learn about: ${String(outcomeLabel || "").trim() || "Outcome"}`}
                 </h2>
               </div>
               <p className="text-sm text-gray-500 mt-0.5">
-                {mode === "schema" ? "What students will know and be able to do" : "What this outcome means, in plain language"}
+                {mode === "schema"
+                  ? "What students will know and be able to do"
+                  : mode === "leap"
+                    ? "What this design principle means, in plain language"
+                    : "What this outcome means, in plain language"}
               </p>
             </div>
             <Badge variant="secondary" className="bg-gray-200 text-gray-700 text-[10px] h-6">
@@ -91,6 +104,8 @@ export default function OutcomesLearnMoreView({
                 </div>
               </div>
             </>
+          ) : mode === "leap" ? (
+            <div className="text-sm text-gray-800 leading-relaxed">{leapDescription(String(leapLabel || ""))}</div>
           ) : (
             <div className="text-sm text-gray-800 leading-relaxed">{outcomeDescription(String(outcomeLabel || ""))}</div>
           )}

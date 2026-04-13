@@ -34,7 +34,8 @@ const TAGS_FAC_CLASSROOM_STAFFING: TagDef[] = [
 
 // ─── Facilitator background & allocation ─────────────────────────────────────
 
-const TAGS_FAC_BACKGROUND: TagDef[] = [
+/** Exported for Designed Experience “Adult background” (clone; separate persisted state). */
+export const TAGS_FAC_BACKGROUND: TagDef[] = [
   {
     id: 'nontraditional-staff',
     label: 'Nontraditional staff',

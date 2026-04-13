@@ -10,6 +10,8 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
+    "setup:env": "node --import tsx script/ensure-env.ts",
+    "seed": "node --env-file=.env --import tsx script/seed-cli.ts",
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {

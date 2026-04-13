@@ -22,7 +22,9 @@ export async function setupVite(server: Server, app: Express) {
       ...viteLogger,
       error: (msg, options) => {
         viteLogger.error(msg, options);
-        process.exit(1);
+        // Do not process.exit here. Vite logs many errors during dev (parse errors during
+        // half-saved edits, HMR glitches, client runtime errors surfaced by plugins) that
+        // are recoverable; exiting kills the whole server and matches "site keeps going down."
       },
     },
     server: serverOptions,
@@ -49,7 +51,16 @@ export async function setupVite(server: Server, app: Express) {
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
       const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      res
+        .status(200)
+        .set({
+          "Content-Type": "text/html; charset=utf-8",
+          // Avoid stale index.html / shell when iterating on the client bundle locally
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        })
+        .end(page);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);

@@ -2,7 +2,14 @@
 
 import React, { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
+import {
+  dataTransferHasLearnerModule,
+  resolveCatalogPickFromDrop,
+  subcomponentFromCatalogPick,
+} from "@/lib/learner-module-drop";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { useUpdateComponent } from "@/lib/api";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import ComponentWorkingPanel, { type ComponentWorkingPanelNode } from "./component-working-panel";
 import AICompanionPanel from "./ai-companion-panel";
@@ -11,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
 import ToolSidebar, { getToolMeta, type ToolId } from "./tool-sidebar";
 import { componentQueries } from "@/lib/api";
+import { shouldIgnoreOutsideInteraction } from "@/lib/learner-module-library-dismiss-guard";
+import { useLearnerModuleLibrary } from "@/contexts/learner-module-library-context";
 
 class OverlayErrorBoundary extends React.Component<
   { children: React.ReactNode; onClose: () => void },
@@ -53,6 +62,7 @@ export default function ComponentWorkingSpaceOverlay({
   onOpenSubIdChange,
   overallNavTarget,
   onOverallNavTargetConsumed,
+  onRequestOpenComponent,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -66,6 +76,7 @@ export default function ComponentWorkingSpaceOverlay({
   onOpenSubIdChange: (id: string | null) => void;
   overallNavTarget: any | null;
   onOverallNavTargetConsumed: () => void;
+  onRequestOpenComponent?: (nodeId: string) => void;
 }) {
   const nodeId = selectedNode?.nodeId || "";
   const listComponent =
@@ -77,6 +88,10 @@ export default function ComponentWorkingSpaceOverlay({
   });
   const componentInFocus =
     (componentData as any) ?? listComponent;
+
+  const updateMutation = useUpdateComponent();
+  const { moduleLibraryAudience } = useLearnerModuleLibrary();
+  const [panelDropActive, setPanelDropActive] = useState(false);
 
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [pane2Tool, setPane2Tool] = useState<ToolId | null>(null);
@@ -171,17 +186,97 @@ export default function ComponentWorkingSpaceOverlay({
     );
   };
 
+  const onWorkingPanelDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setPanelDropActive(false);
+      const parentId = selectedNode?.nodeId;
+      if (!parentId) return;
+      const resolved = resolveCatalogPickFromDrop(e.dataTransfer);
+      if (!resolved || !componentInFocus) return;
+      if (parentId === "overall" && resolved.audience !== "adult") return;
+      const de: any = componentInFocus.designedExperienceData || {};
+      if (resolved.audience === "adult") {
+        const adultSubs = [...(de.adultSubcomponents || [])];
+        adultSubs.push(subcomponentFromCatalogPick(resolved.pick, "adult"));
+        updateMutation.mutate({
+          nodeId: parentId,
+          data: { designedExperienceData: { ...de, adultSubcomponents: adultSubs } },
+        });
+      } else {
+        const subs = [...(de.subcomponents || [])];
+        subs.push(subcomponentFromCatalogPick(resolved.pick, "learner"));
+        updateMutation.mutate({
+          nodeId: parentId,
+          data: { designedExperienceData: { ...de, subcomponents: subs } },
+        });
+      }
+    },
+    [selectedNode?.nodeId, componentInFocus, updateMutation],
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="fixed left-0 top-0 translate-x-0 translate-y-0 w-screen h-screen max-w-none rounded-none p-0 gap-0 border-0 bg-white z-[60] overflow-hidden flex flex-col data-[state=open]:animate-none data-[state=closed]:animate-none"
+        overlayClassName={cn(
+          "fixed z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "left-0 right-0 top-[var(--lml-strip-offset,0px)] bottom-0 !inset-auto",
+        )}
+        className="fixed left-0 top-[var(--lml-strip-offset,0px)] translate-x-0 translate-y-0 w-screen h-[calc(100vh-var(--lml-strip-offset,0px))] max-h-[calc(100vh-var(--lml-strip-offset,0px))] max-w-none rounded-none p-0 gap-0 border-0 bg-white z-[60] overflow-hidden flex flex-col data-[state=open]:animate-none data-[state=closed]:animate-none"
         data-testid="component-working-space-overlay"
+        onPointerDownOutside={(e) => {
+          if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
+        }}
+        onInteractOutside={(e) => {
+          if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
+        }}
+        onFocusOutside={(e) => {
+          if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
+        }}
       >
         <OverlayErrorBoundary onClose={() => onOpenChange(false)}>
           <div className="h-full w-full" style={{ paddingRight: sidebarWidth }}>
             <ResizablePanelGroup direction="horizontal" className="h-full w-full">
               <ResizablePanel defaultSize={pane2Tool ? 35 : 100} minSize={25} className="min-w-[320px]">
-                <div className="h-full w-full flex flex-col border-r border-gray-200 bg-white">
+                <div
+                  className={cn(
+                    "relative h-full w-full flex flex-col border-r border-gray-200 bg-white transition-[box-shadow,background-color]",
+                    panelDropActive &&
+                      selectedNode?.nodeId &&
+                      (selectedNode.nodeId !== "overall" || moduleLibraryAudience === "adult") &&
+                      "ring-4 ring-inset ring-sky-500 bg-sky-50/40",
+                  )}
+                  onDragEnter={(e) => {
+                    if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
+                    if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
+                    e.preventDefault();
+                    setPanelDropActive(true);
+                  }}
+                  onDragOver={(e) => {
+                    if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
+                    if (selectedNode.nodeId === "overall" && moduleLibraryAudience !== "adult") return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                    setPanelDropActive(true);
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setPanelDropActive(false);
+                    }
+                  }}
+                  onDrop={onWorkingPanelDrop}
+                >
+                  {panelDropActive && selectedNode?.nodeId ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-12 z-10 flex justify-center px-4">
+                      <div className="rounded-full border border-sky-300 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-sky-900 shadow-md">
+                        {selectedNode.nodeId === "overall"
+                          ? "Drop to add adult experience module to whole school"
+                          : moduleLibraryAudience === "adult"
+                            ? `Drop to add adult subcomponent to “${selectedNode.title}”`
+                            : `Drop to add learner subcomponent to “${selectedNode.title}”`}
+                      </div>
+                    </div>
+                  ) : null}
                   <ComponentWorkingPanel
                     selectedNode={selectedNode}
                     componentsRaw={componentsRaw}
@@ -194,6 +289,7 @@ export default function ComponentWorkingSpaceOverlay({
                     overallNavTarget={overallNavTarget}
                     onOverallNavTargetConsumed={onOverallNavTargetConsumed}
                     onClose={() => onOpenChange(false)}
+                    onRequestOpenComponent={onRequestOpenComponent}
                   />
                 </div>
               </ResizablePanel>

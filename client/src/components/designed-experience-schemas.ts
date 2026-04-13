@@ -1,34 +1,46 @@
 export const OUTCOME_SCHEMA: Record<string, Record<string, string[]>> = {
   STEM: {
-    Mathematics: ["Algebra", "Geometry", "Calculus"],
-    "Natural sciences": ["Physics", "Chemistry", "Biology"],
-    "Digital & AI literacies": ["Computer science", "AI literacy", "Robotics"],
+    Mathematics: ["Algebraic knowledge & skills", "Math identity", "Math habits"],
+    "Natural sciences": ["Physics knowledge & skills", "Chemistry knowledge & skills", "Scientific reasoning"],
+    "Computational & AI literacies": ["Computer science", "AI literacy", "Robotics"],
   },
-  Humanities: {
+  "Arts & Humanities": {
     "English language arts": ["Reading", "Writing", "Literature"],
-    "Social studies & civics": ["US history", "World history", "Civics"],
-    "World languages": ["Mandarin", "French"],
+    "Social studies & civics": ["US history knowledge", "World history knowledge", "Historical thinking", "Civics"],
+    "World languages": ["Spanish", "Mandarin", "French", "Swahili"],
     "Performing & visual arts": ["Visual art", "Music", "Drama"],
   },
-  "Cross-cutting": {
-    "Higher-order thinking skills": ["Critical thinking", "Systems thinking", "Creativity"],
+  "Thinking & Relating": {
+    "Higher order thinking skills": ["Critical thinking", "Systems thinking", "Creativity"],
     "Learning strategies & habits": ["Goal-setting", "Note-taking"],
-    "Collaboration & communication skills": ["Collaboration", "Communication", "Leadership & followership"],
+    "Relationship skills": ["Collaboration", "Communication", "Leadership & followership"],
+    "Productive mindsets & purpose": ["Identity & purpose", "Mindsets & self-regulation"],
   },
-  "Well-being": {
-    "Social emotional capacities": ["Identity & purpose", "Mindsets & self-regulation", "Relationship skills"],
-    "Physical capacities": ["Athletics", "Healthy habits"],
-    "Mental & physical health": ["Emotional well-being & mood", "Stress & resilience", "Anxiety/depressive symptoms"],
-    "Behavior, attendance, & engagement": ["Attendance", "Positive & negative behavioral incidents", "Participation"],
+  "Professional & Practical": {
+    "Practical life skills": [],
+    "Career specific knowledge & skills": ["Financial services", "Mgmt & entrepreneurship", "Healthcare & human services", "Agriculture"],
+    "Career & continuing-education navigation knowledge & skills": [],
+    "Physical/athletic skills & habits": [],
   },
-  Wayfinding: {
-    "Practical, professional, & continuing education capacities": [
-      "Practical knowledge & life skills",
-      "Professional knowledge & skills",
-      "Continuing-education / post-secondary knowledge & exposure",
+  Advancement: {
+    "Assets for continuing education, career, and life": [
+      "GPA",
+      "Transcript",
+      "Educator relationships & recommendations",
+      "Early college coursework",
+      "Industry-recognized credentials",
+      "Logged experience and work artifacts",
+      "Social network",
     ],
-    "Postsecondary assets": ["Industry-recognized credentials", "Early college coursework", "Postsecondary plan"],
     "Transitional milestones": ["Promotion / graduation", "Postsecondary enrollment", "Successful career transition"],
+  },
+  Wellbeing: {
+    "Mental & physical health": ["Emotional well-being & mood", "Stress & resilience", "Anxiety/depressive symptoms"],
+    "Social wellbeing": ["Belonging", "Quality of peer relationships", "Connection to teachers & staff"],
+  },
+  "Conduct & Engagement": {
+    "Productive engagement & satisfaction": ["Participation", "Engagement profiles", "Social engagement", "Satisfaction"],
+    "Behavior & attendance": ["Positive & negative behavior incidents", "Attendance"],
   },
 };
 
@@ -90,13 +102,15 @@ export const OUTCOME_DESCRIPTIONS: Record<string, string> = {
   Robotics: "Students design and program machines that sense, decide, and act to accomplish tasks.",
 };
 
+/** One–two sentence blurbs for leap detail screens (keep concise). */
 export const LEAP_DESCRIPTIONS: Record<string, string> = {
-  "Whole-child focus": "The component supports academic learning alongside social-emotional and developmental needs.",
-  "Connection & community": "The experience builds belonging, strong relationships, and shared norms for learning.",
-  "High expectations with rigorous learning": "Students encounter challenging work with supports that enable success.",
-  Relevance: "Learning connects to students’ lives, interests, identity, and future opportunities.",
-  Customization: "The design adapts to learner needs through flexible pathways, scaffolds, and choices.",
-  Agency: "Students have meaningful voice and ownership over goals, work products, and learning processes.",
+  "Whole-child focus":
+    "Academic learning alongside social-emotional and developmental needs.",
+  "Connection & community": "Belonging, strong relationships, and shared norms for learning.",
+  "High expectations with rigorous learning": "Challenging work with supports so students can succeed.",
+  Relevance: "Learning connects to students’ lives, interests, and future paths.",
+  Customization: "Flexible pathways, scaffolds, and choices that adapt to learners.",
+  Agency: "Meaningful voice and ownership over goals, work products, and learning processes.",
 };
 
 export const PRACTICE_DESCRIPTIONS: Record<string, string> = {

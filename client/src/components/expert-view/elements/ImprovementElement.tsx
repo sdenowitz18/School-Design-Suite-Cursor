@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QuestionSection } from '../QuestionSection';
 import { IMPROVEMENT_ELEMENT } from '../improvement-element-schema';
 import type { BucketValue, ComponentType, ElementSection, ElementsExpertData } from '../expert-view-types';
@@ -16,8 +16,13 @@ const SECTION_TABS: { id: ElementSection; label: string }[] = [
 
 export function ImprovementElement({ componentType, data, onChange }: ImprovementElementProps) {
   const [activeSection, setActiveSection] = useState<ElementSection>('practices');
+  const [openQuestionId, setOpenQuestionId] = useState<string | null>(null);
   const elementData = data['improvement'] ?? {};
   const sharedData = (data['__shared__'] ?? {}) as Record<string, BucketValue>;
+
+  useEffect(() => {
+    setOpenQuestionId(null);
+  }, [activeSection]);
 
   function handleBucketChange(questionId: string, bucketId: string, value: BucketValue) {
     const key = `${questionId}__${bucketId}`;
@@ -71,6 +76,10 @@ export function ImprovementElement({ componentType, data, onChange }: Improvemen
               data={getQuestionData(question.id)}
               componentType={componentType}
               onChange={(bucketId, value) => handleBucketChange(question.id, bucketId, value)}
+              bucketsExpanded={openQuestionId === question.id}
+              onToggleBuckets={() =>
+                setOpenQuestionId((cur) => (cur === question.id ? null : question.id))
+              }
               sharedData={sharedData}
               onSharedBucketChange={handleSharedBucketChange}
             />
