@@ -1,22 +1,5 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 
-/**
- * When the SPA is hosted separately (e.g. Vercel static), set at build time:
- * `VITE_API_BASE_URL=https://your-api.example.com` (no trailing slash).
- * Leave unset for same-origin (local dev with Express, or single Node server).
- */
-export function getApiBaseUrl(): string {
-  const raw = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  if (raw == null || !String(raw).trim()) return "";
-  return String(raw).trim().replace(/\/$/, "");
-}
-
-export function apiUrl(path: string): string {
-  const base = getApiBaseUrl();
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return base ? `${base}${p}` : p;
-}
-
 async function fetchJson(url: string, options?: RequestInit) {
   const res = await fetch(url, options);
   if (!res.ok) {
@@ -28,12 +11,12 @@ async function fetchJson(url: string, options?: RequestInit) {
 export const componentQueries = {
   all: queryOptions({
     queryKey: ["components"],
-    queryFn: () => fetchJson(apiUrl("/api/components")),
+    queryFn: () => fetchJson("/api/components"),
   }),
   byNodeId: (nodeId: string) =>
     queryOptions({
       queryKey: ["components", nodeId],
-      queryFn: () => fetchJson(apiUrl(`/api/components/${nodeId}`)),
+      queryFn: () => fetchJson(`/api/components/${nodeId}`),
       enabled: !!nodeId,
     }),
 };
@@ -42,14 +25,13 @@ export function useUpdateComponent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ nodeId, data }: { nodeId: string; data: any }) => {
-      return fetchJson(apiUrl(`/api/components/${nodeId}`), {
+      return fetchJson(`/api/components/${nodeId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
     },
     onSuccess: (data, variables) => {
-      // Update cache immediately to prevent stale overwrites between competing autosaves.
       queryClient.setQueryData(["components", variables.nodeId], data);
       queryClient.setQueryData(["components"], (prev: any) => {
         if (!Array.isArray(prev)) return prev;
@@ -69,7 +51,7 @@ export function useSeedComponents() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return fetchJson(apiUrl("/api/seed"), { method: "POST" });
+      return fetchJson("/api/seed", { method: "POST" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["components"] });
@@ -81,7 +63,7 @@ export function useCreateComponent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
-      return fetchJson(apiUrl("/api/components"), {
+      return fetchJson("/api/components", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -97,7 +79,7 @@ export function useDeleteComponent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (nodeId: string) => {
-      const res = await fetch(apiUrl(`/api/components/${encodeURIComponent(nodeId)}`), { method: "DELETE" });
+      const res = await fetch(`/api/components/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
       if (!res.ok) {
         throw new Error(`Delete failed: ${res.status}`);
       }
