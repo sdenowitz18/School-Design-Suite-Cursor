@@ -53,6 +53,24 @@ export function normalizePortrait(raw: any): PortraitOfGraduate {
   return { attributes, linksByAttributeId };
 }
 
+/** Clear all outcome links per attribute (keeps attributes). */
+export function stripPortraitOutcomeLinks(portrait: PortraitOfGraduate): PortraitOfGraduate {
+  const linksByAttributeId: Record<string, PortraitAttributeLink[]> = {};
+  for (const a of portrait.attributes || []) {
+    linksByAttributeId[a.id] = [];
+  }
+  return { ...portrait, linksByAttributeId };
+}
+
+/** Remove center aims that were auto-added from Portrait ↔ outcome sync. */
+export function stripPogSourcedOutcomesFromKeyDesignElements(kde: any): any {
+  const base = kde || { aims: [], practices: [], supports: [] };
+  const aims = (Array.isArray(base.aims) ? base.aims : []).filter(
+    (a: any) => !(a?.type === "outcome" && a?.source === "pog"),
+  );
+  return { ...base, aims };
+}
+
 export type WhereBuiltComponent = {
   nodeId: string;
   title: string;

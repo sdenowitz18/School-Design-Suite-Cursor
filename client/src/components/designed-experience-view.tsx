@@ -17,6 +17,7 @@ import {
   Pencil,
   Check,
   Search,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,12 @@ import ComponentAdultExperienceView from "./component-adult-experience-view";
 import { useLearnerModuleLibraryOptional } from "@/contexts/learner-module-library-context";
 import OutcomeDetailView from "./outcome-detail-view";
 import LeapDetailView from "./leap-detail-view";
+import CommunityEcosystemManageView from "./community-ecosystem/community-ecosystem-manage-view";
+import CommunityEcosystemOutcomeDetailView from "./community-ecosystem/community-ecosystem-outcome-detail-view";
+import {
+  normalizeCommunityEcosystemOutcomes,
+  type CommunityEcosystemOutcome,
+} from "./community-ecosystem/community-ecosystem-types";
 import OutcomeScoreView from "./outcome-score-view";
 import { SchemaPickerSheet } from "./de-schema-picker-sheet";
 import { ExpertViewShell } from "./expert-view/ExpertViewShell";
@@ -66,9 +73,16 @@ import type { SupportGroupKey } from "./support-groups-config";
 import PogHubView from "./pog/pog-hub-view";
 import PogAttributeDetailView from "./pog/pog-attribute-detail-view";
 import PogOutcomesFirstView from "./pog/pog-outcomes-first-view";
-import PogAttributesOverviewView from "./pog/pog-attributes-overview-view";
+import PogLearnMoreView from "./pog/pog-learn-more-view";
 import type { PortraitOfGraduate } from "./pog/pog-types";
-import { normalizePortrait, syncKeyAimsOutcomesFromPortrait, normKey as normPogKey } from "./pog/pog-utils";
+import { POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI } from "./pog/pog-feature-flags";
+import {
+  normalizePortrait,
+  stripPogSourcedOutcomesFromKeyDesignElements,
+  stripPortraitOutcomeLinks,
+  syncKeyAimsOutcomesFromPortrait,
+  normKey as normPogKey,
+} from "./pog/pog-utils";
 import {
   applyScenarioLevelsToAims,
   buildCenterScenarios,
@@ -120,6 +134,12 @@ export interface DesignedExperienceData {
   subcomponents?: DESubcomponent[];
   /** Same shape as subcomponents; modules dragged from the adult catalog land here. */
   adultSubcomponents?: DESubcomponent[];
+  /** Center (overall) only — community & ecosystem outcomes. */
+  communityEcosystemOutcomes?: CommunityEcosystemOutcome[];
+  /** Center (overall) only — plain-language description for community/ecosystem outcomes (future AI assist). */
+  communityEcosystemPlainText?: string;
+  /** Center (overall) only — plain-language for Portrait of a Graduate (future AI / upload assist). */
+  portraitOfGraduatePlainText?: string;
   // Additional nested pages may store extra fields here (e.g. support group workflow).
   // This view must preserve unknown fields when saving.
   [key: string]: any;
@@ -730,7 +750,10 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
   const [adultSubcomponents, setAdultSubcomponents] = useState<DESubcomponent[]>([]);
   const [portraitOfGraduate, setPortraitOfGraduate] = useState<PortraitOfGraduate>({ attributes: [], linksByAttributeId: {} });
-  const [pogNav, setPogNav] = useState<{ mode: "hub" } | { mode: "detail"; attributeId: string } | { mode: "outcomesFirst" } | { mode: "all" }>({ mode: "hub" });
+  const [portraitOfGraduatePlainText, setPortraitOfGraduatePlainText] = useState("");
+  const [pogNav, setPogNav] = useState<
+    { mode: "hub" } | { mode: "detail"; attributeId: string } | { mode: "outcomesFirst" }
+  >({ mode: "hub" });
   const [pogReturnToDetailAttrId, setPogReturnToDetailAttrId] = useState<string | null>(null);
   const [pogOutcomesFirstDraft, setPogOutcomesFirstDraft] = useState<{ selectedKeys: string[]; step: 1 | 2 }>({ selectedKeys: [], step: 1 });
   const [loadedNodeId, setLoadedNodeId] = useState<string | null>(null);
@@ -752,6 +775,11 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   /** When opening ring adult Manage from a pill, scroll to this module on the manage page. */
   const [componentAdultFocusSubId, setComponentAdultFocusSubId] = useState<string | null>(null);
   const [showPortraitOfGraduateManage, setShowPortraitOfGraduateManage] = useState(false);
+  const [showPogManageLearnMore, setShowPogManageLearnMore] = useState(false);
+  const [communityEcosystemOutcomes, setCommunityEcosystemOutcomes] = useState<CommunityEcosystemOutcome[]>([]);
+  const [communityEcosystemPlainText, setCommunityEcosystemPlainText] = useState("");
+  const [showCommunityEcosystemManage, setShowCommunityEcosystemManage] = useState(false);
+  const [communityEcosystemDetailId, setCommunityEcosystemDetailId] = useState<string | null>(null);
   const [leapSummaryFocusLabel, setLeapSummaryFocusLabel] = useState<string | null>(null);
   const learnerModuleLibrary = useLearnerModuleLibraryOptional();
   const openLearnerLibrary = useCallback(() => {
@@ -826,7 +854,14 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     subEditStashRef.current = null;
     const de: DesignedExperienceData = (componentData as any).designedExperienceData || {};
     setDescription(de.description || "");
-    setKeyDesignElements(de.keyDesignElements || { aims: [], practices: [], supports: [] });
+    const baseKdeInit = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+    let portraitHydrated = normalizePortrait((de as any)?.portraitOfGraduate);
+    if (!POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI) {
+      portraitHydrated = stripPortraitOutcomeLinks(portraitHydrated);
+      setKeyDesignElements(stripPogSourcedOutcomesFromKeyDesignElements(baseKdeInit));
+    } else {
+      setKeyDesignElements(baseKdeInit);
+    }
     setSubcomponents((de.subcomponents || []).map((s: any) => ({
       ...s,
       id: s.id || generateId(),
@@ -841,7 +876,14 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       practices: s.practices || [],
       supports: s.supports || [],
     })));
-    setPortraitOfGraduate(normalizePortrait((de as any)?.portraitOfGraduate));
+    setPortraitOfGraduate(portraitHydrated);
+    setCommunityEcosystemOutcomes(normalizeCommunityEcosystemOutcomes((de as any)?.communityEcosystemOutcomes));
+    setCommunityEcosystemPlainText(
+      typeof (de as any).communityEcosystemPlainText === "string" ? (de as any).communityEcosystemPlainText : "",
+    );
+    setPortraitOfGraduatePlainText(
+      typeof (de as any).portraitOfGraduatePlainText === "string" ? (de as any).portraitOfGraduatePlainText : "",
+    );
     setElementsExpertData((de as any)?.elementsExpertData ?? {});
     setPogReturnToDetailAttrId(null);
     setPogOutcomesFirstDraft({ selectedKeys: [], step: 1 });
@@ -888,7 +930,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   }, [loadedNodeId, nodeId, componentData]);
 
   useEffect(() => {
-    if (!isOverall) return;
+    if (!isOverall || !POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI) return;
     const synced = syncKeyAimsOutcomesFromPortrait({ keyDesignElements }, portraitOfGraduate);
     const nextAims: any[] = (synced as any)?.keyDesignElements?.aims || [];
     const curAims: any[] = (keyDesignElements as any)?.aims || [];
@@ -907,6 +949,23 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       }
     }
   }, [isOverall, keyDesignElements, portraitOfGraduate]);
+
+  useEffect(() => {
+    if (!isOverall || POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI) return;
+    if (pogNav.mode !== "outcomesFirst") return;
+    setPogNav({ mode: "hub" });
+  }, [isOverall, pogNav.mode]);
+
+  useEffect(() => {
+    if (!communityEcosystemDetailId) return;
+    if (!communityEcosystemOutcomes.some((o) => o.id === communityEcosystemDetailId)) {
+      setCommunityEcosystemDetailId(null);
+    }
+  }, [communityEcosystemDetailId, communityEcosystemOutcomes]);
+
+  const patchCommunityEcosystemOutcome = useCallback((id: string, patch: Partial<CommunityEcosystemOutcome>) => {
+    setCommunityEcosystemOutcomes((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+  }, []);
 
   useEffect(() => {
     if (initialSubId && subcomponents.length > 0) {
@@ -1063,6 +1122,9 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         subcomponents: newSubs,
         adultSubcomponents,
         portraitOfGraduate: deCurrent.portraitOfGraduate,
+        portraitOfGraduatePlainText: deCurrent.portraitOfGraduatePlainText,
+        communityEcosystemOutcomes: deCurrent.communityEcosystemOutcomes,
+        communityEcosystemPlainText: deCurrent.communityEcosystemPlainText,
         elementsExpertData: stash?.parentElementsExpertData ?? deCurrent.elementsExpertData,
       };
 
@@ -1089,7 +1151,10 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       aims: aimsWithResolvedLevels as any,
     };
 
-    const syncedDe = isOverall ? syncKeyAimsOutcomesFromPortrait({ keyDesignElements: keyDesignElementsWithLevels }, portraitOfGraduate) : { keyDesignElements: keyDesignElementsWithLevels };
+    const syncedDe =
+      isOverall && POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI
+        ? syncKeyAimsOutcomesFromPortrait({ keyDesignElements: keyDesignElementsWithLevels }, portraitOfGraduate)
+        : { keyDesignElements: keyDesignElementsWithLevels };
     const keyDesignElementsToSave = (syncedDe as any)?.keyDesignElements || keyDesignElementsWithLevels;
     const designedExperienceData: DesignedExperienceData = {
       ...(deRef.current || {}),
@@ -1100,6 +1165,11 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       portraitOfGraduate: isOverall ? portraitOfGraduate : (deRef.current as any)?.portraitOfGraduate,
       elementsExpertData,
     };
+    if (isOverall) {
+      designedExperienceData.communityEcosystemOutcomes = communityEcosystemOutcomes;
+      designedExperienceData.communityEcosystemPlainText = communityEcosystemPlainText;
+      designedExperienceData.portraitOfGraduatePlainText = portraitOfGraduatePlainText;
+    }
     updateMutation.mutate({ nodeId, data: { designedExperienceData } });
   }, [
     nodeId,
@@ -1108,6 +1178,9 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     activeSubId,
     keyDesignElements,
     portraitOfGraduate,
+    communityEcosystemOutcomes,
+    communityEcosystemPlainText,
+    portraitOfGraduatePlainText,
     subcomponents,
     adultSubcomponents,
     elementsExpertData,
@@ -1125,7 +1198,20 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     }, 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [description, isOverall, activeSubId, keyDesignElements, portraitOfGraduate, subcomponents, adultSubcomponents, elementsExpertData, supportNav.mode]);
+  }, [
+    description,
+    isOverall,
+    activeSubId,
+    keyDesignElements,
+    portraitOfGraduate,
+    communityEcosystemOutcomes,
+    communityEcosystemPlainText,
+    portraitOfGraduatePlainText,
+    subcomponents,
+    adultSubcomponents,
+    elementsExpertData,
+    supportNav.mode,
+  ]);
 
   const addSubcomponent = () => {
     if (!newSubName.trim()) return;
@@ -1244,6 +1330,40 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     );
   }
 
+  const selectedCommunityEcosystem = communityEcosystemDetailId
+    ? communityEcosystemOutcomes.find((o) => o.id === communityEcosystemDetailId)
+    : undefined;
+  if (communityEcosystemDetailId && isOverall && selectedCommunityEcosystem) {
+    return (
+      <CommunityEcosystemOutcomeDetailView
+        outcome={selectedCommunityEcosystem}
+        onBack={() => setCommunityEcosystemDetailId(null)}
+        onSave={(patch) => patchCommunityEcosystemOutcome(selectedCommunityEcosystem.id, patch)}
+      />
+    );
+  }
+
+  if (showCommunityEcosystemManage && isOverall) {
+    return (
+      <CommunityEcosystemManageView
+        plainText={communityEcosystemPlainText}
+        onPlainTextChange={setCommunityEcosystemPlainText}
+        outcomes={communityEcosystemOutcomes}
+        onChange={setCommunityEcosystemOutcomes}
+        onPatchOutcome={patchCommunityEcosystemOutcome}
+        onManageDetails={(id) => {
+          setShowCommunityEcosystemManage(false);
+          setCommunityEcosystemDetailId(id);
+        }}
+        onBack={() => {
+          const latestDe: any = (componentData as any)?.designedExperienceData || {};
+          deRef.current = latestDe;
+          setShowCommunityEcosystemManage(false);
+        }}
+      />
+    );
+  }
+
   if (showSchoolLearnerExperienceView && isOverall) {
     return (
       <SchoolLearnerExperienceView
@@ -1299,38 +1419,68 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   }
 
   if (showPortraitOfGraduateManage && isOverall) {
+    if (showPogManageLearnMore) {
+      return (
+        <div className="min-h-screen bg-gray-50" data-testid="pog-learn-more-from-manage">
+          <PogLearnMoreView onBack={() => setShowPogManageLearnMore(false)} />
+        </div>
+      );
+    }
     return (
-      <div className="min-h-screen bg-white" data-testid="portrait-of-graduate-manage-page">
+      <div className="min-h-screen bg-gray-50" data-testid="portrait-of-graduate-manage-page">
         <div className="max-w-4xl mx-auto px-6 py-6 pb-20 space-y-6">
           <button
             type="button"
-            onClick={() => setShowPortraitOfGraduateManage(false)}
+            onClick={() => {
+              setShowPogManageLearnMore(false);
+              setShowPortraitOfGraduateManage(false);
+            }}
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
           >
             <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
             Back to Designed Experience
           </button>
-          <h1 className="text-xl font-bold text-gray-900">Portrait of a Graduate</h1>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-xl font-bold text-gray-900">Portrait of a Graduate</h1>
+              <p className="text-sm text-gray-500 mt-1">
+                Define graduate attributes with a name, description, and icon.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 text-xs text-gray-600 shrink-0"
+              onClick={() => setShowPogManageLearnMore(true)}
+              data-testid="pog-manage-learn-more"
+            >
+              <BookOpen className="w-3.5 h-3.5 mr-1" />
+              Learn more
+            </Button>
+          </div>
           <PogHubView
+            portraitPlainText={portraitOfGraduatePlainText}
+            onPortraitPlainTextChange={setPortraitOfGraduatePlainText}
             portrait={portraitOfGraduate}
             onChange={setPortraitOfGraduate}
             onOpenAttribute={(attributeId) => {
               setShowPortraitOfGraduateManage(false);
               setPogNav({ mode: "detail", attributeId });
             }}
-            onViewAll={() => {
-              setShowPortraitOfGraduateManage(false);
-              setPogNav({ mode: "all" });
-            }}
-            onStartWithOutcomes={() => {
-              setShowPortraitOfGraduateManage(false);
-              setPogReturnToDetailAttrId(null);
-              setPogOutcomesFirstDraft((prev) => {
-                const merged = new Set<string>([...prev.selectedKeys, ...linkedPogOutcomeKeys]);
-                return { ...prev, selectedKeys: Array.from(merged) };
-              });
-              setPogNav({ mode: "outcomesFirst" });
-            }}
+            onStartWithOutcomes={
+              POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI
+                ? () => {
+                    setShowPortraitOfGraduateManage(false);
+                    setPogReturnToDetailAttrId(null);
+                    setPogOutcomesFirstDraft((prev) => {
+                      const merged = new Set<string>([...prev.selectedKeys, ...linkedPogOutcomeKeys]);
+                      return { ...prev, selectedKeys: Array.from(merged) };
+                    });
+                    setPogNav({ mode: "outcomesFirst" });
+                  }
+                : undefined
+            }
           />
         </div>
       </div>
@@ -1427,7 +1577,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
 
   if (isOverall && pogNav.mode === "detail") {
     return (
-      <div className="p-6">
+      <div className="min-h-screen bg-gray-50" data-testid="pog-attribute-detail-page">
         <PogAttributeDetailView
           portrait={portraitOfGraduate}
           attributeId={pogNav.attributeId}
@@ -1459,18 +1609,6 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
             }
             setPogNav({ mode: "hub" });
           }}
-        />
-      </div>
-    );
-  }
-
-  if (isOverall && pogNav.mode === "all") {
-    return (
-      <div className="p-6">
-        <PogAttributesOverviewView
-          portrait={portraitOfGraduate}
-          onBack={() => setPogNav({ mode: "hub" })}
-          onOpenAttribute={(attributeId) => setPogNav({ mode: "detail", attributeId })}
         />
       </div>
     );
@@ -1652,7 +1790,10 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                     variant="link"
                     size="sm"
                     className="text-xs text-gray-500 h-auto p-0"
-                    onClick={() => setShowPortraitOfGraduateManage(true)}
+                    onClick={() => {
+                      setShowPogManageLearnMore(false);
+                      setShowPortraitOfGraduateManage(true);
+                    }}
                     data-testid="button-manage-portrait-of-graduate"
                   >
                     Manage
@@ -1673,6 +1814,40 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                   </div>
                 ) : (
                   <p className="text-xs text-gray-400 italic">No graduate portrait attributes yet — open Manage to add them.</p>
+                )}
+              </div>
+            )}
+            {/* Community & ecosystem outcomes — center only */}
+            {isOverall && (
+              <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <span className="text-xs font-medium text-gray-700">Community &amp; ecosystem outcomes</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="text-xs text-gray-500 h-auto p-0"
+                    onClick={() => setShowCommunityEcosystemManage(true)}
+                    data-testid="button-manage-community-ecosystem-outcomes"
+                  >
+                    Manage
+                  </Button>
+                </div>
+                {communityEcosystemOutcomes.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {communityEcosystemOutcomes.map((o) => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 transition-colors"
+                        onClick={() => setCommunityEcosystemDetailId(o.id)}
+                        data-testid={`chip-community-ecosystem-${o.id}`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 italic">None selected yet — open Manage to add outcomes.</p>
                 )}
               </div>
             )}

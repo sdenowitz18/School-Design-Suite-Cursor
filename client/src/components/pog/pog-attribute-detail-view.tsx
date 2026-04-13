@@ -12,6 +12,7 @@ import { componentQueries } from "@/lib/api";
 import { SchemaPickerSheet } from "@/components/de-schema-picker-sheet";
 import { OUTCOME_SCHEMA } from "@/components/designed-experience-schemas";
 import type { PortraitOfGraduate } from "./pog-types";
+import { POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI } from "./pog-feature-flags";
 import { buildWhereBuiltForOutcomeKeys, normKey } from "./pog-utils";
 import PogOutcomePill from "./pog-outcome-pill";
 
@@ -33,6 +34,7 @@ export default function PogAttributeDetailView({
   onChange: (next: PortraitOfGraduate) => void;
   onBack: () => void;
 }) {
+  const showAdvanced = POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI;
   const { data: allComponents } = useQuery(componentQueries.all);
   const attr = (portrait.attributes || []).find((a) => a.id === attributeId) || null;
   const [editingDetails, setEditingDetails] = useState(false);
@@ -135,7 +137,10 @@ export default function PogAttributeDetailView({
   };
 
   const deleteAttribute = () => {
-    const confirmed = window.confirm("Delete this attribute? This will also remove all linked outcomes from this attribute.");
+    const msg = showAdvanced
+      ? "Delete this attribute? This will also remove all linked outcomes from this attribute."
+      : "Delete this attribute?";
+    const confirmed = window.confirm(msg);
     if (!confirmed) return;
     const next: PortraitOfGraduate = {
       ...portrait,
@@ -147,49 +152,51 @@ export default function PogAttributeDetailView({
     onBack();
   };
 
+  const sectionClass = "rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3";
+
   if (!attr) {
     return (
-      <div className="p-6">
-        <Button variant="ghost" onClick={onBack}>
-          <ChevronLeft className="h-4 w-4 mr-2" />
+      <div className="max-w-2xl mx-auto px-6 py-8 pb-16 space-y-4" data-testid="pog-attribute-not-found">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
           Back
-        </Button>
-        <div className="mt-4 text-sm text-muted-foreground">Attribute not found.</div>
+        </button>
+        <div className="text-sm text-gray-500">Attribute not found.</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <Button variant="ghost" onClick={onBack}>
-          <ChevronLeft className="h-4 w-4 mr-2" />
-          Back
-        </Button>
-        <div className="text-xs text-muted-foreground">
-          Linked outcomes are added to Whole School outcomes automatically (priority is derived from POG links).
-        </div>
-      </div>
+    <div className="max-w-2xl mx-auto px-6 py-8 pb-16 space-y-8" data-testid="pog-attribute-detail-view">
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+      >
+        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+        Back
+      </button>
 
-      <div className="rounded-lg border p-4 bg-background space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="h-10 w-10 rounded-md border flex items-center justify-center text-lg shrink-0">{attr.icon || "★"}</div>
-            <div className="min-w-0">
-              <div className="text-lg font-semibold truncate">{attr.name}</div>
-              {attr.description ? (
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap">{attr.description}</div>
-              ) : (
-                <div className="text-sm text-muted-foreground">No description yet.</div>
-              )}
+      <header className="space-y-2">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className="h-12 w-12 rounded-lg border border-gray-200 flex items-center justify-center text-xl shrink-0 bg-white shadow-sm">
+              {attr.icon || "★"}
             </div>
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight min-w-0 break-words">{attr.name}</h1>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Badge variant="secondary">
-              {linkedSorted.length === 1 ? "1 linked outcome" : `${linkedSorted.length} linked outcomes`}
-            </Badge>
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {showAdvanced ? (
+              <Badge variant="secondary">
+                {linkedSorted.length === 1 ? "1 linked outcome" : `${linkedSorted.length} linked outcomes`}
+              </Badge>
+            ) : null}
             <Button variant="outline" size="sm" onClick={deleteAttribute}>
-              Delete attribute
+              Delete
             </Button>
             <Button
               variant="outline"
@@ -204,9 +211,22 @@ export default function PogAttributeDetailView({
             </Button>
           </div>
         </div>
+        <p className="text-sm text-gray-500">Portrait of a Graduate attribute</p>
+        <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+          {attr.description?.trim() ? attr.description : "No description yet — use Edit details to add one."}
+        </p>
+      </header>
 
-        {editingDetails && (
-          <div className="rounded-md border p-3 space-y-3 bg-muted/20">
+      {showAdvanced ? (
+        <p className="text-xs text-gray-500 -mt-4">
+          Linked outcomes are added to Whole School outcomes automatically (priority is derived from POG links).
+        </p>
+      ) : null}
+
+      {editingDetails ? (
+        <div className={sectionClass}>
+          <div className="text-sm font-medium text-gray-800">Edit attribute</div>
+          <div className="rounded-lg border border-gray-100 p-3 space-y-3 bg-gray-50/80">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
               <div className="md:col-span-2">
                 <div className="text-xs text-muted-foreground mb-1">Icon</div>
@@ -249,125 +269,132 @@ export default function PogAttributeDetailView({
               </Button>
             </div>
           </div>
-        )}
-      </div>
-
-      <div className="rounded-lg border p-3 bg-background">
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <div className="font-medium text-foreground">Scores</div>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">1-5</span>
-            <select
-              className={cn("h-7 rounded-full border px-2 text-xs", scoreChipClass((attr as any)?.score1to5 ?? null))}
-              value={(attr as any)?.score1to5 ?? ""}
-              onChange={(e) => {
-                const raw = e.currentTarget?.value ?? "";
-                const v = raw ? Number(raw) : null;
-                updateAttr({
-                  score1to5: v === 1 || v === 2 || v === 3 || v === 4 || v === 5 ? (v as 1 | 2 | 3 | 4 | 5) : null,
-                });
-              }}
-            >
-              <option value="">—</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Built %</span>
-            <select
-              className="h-7 rounded-full border px-2 text-xs"
-              value={(attr as any)?.builtPercent ?? ""}
-              onChange={(e) => {
-                const raw = e.currentTarget?.value ?? "";
-                const v = raw ? Number(raw) : null;
-                updateAttr({
-                  builtPercent: v === 0 || v === 25 || v === 50 || v === 75 || v === 100 ? (v as 0 | 25 | 50 | 75 | 100) : null,
-                });
-              }}
-            >
-              <option value="">—</option>
-              <option value="0">0%</option>
-              <option value="25">25%</option>
-              <option value="50">50%</option>
-              <option value="75">75%</option>
-              <option value="100">100%</option>
-            </select>
-          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-medium">Linked outcomes</div>
-          <SchemaPickerSheet
-            title={`Add outcomes to ${attr.name || "this attribute"}`}
-            description="Selections here are unique to this Portrait attribute and do not mirror Key Design Elements selections."
-            schema={OUTCOME_SCHEMA}
-            selectedLabels={(links || []).map((l: any) => String(l?.outcomeLabel || ""))}
-            onToggle={toggleOutcome}
-            getLevel={getOutcomeLevel}
-            onSetLevel={(label, level) => setOutcomeLevel(label, level as any)}
-            type="outcome"
-            triggerLabel="Outcomes"
-            triggerIcon={Target}
-          />
-        </div>
-        {linkedSorted.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {linkedSorted.map((l: any) => (
-              <PogOutcomePill key={String(l?.outcomeLabel)} label={String(l?.outcomeLabel || "")} meta={String(l?.priority || "M")} className="max-w-[320px]" />
-            ))}
+      {showAdvanced ? (
+        <>
+          <div className={cn(sectionClass, "p-3")}>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <div className="font-medium text-foreground">Scores</div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">1-5</span>
+                <select
+                  className={cn("h-7 rounded-full border px-2 text-xs", scoreChipClass((attr as any)?.score1to5 ?? null))}
+                  value={(attr as any)?.score1to5 ?? ""}
+                  onChange={(e) => {
+                    const raw = e.currentTarget?.value ?? "";
+                    const v = raw ? Number(raw) : null;
+                    updateAttr({
+                      score1to5: v === 1 || v === 2 || v === 3 || v === 4 || v === 5 ? (v as 1 | 2 | 3 | 4 | 5) : null,
+                    });
+                  }}
+                >
+                  <option value="">—</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Built %</span>
+                <select
+                  className="h-7 rounded-full border px-2 text-xs"
+                  value={(attr as any)?.builtPercent ?? ""}
+                  onChange={(e) => {
+                    const raw = e.currentTarget?.value ?? "";
+                    const v = raw ? Number(raw) : null;
+                    updateAttr({
+                      builtPercent:
+                        v === 0 || v === 25 || v === 50 || v === 75 || v === 100 ? (v as 0 | 25 | 50 | 75 | 100) : null,
+                    });
+                  }}
+                >
+                  <option value="">—</option>
+                  <option value="0">0%</option>
+                  <option value="25">25%</option>
+                  <option value="50">50%</option>
+                  <option value="75">75%</option>
+                  <option value="100">100%</option>
+                </select>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="rounded-md border p-4 text-sm text-muted-foreground bg-background">
-            No outcomes linked yet.
-          </div>
-        )}
-      </div>
 
-      <div className="rounded-lg border p-4 bg-background space-y-3">
-        <div className="text-sm font-medium">Where it&apos;s built (key aims only)</div>
-        {whereBuilt.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {whereBuilt.map((wb) => (
-              <div key={wb.nodeId} className="rounded-md border p-3 space-y-2">
-                <div className="flex items-start gap-2">
-                  <div
-                    className="w-9 h-9 shrink-0 border bg-muted/20"
-                    style={{ clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)" }}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">Linked outcomes</div>
+              <SchemaPickerSheet
+                title={`Add outcomes to ${attr.name || "this attribute"}`}
+                description="Selections here are unique to this Portrait attribute and do not mirror Key Design Elements selections."
+                schema={OUTCOME_SCHEMA}
+                selectedLabels={(links || []).map((l: any) => String(l?.outcomeLabel || ""))}
+                onToggle={toggleOutcome}
+                getLevel={getOutcomeLevel}
+                onSetLevel={(label, level) => setOutcomeLevel(label, level as any)}
+                type="outcome"
+                triggerLabel="Outcomes"
+                triggerIcon={Target}
+              />
+            </div>
+            {linkedSorted.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {linkedSorted.map((l: any) => (
+                  <PogOutcomePill
+                    key={String(l?.outcomeLabel)}
+                    label={String(l?.outcomeLabel || "")}
+                    meta={String(l?.priority || "M")}
+                    className="max-w-[320px]"
                   />
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">{wb.title}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {wb.outcomes.length} referenced outcome{wb.outcomes.length === 1 ? "" : "s"}
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-gray-200 p-4 text-sm text-gray-500 bg-white">No outcomes linked yet.</div>
+            )}
+          </div>
+
+          <div className={sectionClass}>
+            <div className="text-sm font-medium">Where it&apos;s built (key aims only)</div>
+            {whereBuilt.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {whereBuilt.map((wb) => (
+                  <div key={wb.nodeId} className="rounded-lg border border-gray-100 p-3 space-y-2 bg-gray-50/50">
+                    <div className="flex items-start gap-2">
+                      <div
+                        className="w-9 h-9 shrink-0 border bg-muted/20"
+                        style={{ clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)" }}
+                      />
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{wb.title}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {wb.outcomes.length} referenced outcome{wb.outcomes.length === 1 ? "" : "s"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {wb.outcomes.map((label) => {
+                        const priority = (linkByKey.get(normKey(label)) as any)?.priority || "M";
+                        return (
+                          <PogOutcomePill
+                            key={`${wb.nodeId}:${label}`}
+                            label={label}
+                            meta={priority}
+                            className="max-w-[240px]"
+                          />
+                        );
+                      })}
                     </div>
                   </div>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {wb.outcomes.map((label) => {
-                    const priority = (linkByKey.get(normKey(label)) as any)?.priority || "M";
-                    return (
-                      <PogOutcomePill
-                        key={`${wb.nodeId}:${label}`}
-                        label={label}
-                        meta={priority}
-                        className="max-w-[240px]"
-                      />
-                    );
-                  })}
-                </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <div className="text-sm text-muted-foreground">No key-aim references found yet for these linked outcomes.</div>
+            )}
           </div>
-        ) : (
-          <div className="text-sm text-muted-foreground">No key-aim references found yet for these linked outcomes.</div>
-        )}
-      </div>
+        </>
+      ) : null}
     </div>
   );
 }
-

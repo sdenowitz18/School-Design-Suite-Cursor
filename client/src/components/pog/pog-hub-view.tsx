@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Plus, Trash2, Pencil, ArrowRight, BookOpen } from "lucide-react";
+import { Plus, Trash2, Pencil, ArrowRight, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,10 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { SchemaPickerSheet } from "@/components/de-schema-picker-sheet";
 import { OUTCOME_SCHEMA } from "@/components/designed-experience-schemas";
+import { PlainLanguageInput } from "@/components/expert-view/PlainLanguageInput";
 import type { PortraitOfGraduate, PortraitAttribute } from "./pog-types";
+import { POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI } from "./pog-feature-flags";
 import { normKey } from "./pog-utils";
 import PogOutcomePill from "./pog-outcome-pill";
-import PogLearnMoreView from "./pog-learn-more-view";
 
 function genId() {
   return `pog_attr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -31,20 +32,22 @@ function levelToPriority(level: unknown): "H" | "M" | "L" {
 }
 
 export default function PogHubView({
+  portraitPlainText,
+  onPortraitPlainTextChange,
   portrait,
   onChange,
   onOpenAttribute,
   onStartWithOutcomes,
-  onViewAll,
 }: {
+  portraitPlainText: string;
+  onPortraitPlainTextChange: (v: string) => void;
   portrait: PortraitOfGraduate;
   onChange: (next: PortraitOfGraduate) => void;
   onOpenAttribute: (attributeId: string) => void;
-  onStartWithOutcomes: () => void;
-  onViewAll: () => void;
+  onStartWithOutcomes?: () => void;
 }) {
+  const showAdvanced = POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI;
   const [adding, setAdding] = useState(false);
-  const [showLearnMore, setShowLearnMore] = useState(false);
   const [draft, setDraft] = useState<{ icon: string; name: string; description: string }>({ icon: "★", name: "", description: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{ icon: string; name: string; description: string }>({ icon: "★", name: "", description: "" });
@@ -80,10 +83,6 @@ export default function PogHubView({
     return m;
   }, [portrait.attributes, portrait.linksByAttributeId]);
 
-  if (showLearnMore) {
-    return <PogLearnMoreView onBack={() => setShowLearnMore(false)} />;
-  }
-
   const startEdit = (a: PortraitAttribute) => {
     setEditingId(a.id);
     setEditDraft({ icon: a.icon || "★", name: a.name || "", description: a.description || "" });
@@ -106,7 +105,10 @@ export default function PogHubView({
   };
 
   const removeAttr = (id: string) => {
-    const confirmed = window.confirm("Delete this attribute? This will also remove all linked outcomes from this attribute.");
+    const msg = showAdvanced
+      ? "Delete this attribute? This will also remove all linked outcomes from this attribute."
+      : "Delete this attribute?";
+    const confirmed = window.confirm(msg);
     if (!confirmed) return;
     const next: PortraitOfGraduate = {
       ...portrait,
@@ -167,9 +169,7 @@ export default function PogHubView({
   const setAttrOutcomeLevel = (attributeId: string, label: string, level: "High" | "Medium" | "Low") => {
     const key = normKey(label);
     const next = linksForAttr(attributeId).map((l) =>
-      normKey((l as any)?.outcomeLabel) === key
-        ? { ...(l as any), priority: levelToPriority(level) }
-        : l,
+      normKey((l as any)?.outcomeLabel) === key ? { ...(l as any), priority: levelToPriority(level) } : l,
     );
     onChange({
       ...portrait,
@@ -180,84 +180,102 @@ export default function PogHubView({
     });
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="text-lg font-semibold">Portrait of a Graduate</div>
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setShowLearnMore(true)}>
-              <BookOpen className="h-4 w-4 mr-1.5" />
-              Learn more
-            </Button>
-          </div>
-          <div className="text-sm text-muted-foreground">
-            Create attributes that describe your graduate vision, then connect each attribute to outcomes. Linked outcomes are automatically added to Whole
-            School outcomes (priority is derived from POG links).
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={onStartWithOutcomes}>
-              Start with outcomes
-            </Button>
-            <Button size="sm" variant="outline" onClick={onViewAll}>
-              View all
-            </Button>
-          </div>
+  const cardClass = "rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3";
+
+  const addForm = (
+    <div className={cardClass}>
+      <div className="text-sm font-medium text-gray-800">New attribute</div>
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-2">
+          <div className="text-xs text-muted-foreground mb-1">Icon</div>
+          <Input
+            value={draft.icon}
+            onChange={(e) => {
+              const v = e.currentTarget?.value ?? "";
+              setDraft((d) => ({ ...d, icon: v }));
+            }}
+            placeholder="★"
+          />
         </div>
-        <Button onClick={() => setAdding(true)} className={cn(adding && "opacity-60")} disabled={adding}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add attribute
+        <div className="md:col-span-10">
+          <div className="text-xs text-muted-foreground mb-1">Name</div>
+          <Input
+            value={draft.name}
+            onChange={(e) => {
+              const v = e.currentTarget?.value ?? "";
+              setDraft((d) => ({ ...d, name: v }));
+            }}
+            placeholder="Resilient achiever"
+          />
+        </div>
+      </div>
+      <div>
+        <div className="text-xs text-muted-foreground mb-1">Description</div>
+        <Textarea
+          value={draft.description}
+          onChange={(e) => {
+            const v = e.currentTarget?.value ?? "";
+            setDraft((d) => ({ ...d, description: v }));
+          }}
+          placeholder="What does this look like for graduates?"
+          rows={3}
+        />
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="outline" onClick={() => setAdding(false)}>
+          Cancel
+        </Button>
+        <Button onClick={addAttr} disabled={!draft.name.trim()}>
+          Add
         </Button>
       </div>
+    </div>
+  );
 
-      {adding && (
-        <div className="rounded-lg border p-4 space-y-3 bg-background">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div className="md:col-span-2">
-              <div className="text-xs text-muted-foreground mb-1">Icon</div>
-              <Input
-                value={draft.icon}
-                onChange={(e) => {
-                  const v = e.currentTarget?.value ?? "";
-                  setDraft((d) => ({ ...d, icon: v }));
-                }}
-                placeholder="★"
-              />
-            </div>
-            <div className="md:col-span-10">
-              <div className="text-xs text-muted-foreground mb-1">Name</div>
-              <Input
-                value={draft.name}
-                onChange={(e) => {
-                  const v = e.currentTarget?.value ?? "";
-                  setDraft((d) => ({ ...d, name: v }));
-                }}
-                placeholder="Resilient achiever"
-              />
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground mb-1">Description</div>
-            <Textarea
-              value={draft.description}
+  return (
+    <div className="space-y-6">
+      <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+        <h2 className="text-sm font-semibold text-gray-800">Describe your Portrait of a Graduate</h2>
+        <p className="text-xs text-gray-500">
+          Type or record in plain language. Future: AI or an uploaded document may suggest attributes — not wired yet.
+        </p>
+        <PlainLanguageInput
+          value={portraitPlainText}
+          onChange={onPortraitPlainTextChange}
+          indicativeOnly
+          showGenerateSummary
+          placeholder="e.g. We want graduates who are resilient, curious, and ready to contribute to their communities…"
+        />
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-teal-700 cursor-pointer">
+            <Upload className="w-3.5 h-3.5" />
+            <span>Upload Portrait of a Graduate</span>
+            <input
+              type="file"
+              className="hidden"
               onChange={(e) => {
-                const v = e.currentTarget?.value ?? "";
-                setDraft((d) => ({ ...d, description: v }));
+                e.target.value = "";
               }}
-              placeholder="What does this look like for graduates?"
-              rows={3}
             />
-          </div>
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={() => setAdding(false)}>
-              Cancel
-            </Button>
-            <Button onClick={addAttr} disabled={!draft.name.trim()}>
-              Add
-            </Button>
-          </div>
+          </label>
+          <span className="text-[11px] text-gray-400">Placeholder — no file processing yet.</span>
         </div>
-      )}
+      </section>
+
+      {showAdvanced && onStartWithOutcomes ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={onStartWithOutcomes}>
+            Start with outcomes
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-gray-800">Portrait of a Graduate attributes</h2>
+        <p className="text-xs text-gray-500">
+          Each card is one graduate attribute. Open a card for full details, or add another below.
+        </p>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {(portrait.attributes || []).map((a) => {
@@ -267,18 +285,22 @@ export default function PogHubView({
           const extra = Math.max(0, linked.length - preview.length);
           const isEditing = editingId === a.id;
           return (
-            <div key={a.id} className="rounded-lg border p-4 bg-background space-y-3">
+            <div key={a.id} className={cardClass}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="h-8 w-8 rounded-md border flex items-center justify-center text-base shrink-0">{a.icon || "★"}</div>
+                    <div className="h-8 w-8 rounded-md border border-gray-200 flex items-center justify-center text-base shrink-0 bg-gray-50">
+                      {a.icon || "★"}
+                    </div>
                     <div className="min-w-0">
-                      <div className="font-medium truncate">{a.name}</div>
-                      <div className="text-xs text-muted-foreground">{n === 1 ? "1 linked outcome" : `${n} linked outcomes`}</div>
+                      <div className="font-medium truncate text-gray-900">{a.name}</div>
+                      {showAdvanced ? (
+                        <div className="text-xs text-muted-foreground">{n === 1 ? "1 linked outcome" : `${n} linked outcomes`}</div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                   <Button variant="outline" size="sm" onClick={() => onOpenAttribute(a.id)}>
                     Open <ArrowRight className="h-4 w-4 ml-1" />
                   </Button>
@@ -287,9 +309,13 @@ export default function PogHubView({
 
               {!isEditing ? (
                 <>
-                  {a.description ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{a.description}</div> : <div className="text-sm text-muted-foreground">No description yet.</div>}
+                  {a.description ? (
+                    <div className="text-sm text-gray-600 whitespace-pre-wrap">{a.description}</div>
+                  ) : (
+                    <div className="text-sm text-gray-400">No description yet.</div>
+                  )}
 
-                  {linked.length > 0 && (
+                  {showAdvanced && linked.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {preview.map((it) => (
                         <PogOutcomePill key={it.label} label={it.label} meta={it.priority} className="max-w-[240px]" />
@@ -302,38 +328,42 @@ export default function PogHubView({
                     </div>
                   )}
 
-                  <div className="pt-1">
-                    <SchemaPickerSheet
-                      title={`Add outcomes to ${a.name || "this attribute"}`}
-                      description="Selections here are unique to this Portrait attribute and do not mirror Key Design Elements selections."
-                      schema={OUTCOME_SCHEMA}
-                      selectedLabels={(linksForAttr(a.id) || []).map((l: any) => String(l?.outcomeLabel || ""))}
-                      onToggle={(label) => toggleAttrOutcome(a.id, label)}
-                      getLevel={(label) => getAttrOutcomeLevel(a.id, label)}
-                      onSetLevel={(label, level) => setAttrOutcomeLevel(a.id, label, level as any)}
-                      type="outcome"
-                      triggerLabel="Outcomes"
-                    >
-                      <button
-                        type="button"
-                        className="flex items-center gap-1 text-[11px] font-medium border border-dashed rounded-full px-2 py-0.5 transition-colors text-indigo-600 border-indigo-300 hover:text-indigo-700 hover:border-indigo-400"
+                  {showAdvanced && (
+                    <div className="pt-1">
+                      <SchemaPickerSheet
+                        title={`Add outcomes to ${a.name || "this attribute"}`}
+                        description="Selections here are unique to this Portrait attribute and do not mirror Key Design Elements selections."
+                        schema={OUTCOME_SCHEMA}
+                        selectedLabels={(linksForAttr(a.id) || []).map((l: any) => String(l?.outcomeLabel || ""))}
+                        onToggle={(label) => toggleAttrOutcome(a.id, label)}
+                        getLevel={(label) => getAttrOutcomeLevel(a.id, label)}
+                        onSetLevel={(label, level) => setAttrOutcomeLevel(a.id, label, level as any)}
+                        type="outcome"
+                        triggerLabel="Outcomes"
                       >
-                        <Plus className="w-3 h-3" />
-                        + Outcomes
-                      </button>
-                    </SchemaPickerSheet>
-                  </div>
-
-                  {linked.length === 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      No outcomes linked yet. Open this attribute to add outcomes.
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-[11px] font-medium border border-dashed rounded-full px-2 py-0.5 transition-colors text-indigo-600 border-indigo-300 hover:text-indigo-700 hover:border-indigo-400"
+                        >
+                          <Plus className="w-3 h-3" />
+                          + Outcomes
+                        </button>
+                      </SchemaPickerSheet>
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">Attribute</Badge>
-                    </div>
+                  {showAdvanced && linked.length === 0 && (
+                    <div className="text-xs text-muted-foreground">No outcomes linked yet. Open this attribute to add outcomes.</div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                    {showAdvanced ? (
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">Attribute</Badge>
+                      </div>
+                    ) : (
+                      <span />
+                    )}
                     <div className="flex items-center gap-1">
                       <Button variant="ghost" size="sm" onClick={() => startEdit(a)}>
                         <Pencil className="h-4 w-4 mr-2" />
@@ -394,14 +424,28 @@ export default function PogHubView({
             </div>
           );
         })}
-      </div>
 
-      {(portrait.attributes || []).length === 0 && !adding && (
-        <div className="rounded-lg border p-6 text-sm text-muted-foreground bg-background">
-          No Portrait attributes yet. Click <span className="font-medium text-foreground">Add attribute</span> to start.
-        </div>
-      )}
+        {adding ? (
+          addForm
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className={cn(
+              cardClass,
+              "border-dashed border-gray-300 bg-gray-50/50 hover:bg-gray-50 hover:border-gray-400 transition-colors",
+              "flex flex-col items-center justify-center min-h-[160px] text-center gap-2 cursor-pointer",
+            )}
+            data-testid="pog-add-attribute-tile"
+          >
+            <div className="h-10 w-10 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-500">
+              <Plus className="h-5 w-5" />
+            </div>
+            <span className="text-sm font-medium text-gray-700">Add attribute</span>
+            <span className="text-xs text-gray-500 px-4">Name, description, and icon</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
-
