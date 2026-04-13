@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Bot, Hand, Library, X } from "lucide-react";
+import { Bot, Library, X } from "lucide-react";
 import { LearnerModuleLibraryProvider, useLearnerModuleLibrary } from "@/contexts/learner-module-library-context";
 import LearnerModuleLibraryStrip from "@/components/learner-module-library-strip";
 import { LML_STRIP_HEIGHT_CLAMP } from "@/lib/learner-module-library-layout";
@@ -116,6 +116,8 @@ type OverallCardRoute = OverallNavTarget;
 /** Matches `transform scale-90` on the canvas stage (tailwind scale-90 = 0.9). */
 const CANVAS_STAGE_SCALE = 0.9;
 const DRAG_THRESHOLD_PX = 8;
+/** Mark octagon roots so blueprint pan only starts on empty canvas (pointerdown capture). */
+const DATA_BLUEPRINT_NODE = "data-blueprint-node";
 
 function DraggableRingOctagon({
   node,
@@ -170,8 +172,9 @@ function DraggableRingOctagon({
       initial={{ scale: 0.9, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       whileHover={draggingPos ? undefined : { scale: 1.04 }}
-      className="group absolute cursor-grab active:cursor-grabbing flex flex-col items-center justify-center w-[220px] h-[220px] touch-none select-none"
+      className="group absolute z-[2] cursor-grab active:cursor-grabbing flex flex-col items-center justify-center w-[220px] h-[220px] touch-none select-none"
       style={{ left: displayX, top: displayY, transform: "translate(-50%, -50%)" }}
+      {...{ [DATA_BLUEPRINT_NODE]: "" }}
       data-testid={`node-${node.nodeId}`}
       onPointerDown={(e) => {
         if ((e.target as HTMLElement).closest("[data-octagon-delete]")) return;
@@ -326,8 +329,9 @@ const OctagonNode = ({
 
      return (
         <div
-          className="absolute w-[320px] h-[255px] z-30"
+          className="absolute z-[2] w-[320px] h-[255px]"
           style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
+          {...{ [DATA_BLUEPRINT_NODE]: "" }}
           data-testid={`node-${node.nodeId}`}
         >
           {/* Two cards behind (clickable to switch back) */}
@@ -758,8 +762,9 @@ const OctagonNode = ({
       initial={{ scale: 0.9, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       whileHover={{ scale: 1.05 }}
-      className="absolute cursor-pointer flex flex-col items-center justify-center w-[220px] h-[220px] transition-all"
+      className="absolute z-[2] cursor-pointer flex flex-col items-center justify-center w-[220px] h-[220px] transition-all"
       style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
+      {...{ [DATA_BLUEPRINT_NODE]: "" }}
       data-testid={`node-${node.nodeId}`}
     >
       <OctagonCard
@@ -789,7 +794,6 @@ function CanvasViewInner() {
   const { open: libraryOpen, toggleLibrary, moduleLibraryAudience } = useLearnerModuleLibrary();
   const [blueprintDropActive, setBlueprintDropActive] = useState(false);
   const [sheetPanelDropActive, setSheetPanelDropActive] = useState(false);
-  const [handToolActive, setHandToolActive] = useState(false);
   const [blueprintPan, setBlueprintPan] = useState({ x: 0, y: 0 });
   const blueprintPanSessionRef = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null);
   const { data: componentsRaw, isSuccess } = useQuery(componentQueries.all);
@@ -845,15 +849,6 @@ function CanvasViewInner() {
       document.documentElement.style.removeProperty("--lml-strip-offset");
     };
   }, [libraryOpen]);
-
-  useEffect(() => {
-    if (!handToolActive) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setHandToolActive(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handToolActive]);
 
   const ringListForDrop = useMemo(
     () => (Array.isArray(componentsRaw) ? componentsRaw.filter((c: any) => String(c?.nodeId || "") !== "overall") : []),
@@ -958,9 +953,49 @@ function CanvasViewInner() {
 
       <div
         className={cn(
-          "absolute inset-0 overflow-hidden transition-[box-shadow] rounded-[inherit]",
+          "absolute inset-0 cursor-grab touch-none select-none overflow-hidden transition-[box-shadow] rounded-[inherit] active:cursor-grabbing",
           blueprintDropActive && "ring-4 ring-emerald-500 ring-offset-2 ring-offset-[#F8F9FA]",
         )}
+        onPointerDownCapture={(e) => {
+          if (e.button !== 0) return;
+          if ((e.target as HTMLElement).closest(`[${DATA_BLUEPRINT_NODE}]`)) return;
+          const host = e.currentTarget as HTMLElement;
+          host.setPointerCapture(e.pointerId);
+          blueprintPanSessionRef.current = {
+            pointerId: e.pointerId,
+            lastX: e.clientX,
+            lastY: e.clientY,
+          };
+        }}
+        onPointerMove={(e) => {
+          const s = blueprintPanSessionRef.current;
+          if (!s || s.pointerId !== e.pointerId) return;
+          const dx = e.clientX - s.lastX;
+          const dy = e.clientY - s.lastY;
+          s.lastX = e.clientX;
+          s.lastY = e.clientY;
+          setBlueprintPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+        }}
+        onPointerUp={(e) => {
+          const s = blueprintPanSessionRef.current;
+          if (!s || s.pointerId !== e.pointerId) return;
+          try {
+            (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          } catch {
+            /* ignore */
+          }
+          blueprintPanSessionRef.current = null;
+        }}
+        onPointerCancel={(e) => {
+          const s = blueprintPanSessionRef.current;
+          if (!s || s.pointerId !== e.pointerId) return;
+          try {
+            (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          } catch {
+            /* ignore */
+          }
+          blueprintPanSessionRef.current = null;
+        }}
         onDragEnter={(e) => {
           if (!dataTransferHasLearnerModule(e.dataTransfer)) return;
           e.preventDefault();
@@ -977,51 +1012,8 @@ function CanvasViewInner() {
         }}
         onDrop={onBlueprintDrop}
       >
-        {handToolActive ? (
-          <div
-            className="absolute inset-0 z-0 cursor-grab touch-none select-none active:cursor-grabbing"
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              blueprintPanSessionRef.current = {
-                pointerId: e.pointerId,
-                lastX: e.clientX,
-                lastY: e.clientY,
-              };
-            }}
-            onPointerMove={(e) => {
-              const s = blueprintPanSessionRef.current;
-              if (!s || s.pointerId !== e.pointerId) return;
-              const dx = e.clientX - s.lastX;
-              const dy = e.clientY - s.lastY;
-              s.lastX = e.clientX;
-              s.lastY = e.clientY;
-              setBlueprintPan((p) => ({ x: p.x + dx, y: p.y + dy }));
-            }}
-            onPointerUp={(e) => {
-              const s = blueprintPanSessionRef.current;
-              if (!s || s.pointerId !== e.pointerId) return;
-              try {
-                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-              } catch {
-                /* ignore */
-              }
-              blueprintPanSessionRef.current = null;
-            }}
-            onPointerCancel={(e) => {
-              const s = blueprintPanSessionRef.current;
-              if (!s || s.pointerId !== e.pointerId) return;
-              try {
-                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-              } catch {
-                /* ignore */
-              }
-              blueprintPanSessionRef.current = null;
-            }}
-          />
-        ) : null}
         <div
-          className="pointer-events-none absolute inset-0 z-[1]"
+          className="absolute inset-0"
           style={{
             transform: `translate(${blueprintPan.x}px, ${blueprintPan.y}px) scale(${CANVAS_STAGE_SCALE})`,
             transformOrigin: "center center",
@@ -1077,22 +1069,6 @@ function CanvasViewInner() {
 
       <div className="absolute bottom-6 right-6 z-20 flex flex-row-reverse items-center gap-3">
         <div className="flex items-center bg-white rounded-full shadow-lg border border-gray-200 px-2 py-2 gap-1">
-          <button
-            type="button"
-            title={handToolActive ? "Pan the blueprint (Esc to exit)" : "Pan the blueprint — drag empty space"}
-            aria-pressed={handToolActive}
-            onClick={() => setHandToolActive((v) => !v)}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
-              handToolActive
-                ? "bg-sky-100 text-sky-900 ring-2 ring-sky-400 shadow-inner"
-                : "text-gray-600 hover:bg-gray-100",
-            )}
-            data-testid="button-blueprint-hand-tool"
-          >
-            <Hand className="h-4 w-4" />
-          </button>
-          <div className="mx-1 h-6 w-px bg-gray-200" />
           <button type="button" className="px-2 text-gray-500 hover:text-gray-900 font-bold">
             -
           </button>
