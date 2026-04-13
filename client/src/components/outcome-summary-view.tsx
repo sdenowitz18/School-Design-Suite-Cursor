@@ -10,6 +10,7 @@ import { componentQueries, useUpdateComponent } from "@/lib/api";
 import { OUTCOME_SCHEMA } from "./designed-experience-schemas";
 import OutcomeDetailView from "./outcome-detail-view";
 import OutcomesLearnMoreView from "./outcomes-learn-more-view";
+import { PlainLanguageInput } from "./expert-view/PlainLanguageInput";
 import { normOutcomeKey } from "./outcomes-utils";
 
 function norm(s: string) {
@@ -80,6 +81,7 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
   // Modal: label of the primary that was auto-removed when a 3rd was set
   const [replacedPrimaryLabel, setReplacedPrimaryLabel] = useState<string | null>(null);
   const [modalDontShow, setModalDontShow] = useState(false);
+  const [outcomeDescribeDraft, setOutcomeDescribeDraft] = useState("");
 
   // ── Derived data ───────────────────────────────────────────
   const deAims = useMemo(() => {
@@ -783,6 +785,21 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
           </div>
         )}
       </div>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+        <h2 className="text-sm font-semibold text-gray-800">Describe outcomes for this component</h2>
+        <p className="text-xs text-gray-500">
+          Write or record in plain language, then map to outcomes below — same pattern as learner experience. Actions are
+          indicative only until AI mapping is wired.
+        </p>
+        <PlainLanguageInput
+          value={outcomeDescribeDraft}
+          onChange={setOutcomeDescribeDraft}
+          indicativeOnly
+          showGenerateSummary
+          placeholder="e.g. We prioritize algebra readiness, critical thinking in seminars, and attendance culture for this component…"
+        />
+      </section>
 
       {/* L1 category tabs */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm">

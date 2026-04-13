@@ -12,6 +12,10 @@ interface PlainLanguageInputProps {
    * `default` — full panel (AI map demo, mic). `simple` — label + textarea only (no extra chrome).
    */
   variant?: 'default' | 'simple';
+  /**
+   * Show mic + action buttons but keep them non-interactive (layout spec / handoff only).
+   */
+  indicativeOnly?: boolean;
 }
 
 export function PlainLanguageInput({
@@ -20,6 +24,7 @@ export function PlainLanguageInput({
   placeholder,
   showGenerateSummary = true,
   variant = 'default',
+  indicativeOnly = false,
 }: PlainLanguageInputProps) {
   const [isRecording, setIsRecording] = useState(false);
 
@@ -42,7 +47,12 @@ export function PlainLanguageInput({
   }
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
+    <div
+      className={cn(
+        'rounded-xl border border-gray-200 bg-gray-50 overflow-hidden',
+        indicativeOnly && 'opacity-95',
+      )}
+    >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 pt-3 pb-1">
         <span className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0" />
@@ -64,23 +74,35 @@ export function PlainLanguageInput({
           className="flex-1 text-sm text-gray-700 placeholder-gray-400 bg-transparent border-none outline-none resize-none"
         />
         <button
-          onClick={() => setIsRecording((r) => !r)}
-          title={isRecording ? 'Stop recording' : 'Start recording'}
+          type="button"
+          disabled={indicativeOnly}
+          onClick={() => !indicativeOnly && setIsRecording((r) => !r)}
+          title={
+            indicativeOnly
+              ? 'Voice recording (coming soon)'
+              : isRecording
+                ? 'Stop recording'
+                : 'Start recording'
+          }
           className={cn(
             'w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 border transition-all mt-0.5',
-            isRecording
-              ? 'bg-red-500 border-red-500 text-white animate-pulse'
-              : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-100',
+            indicativeOnly && 'opacity-50 cursor-not-allowed bg-gray-100 border-gray-200 text-gray-400',
+            !indicativeOnly &&
+              (isRecording
+                ? 'bg-red-500 border-red-500 text-white animate-pulse'
+                : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-100'),
           )}
         >
-          {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          {isRecording && !indicativeOnly ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
       </div>
 
       {/* Footer */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-2 border-t border-gray-200 bg-white/60">
         <span className="text-xs text-gray-400 flex items-center gap-1">
-          {isRecording ? (
+          {indicativeOnly ? (
+            'Type or record, then map to structured fields (actions not wired yet)'
+          ) : isRecording ? (
             <>
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
               Recording...
@@ -92,20 +114,33 @@ export function PlainLanguageInput({
         <div className="flex flex-wrap items-center gap-2 justify-end">
           <button
             type="button"
-            onClick={() => alert('AI mapping coming soon')}
-            className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors font-medium"
+            disabled={indicativeOnly}
+            onClick={() => !indicativeOnly && alert('AI mapping coming soon')}
+            className={cn(
+              'text-xs px-3 py-1.5 rounded-lg font-medium transition-colors',
+              indicativeOnly
+                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                : 'bg-gray-900 text-white hover:bg-gray-700',
+            )}
           >
             Map to fields
           </button>
           {showGenerateSummary && (
             <button
               type="button"
+              disabled={indicativeOnly}
               onClick={() =>
+                !indicativeOnly &&
                 alert(
                   'Demo: would synthesize a short summary from the structured choices you defined below so you can accept or edit it.',
                 )
               }
-              className="text-xs border border-purple-200 bg-purple-50 text-purple-800 px-3 py-1.5 rounded-lg hover:bg-purple-100 transition-colors font-medium inline-flex items-center gap-1.5"
+              className={cn(
+                'text-xs px-3 py-1.5 rounded-lg font-medium inline-flex items-center gap-1.5 transition-colors',
+                indicativeOnly
+                  ? 'border border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed'
+                  : 'border border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100',
+              )}
             >
               <Sparkles className="w-3.5 h-3.5" />
               Generate AI summary

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
+import { PlainLanguageInput } from "./expert-view/PlainLanguageInput";
 import { LEAP_DESCRIPTIONS, LEAP_SCHEMA } from "./designed-experience-schemas";
 
 function norm(s: string) {
@@ -69,6 +70,7 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set());
   const [newPrincipleText, setNewPrincipleText] = useState("");
   const [addingPrinciple, setAddingPrinciple] = useState(false);
+  const [leapDescribeDraft, setLeapDescribeDraft] = useState("");
 
   // ── Derived data ───────────────────────────────────────────
   const deAims = React.useMemo(() => {
@@ -497,6 +499,21 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
           </div>
         )}
       </div>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+        <h2 className="text-sm font-semibold text-gray-800">Describe leaps for this component</h2>
+        <p className="text-xs text-gray-500">
+          Write or record in plain language, then map to leaps and design principles below — same pattern as learner
+          experience. Actions are indicative only until AI mapping is wired.
+        </p>
+        <PlainLanguageInput
+          value={leapDescribeDraft}
+          onChange={setLeapDescribeDraft}
+          indicativeOnly
+          showGenerateSummary
+          placeholder="e.g. We lean on agency and relevance here, with high expectations and strong community connection…"
+        />
+      </section>
 
       {/* Fixed leaps */}
       <div className="space-y-2.5">
