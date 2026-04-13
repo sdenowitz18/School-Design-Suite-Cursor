@@ -17,6 +17,18 @@ export async function createAppAndServer(): Promise<{ app: Express; httpServer: 
   const app: Express = express();
   const httpServer: Server = createServer(app);
 
+  // Browser SPA on another origin (e.g. Vercel) calling this API — set CORS_ORIGIN to that site.
+  const corsOrigin = process.env.CORS_ORIGIN?.trim() || "*";
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", corsOrigin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
   app.use(
     express.json({
       verify: (req, _res, buf) => {
