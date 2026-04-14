@@ -122,7 +122,8 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
   // 3) Status & Health
   const outcomeScoreData: any = hd.outcomeScoreData || null;
   const experienceScoreData: any = hd.experienceScoreData || null;
-  const ringDesignScoreData: any = hd.ringDesignScoreData || null;
+  const designScoreData: any = hd.designScoreData || null;
+  const implementationScoreData: any = hd.implementationScoreData || null;
   const ringImplementationScoreData: any = hd.ringImplementationScoreData || null;
   const ringConditionsScoreData: any = hd.ringConditionsScoreData || null;
 
@@ -138,10 +139,12 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
   const finalExperienceScore = experienceScoreData ? experienceScoreData.finalExperienceScore ?? null : null;
   const leapItemsCount = count(experienceScoreData?.leapItems);
 
-  const ringDesignFinal = ringDesignScoreData ? ringDesignScoreData.finalDesignScore ?? ringDesignScoreData.overallDesignScore ?? null : null;
-  const ringImplFinal = ringImplementationScoreData
-    ? ringImplementationScoreData.finalImplementationScore ?? ringImplementationScoreData.overallImplementationScore ?? null
-    : null;
+  const ringDesignFinal = designScoreData ? designScoreData.finalDesignScore ?? null : null;
+  const ringImplFinal = implementationScoreData
+    ? implementationScoreData.finalImplementationScore ?? null
+    : ringImplementationScoreData
+      ? ringImplementationScoreData.finalImplementationScore ?? ringImplementationScoreData.overallImplementationScore ?? null
+      : null;
   const ringConditionsFinal = ringConditionsScoreData ? ringConditionsScoreData.finalConditionsScore ?? null : null;
 
   healthLines.push(
@@ -227,13 +230,16 @@ export function buildExecutiveSummaryText(component: any | null | undefined): st
     .map((o: any) => clean(o?.outcomeName))
     .filter(Boolean);
 
-  const ringDesignScoreData: any = hd.ringDesignScoreData || null;
+  const designScoreData: any = hd.designScoreData || null;
+  const implementationScoreData: any = hd.implementationScoreData || null;
   const ringImplementationScoreData: any = hd.ringImplementationScoreData || null;
   const ringConditionsScoreData: any = hd.ringConditionsScoreData || null;
-  const ringDesignFinal = ringDesignScoreData ? ringDesignScoreData.finalDesignScore ?? ringDesignScoreData.overallDesignScore ?? null : null;
-  const ringImplFinal = ringImplementationScoreData
-    ? ringImplementationScoreData.finalImplementationScore ?? ringImplementationScoreData.overallImplementationScore ?? null
-    : null;
+  const ringDesignFinal = designScoreData ? designScoreData.finalDesignScore ?? null : null;
+  const ringImplFinal = implementationScoreData
+    ? implementationScoreData.finalImplementationScore ?? null
+    : ringImplementationScoreData
+      ? ringImplementationScoreData.finalImplementationScore ?? ringImplementationScoreData.overallImplementationScore ?? null
+      : null;
   const ringConditionsFinal = ringConditionsScoreData ? ringConditionsScoreData.finalConditionsScore ?? null : null;
 
   const overviewDesc = truncateText(clean(snap.description), 220);

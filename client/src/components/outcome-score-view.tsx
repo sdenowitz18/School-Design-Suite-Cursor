@@ -60,6 +60,8 @@ import {
   type OutcomeSubDimL1,
   type OutcomeSubDimL2,
 } from "@shared/outcome-subdimension-tree";
+import { classifyImplementationMultiTagSelection } from "@shared/implementation-subdimension-tree";
+import { classifyDesignMultiTagSelection } from "@shared/design-subdimension-tree";
 import {
   calcL2Score,
   calcL1Score,
@@ -72,6 +74,7 @@ import {
   collectInstanceFlagItems,
   type DeltaDirection,
 } from "@shared/outcome-score-calc";
+import { IMPLEMENTATION_MEASURE_WEIGHT_VALUES } from "@shared/implementation-score-calc";
 
 function generateId() {
   return Math.random().toString(36).substring(2, 10);
@@ -81,7 +84,7 @@ function clamp1to5(v: number): number {
   return Math.max(1, Math.min(5, Math.round(v)));
 }
 
-function ScoreChip({ score, size = "md" }: { score: number | null; size?: "sm" | "md" | "lg" }) {
+export function ScoreChip({ score, size = "md" }: { score: number | null; size?: "sm" | "md" | "lg" }) {
   if (score === null)
     return (
       <div
@@ -150,7 +153,7 @@ function computedWeightDisplay(m: OutcomeMeasure): string {
 
 const WEIGHT_LABELS: Record<string, string> = { H: "High", M: "Medium", L: "Low" };
 
-function DeltaArrow({ delta }: { delta: DeltaDirection | null }) {
+export function DeltaArrow({ delta }: { delta: DeltaDirection | null }) {
   if (delta === null) return null;
   if (delta === "up") return <ArrowUp className="w-3.5 h-3.5 text-emerald-600" />;
   if (delta === "down") return <ArrowDown className="w-3.5 h-3.5 text-red-500" />;
@@ -184,7 +187,7 @@ function mpLabel(mode: MPMode, key: string): string {
 }
 
 
-function getFlagStatus(
+export function getFlagStatus(
   items: { score: number | null }[],
   overallScore: number | null,
   threshold = 1,
@@ -207,8 +210,9 @@ function getFlagStatus(
 
 // ─── Sub-dimension tile ────────────────────────────────────────────────
 
-function SubDimTile({
+export function SubDimTile({
   label,
+  fullLabel,
   score,
   weight,
   measureCount,
@@ -220,6 +224,8 @@ function SubDimTile({
   flagStatus,
 }: {
   label: string;
+  /** Shown in native tooltip on hover (full text when `label` is truncated). */
+  fullLabel?: string;
   score: number | null;
   weight?: "H" | "M" | "L";
   measureCount: number;
@@ -274,7 +280,9 @@ function SubDimTile({
         <DeltaArrow delta={delta ?? null} />
       </div>
       <div className="min-w-0 flex-1">
-        <span className="text-xs font-medium truncate block">{label}</span>
+        <span className="text-xs font-medium truncate block" title={fullLabel ?? label}>
+          {label}
+        </span>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[9px] text-gray-500">{measureCount} measure{measureCount !== 1 ? "s" : ""}</span>
           {onWeightChange ? (
@@ -309,7 +317,7 @@ function SubDimTile({
 
 // ─── OutcomeMeasureCard ────────────────────────────────────────────────
 
-function OutcomeMeasureCard({
+export function OutcomeMeasureCard({
   measure,
   onUpdate,
   onDelete,
@@ -318,6 +326,8 @@ function OutcomeMeasureCard({
   filter,
   allL2s,
   subDimensionWeights,
+  measureScoringMode = "outcome",
+  dimensionTagTree,
 }: {
   measure: OutcomeMeasure;
   onUpdate: (m: OutcomeMeasure) => void;
@@ -327,7 +337,10 @@ function OutcomeMeasureCard({
   filter: ScoreFilter;
   allL2s?: { id: string; label: string }[];
   subDimensionWeights?: Record<string, "H" | "M" | "L">;
+  measureScoringMode?: "outcome" | "implementation" | "design";
+  dimensionTagTree?: OutcomeSubDimL1[];
 }) {
+  const isImpStyle = measureScoringMode === "implementation" || measureScoringMode === "design";
   const [isExpanded, setIsExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showTagEditor, setShowTagEditor] = useState(false);
@@ -335,11 +348,25 @@ function OutcomeMeasureCard({
   const [showRetireConfirm, setShowRetireConfirm] = useState<string | null>(null);
   const [showCrossOutcomeModal, setShowCrossOutcomeModal] = useState(false);
   const [pendingSubDimIds, setPendingSubDimIds] = useState<string[]>([]);
+  const [showImplParentModal, setShowImplParentModal] = useState(false);
+  const [showImplFullModal, setShowImplFullModal] = useState(false);
+  const [pendingImplTagIds, setPendingImplTagIds] = useState<string[]>([]);
+  const [showDesignMultiModal, setShowDesignMultiModal] = useState(false);
   const minDate = useMemo(() => minAsOfDate(new Date(), 5), []);
   const score = useMemo(() => calcMeasureScore(measure, filter), [filter, measure]);
   const mDelta = useMemo(() => measureDelta(measure, filter), [measure, filter]);
-  const mWeight = computedWeight(measure);
-  const mWeightDisplay = computedWeightDisplay(measure);
+  const imp = safeHML((measure as any).importance);
+  const mWeight = isImpStyle ? imp : computedWeight(measure);
+  const mWeightDisplay = isImpStyle
+    ? String(IMPLEMENTATION_MEASURE_WEIGHT_VALUES[imp])
+    : computedWeightDisplay(measure);
+  const tagTree = dimensionTagTree ?? OUTCOME_SUBDIMENSION_TREE;
+  const overallTagLabel =
+    measureScoringMode === "implementation"
+      ? "Overall"
+      : measureScoringMode === "design"
+        ? "Overall design"
+        : "All Outcomes";
   const periodEnd = useMemo(() => getPeriodEndFromFilter(filter), [filter]);
 
   const actorOptions = useMemo(() => {
@@ -443,7 +470,7 @@ function OutcomeMeasureCard({
                     <span className="uppercase tracking-wider">wt: {mWeightDisplay}</span>
                     <span className="text-gray-300">·</span>
                     {taggedL2Labels.length === 0 && (
-                      <span className="text-[9px] text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">All Outcomes</span>
+                      <span className="text-[9px] text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{overallTagLabel}</span>
                     )}
                     {taggedL2Labels.map((l) => (
                       <span key={l.id} className="text-[9px] text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">
@@ -521,7 +548,7 @@ function OutcomeMeasureCard({
                         {isRetiredInst && <span className="ml-1 text-gray-400 italic">· Retired</span>}
                       </span>
                     </div>
-                    {!isRetiredInst && (
+                                       {!isRetiredInst && (
                       <div className="flex items-center gap-1.5 shrink-0">
                         <span className="text-[10px] text-gray-500">Imp.</span>
                         <select
@@ -533,16 +560,20 @@ function OutcomeMeasureCard({
                           <option value="M">M</option>
                           <option value="H">H</option>
                         </select>
-                        <span className="text-[10px] text-gray-500">Conf.</span>
-                        <select
-                          className="h-7 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-semibold"
-                          value={(inst as any).confidence || "M"}
-                          onChange={(e) => updateInstances((measure.instances || []).map((x) => x.id === inst.id ? { ...x, confidence: e.target.value as "H" | "M" | "L" } : x))}
-                        >
-                          <option value="L">L</option>
-                          <option value="M">M</option>
-                          <option value="H">H</option>
-                        </select>
+                        {!isImpStyle && (
+                          <>
+                            <span className="text-[10px] text-gray-500">Conf.</span>
+                            <select
+                              className="h-7 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-semibold"
+                              value={(inst as any).confidence || "M"}
+                              onChange={(e) => updateInstances((measure.instances || []).map((x) => x.id === inst.id ? { ...x, confidence: e.target.value as "H" | "M" | "L" } : x))}
+                            >
+                              <option value="L">L</option>
+                              <option value="M">M</option>
+                              <option value="H">H</option>
+                            </select>
+                          </>
+                        )}
                       </div>
                     )}
                     <button
@@ -592,6 +623,111 @@ function OutcomeMeasureCard({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {measureScoringMode === "implementation" && (
+          <>
+            <Dialog open={showImplParentModal} onOpenChange={(open) => { if (!open) { setPendingImplTagIds([]); setShowImplParentModal(false); } }}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Overall measure for this sub-dimension</DialogTitle>
+                  <DialogDescription className="text-sm leading-relaxed">
+                    {(() => {
+                      const c = classifyImplementationMultiTagSelection(pendingImplTagIds);
+                      const label = c.kind === "parent_overall" ? c.parentLabel : "this area";
+                      return (
+                        <>
+                          This measure will contribute to the score for{" "}
+                          <span className="font-semibold text-gray-800">{label}</span> as a whole, not to individual sub-components.
+                          <br /><br />
+                          Add separate measures if you need scores for each component.
+                        </>
+                      );
+                    })()}
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="flex-col sm:flex-row gap-2">
+                  <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setPendingImplTagIds([]); setShowImplParentModal(false); }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => {
+                      const c = classifyImplementationMultiTagSelection(pendingImplTagIds);
+                      if (c.kind === "parent_overall") {
+                        onUpdate({ ...measure, subDimensionIds: [c.parentId], crossOutcome: false } as any);
+                      }
+                      setPendingImplTagIds([]);
+                      setShowImplParentModal(false);
+                    }}
+                  >
+                    Confirm
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            <Dialog open={showImplFullModal} onOpenChange={(open) => { if (!open) { setPendingImplTagIds([]); setShowImplFullModal(false); } }}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Overall implementation measure</DialogTitle>
+                  <DialogDescription className="text-sm leading-relaxed">
+                    You selected tags from more than one implementation sub-dimension. This measure will contribute to the{" "}
+                    <span className="font-semibold text-gray-800">overall implementation score</span> only, not to individual sub-dimensions.
+                    <br /><br />
+                    Add separate measures if you need scores for specific sub-dimensions.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="flex-col sm:flex-row gap-2">
+                  <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setPendingImplTagIds([]); setShowImplFullModal(false); }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => {
+                      onUpdate({ ...measure, subDimensionIds: [], crossOutcome: false } as any);
+                      setPendingImplTagIds([]);
+                      setShowImplFullModal(false);
+                    }}
+                  >
+                    Confirm — overall implementation
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </>
+        )}
+
+        {measureScoringMode === "design" && (
+          <Dialog open={showDesignMultiModal} onOpenChange={(open) => { if (!open) setShowDesignMultiModal(false); }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Overall design score</DialogTitle>
+                <DialogDescription className="text-sm leading-relaxed">
+                  You selected more than one design sub-dimension. This measure will contribute to the{" "}
+                  <span className="font-semibold text-gray-800">overall design score</span> only (untagged), not to individual sub-dimensions.
+                  <br /><br />
+                  Add separate measures if you need scores for specific sub-dimensions.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="flex-col sm:flex-row gap-2">
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowDesignMultiModal(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => {
+                    onUpdate({ ...measure, subDimensionIds: [], crossOutcome: false } as any);
+                    setShowDesignMultiModal(false);
+                  }}
+                >
+                  Confirm — overall design
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
 
         {/* ── Retire confirmation dialog (Step 5) ── */}
         <Dialog open={!!showRetireConfirm} onOpenChange={(open) => { if (!open) setShowRetireConfirm(null); }}>
@@ -683,7 +819,7 @@ function OutcomeMeasureCard({
                       className="text-xs min-h-[48px] bg-white"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className={cn("grid gap-2", isImpStyle ? "grid-cols-1" : "grid-cols-2")}>
                     <div>
                       <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1 block">Importance</Label>
                       <select
@@ -691,9 +827,19 @@ function OutcomeMeasureCard({
                         value={(measure as any).importance || "M"}
                         onChange={(e) => {
                           const imp = e.target.value as "H" | "M" | "L";
-                          const w = computeMeasureWeight(imp, measure.confidence || "M");
-                          const insts = (measure.instances || []).map((i) => ({ ...i, weight: w }));
-                          onUpdate({ ...measure, importance: imp, instances: insts } as any);
+                          if (isImpStyle) {
+                            const insts = (measure.instances || []).map((i) => ({
+                              ...i,
+                              weight: imp,
+                              importance: imp,
+                              confidence: (i as any).confidence || "M",
+                            }));
+                            onUpdate({ ...measure, importance: imp, instances: insts } as any);
+                          } else {
+                            const w = computeMeasureWeight(imp, measure.confidence || "M");
+                            const insts = (measure.instances || []).map((i) => ({ ...i, weight: w }));
+                            onUpdate({ ...measure, importance: imp, instances: insts } as any);
+                          }
                         }}
                       >
                         <option value="H">High</option>
@@ -701,26 +847,36 @@ function OutcomeMeasureCard({
                         <option value="L">Low</option>
                       </select>
                     </div>
-                    <div>
-                      <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1 block">Confidence</Label>
-                      <select
-                        className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
-                        value={measure.confidence || "M"}
-                        onChange={(e) => {
-                          const conf = e.target.value as "H" | "M" | "L";
-                          const w = computeMeasureWeight((measure as any).importance || "M", conf);
-                          const insts = (measure.instances || []).map((i) => ({ ...i, weight: w }));
-                          onUpdate({ ...measure, confidence: conf, instances: insts } as any);
-                        }}
-                      >
-                        <option value="H">High</option>
-                        <option value="M">Medium</option>
-                        <option value="L">Low</option>
-                      </select>
-                    </div>
+                    {!isImpStyle && (
+                      <div>
+                        <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1 block">Confidence</Label>
+                        <select
+                          className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+                          value={measure.confidence || "M"}
+                          onChange={(e) => {
+                            const conf = e.target.value as "H" | "M" | "L";
+                            const w = computeMeasureWeight((measure as any).importance || "M", conf);
+                            const insts = (measure.instances || []).map((i) => ({ ...i, weight: w }));
+                            onUpdate({ ...measure, confidence: conf, instances: insts } as any);
+                          }}
+                        >
+                          <option value="H">High</option>
+                          <option value="M">Medium</option>
+                          <option value="L">Low</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
                   <div className="text-[10px] text-gray-500">
-                    Computed weight: <span className="font-bold">{mWeightDisplay}</span> (LL=1, LM=2, MM=3, MH=4, HH=5)
+                    {isImpStyle ? (
+                      <>
+                        Measure weight: <span className="font-bold">{mWeightDisplay}</span> (L=1, M=3, H=5)
+                      </>
+                    ) : (
+                      <>
+                        Computed weight: <span className="font-bold">{mWeightDisplay}</span> (LL=1, LM=2, MM=3, MH=4, HH=5)
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -740,7 +896,42 @@ function OutcomeMeasureCard({
                       const isAllOutcomes = currentIds.size === 0;
                       const isCrossOutcome = !!(measure as any).crossOutcome;
 
+                      const applyImplTagIds = (nextUniq: string[]) => {
+                        const uniq = Array.from(new Set(nextUniq.filter(Boolean)));
+                        if (uniq.length <= 1) {
+                          onUpdate({ ...measure, subDimensionIds: uniq, crossOutcome: false } as any);
+                          return;
+                        }
+                        const c = classifyImplementationMultiTagSelection(uniq);
+                        if (c.kind === "parent_overall") {
+                          setPendingImplTagIds(uniq);
+                          setShowImplParentModal(true);
+                        } else {
+                          setPendingImplTagIds(uniq);
+                          setShowImplFullModal(true);
+                        }
+                      };
+
+                      const applyDesignTagIds = (nextUniq: string[]) => {
+                        const uniq = Array.from(new Set(nextUniq.filter(Boolean)));
+                        if (uniq.length <= 1) {
+                          onUpdate({ ...measure, subDimensionIds: uniq, crossOutcome: false } as any);
+                          return;
+                        }
+                        if (classifyDesignMultiTagSelection(uniq) === "overall_design") {
+                          setShowDesignMultiModal(true);
+                        }
+                      };
+
                       const trySetSubDims = (newIds: string[]) => {
+                        if (measureScoringMode === "implementation") {
+                          applyImplTagIds(newIds);
+                          return;
+                        }
+                        if (measureScoringMode === "design") {
+                          applyDesignTagIds(newIds);
+                          return;
+                        }
                         if (newIds.length > 1) {
                           setPendingSubDimIds(newIds);
                           setShowCrossOutcomeModal(true);
@@ -764,31 +955,91 @@ function OutcomeMeasureCard({
                               isAllOutcomes ? "bg-indigo-100 border-indigo-400 text-indigo-800" : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-400",
                             )}
                           >
-                            All Outcomes
+                            {overallTagLabel}
                           </button>
-                          {OUTCOME_SUBDIMENSION_TREE.map((l1) => {
+                          {tagTree.map((l1) => {
+                            if (l1.children.length === 0) {
+                              const isOn = currentIds.has(l1.id);
+                              return (
+                                <div key={l1.id} className="space-y-1">
+                                  <button
+                                    type="button"
+                                    title={l1.label}
+                                    onClick={() => {
+                                      if (measureScoringMode === "implementation") {
+                                        applyImplTagIds(isOn ? [] : [l1.id]);
+                                      } else if (measureScoringMode === "design") {
+                                        applyDesignTagIds(isOn ? [] : [l1.id]);
+                                      } else if (!isAllOutcomes) {
+                                        trySetSubDims(isOn ? [] : [l1.id]);
+                                      }
+                                    }}
+                                    className={cn(
+                                      "text-[10px] px-2 py-1 rounded-full border transition-colors max-w-full truncate",
+                                      isOn ? "bg-blue-100 border-blue-300 text-blue-800 font-semibold" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300",
+                                    )}
+                                  >
+                                    {l1.label.length > 42 ? `${l1.label.slice(0, 40)}…` : l1.label}
+                                  </button>
+                                </div>
+                              );
+                            }
                             const childIds = l1.children.map((c) => c.id);
                             const allOn = childIds.length > 0 && childIds.every((id) => currentIds.has(id));
                             return (
-                              <div key={l1.id} className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-semibold text-gray-600">{l1.label}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (isAllOutcomes) return;
-                                      const ids = new Set(measure.subDimensionIds || []);
-                                      if (allOn) { for (const id of childIds) ids.delete(id); } else { for (const id of childIds) ids.add(id); }
-                                      trySetSubDims(Array.from(ids));
-                                    }}
-                                    className={cn(
-                                      "text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-wide transition-colors",
-                                      allOn ? "bg-indigo-100 border-indigo-300 text-indigo-700" : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-400",
-                                    )}
-                                  >
-                                    All {l1.label}
-                                  </button>
-                                </div>
+                              <div
+                                key={l1.id}
+                                className={cn(
+                                  measureScoringMode === "implementation" && "rounded-lg border border-gray-100 bg-gray-50/50 p-2 space-y-2",
+                                  measureScoringMode !== "implementation" && "space-y-1",
+                                )}
+                              >
+                                {measureScoringMode !== "implementation" && (
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-semibold text-gray-600 truncate" title={l1.label}>{l1.label}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (isAllOutcomes) return;
+                                        const ids = new Set(measure.subDimensionIds || []);
+                                        if (allOn) { for (const id of childIds) ids.delete(id); } else { for (const id of childIds) ids.add(id); }
+                                        trySetSubDims(Array.from(ids));
+                                      }}
+                                      className={cn(
+                                        "text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-wide transition-colors shrink-0",
+                                        allOn ? "bg-indigo-100 border-indigo-300 text-indigo-700" : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-400",
+                                      )}
+                                    >
+                                      All {l1.label.length > 20 ? `${l1.label.slice(0, 18)}…` : l1.label}
+                                    </button>
+                                  </div>
+                                )}
+                                {measureScoringMode === "implementation" && (
+                                  <>
+                                    <div className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Whole sub-dimension</div>
+                                    <button
+                                      type="button"
+                                      title={l1.label}
+                                      onClick={() => {
+                                        const base = new Set(measure.subDimensionIds || []);
+                                        if (currentIds.has(l1.id)) base.delete(l1.id);
+                                        else base.add(l1.id);
+                                        applyImplTagIds(Array.from(base));
+                                      }}
+                                      className={cn(
+                                        "text-[10px] px-2.5 py-1.5 rounded-md border text-left w-full transition-colors max-w-full truncate font-medium",
+                                        currentIds.has(l1.id)
+                                          ? "bg-blue-100 border-blue-300 text-blue-900"
+                                          : "bg-white border-gray-200 text-gray-700 hover:border-gray-300",
+                                      )}
+                                    >
+                                      {l1.label.length > 56 ? `${l1.label.slice(0, 54)}…` : l1.label}
+                                    </button>
+                                    <div className="text-[9px] font-bold uppercase tracking-wide text-gray-400 pt-1 border-t border-gray-200/80">
+                                      Sub-components
+                                    </div>
+                                  </>
+                                )}
                                 <div className="flex flex-wrap gap-1.5">
                                   {l1.children.map((l2) => {
                                     const isOn = currentIds.has(l2.id);
@@ -796,18 +1047,26 @@ function OutcomeMeasureCard({
                                       <button
                                         key={l2.id}
                                         type="button"
+                                        title={l2.label}
                                         onClick={() => {
+                                          if (measureScoringMode === "implementation") {
+                                            const base = new Set(measure.subDimensionIds || []);
+                                            if (currentIds.has(l2.id)) base.delete(l2.id);
+                                            else base.add(l2.id);
+                                            applyImplTagIds(Array.from(base));
+                                            return;
+                                          }
                                           if (allOn || isAllOutcomes) return;
                                           const ids = new Set(measure.subDimensionIds || []);
                                           if (ids.has(l2.id)) ids.delete(l2.id); else ids.add(l2.id);
                                           trySetSubDims(Array.from(ids));
                                         }}
                                         className={cn(
-                                          "text-[10px] px-2 py-1 rounded-full border transition-colors",
+                                          "text-[10px] px-2 py-1 rounded-full border transition-colors max-w-[220px] truncate",
                                           allOn ? "bg-blue-50 border-blue-200 text-blue-400 opacity-60 cursor-not-allowed" : isOn ? "bg-blue-100 border-blue-300 text-blue-800 font-semibold" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300",
                                         )}
                                       >
-                                        {l2.label}
+                                        {l2.label.length > 42 ? `${l2.label.slice(0, 40)}…` : l2.label}
                                       </button>
                                     );
                                   })}
@@ -1043,19 +1302,33 @@ function OutcomeMeasureCard({
 
 // ─── AddMeasureSheet (inline panel) ────────────────────────────────────
 
-function AddMeasurePanel({
+export function AddMeasurePanel({
   onAdd,
   onCancel,
   l2Options,
   defaultL2Ids,
   measureType: initialMeasureType = "measure",
+  panelVariant = "outcome",
+  restrictToTopId,
 }: {
   onAdd: (m: OutcomeMeasure) => void;
   onCancel: () => void;
   l2Options: OutcomeSubDimL1[];
   defaultL2Ids?: string[];
   measureType?: "measure" | "perception";
+  panelVariant?: "outcome" | "implementation" | "design";
+  /** When set (nested implementation page), only this top’s group is shown. */
+  restrictToTopId?: string;
 }) {
+  const isImpl = panelVariant === "implementation";
+  const isDesign = panelVariant === "design";
+  const isImpStyle = isImpl || isDesign;
+  const displayL2Options = useMemo(() => {
+    if (!restrictToTopId) return l2Options;
+    const t = l2Options.find((x) => x.id === restrictToTopId);
+    return t ? [t] : l2Options;
+  }, [l2Options, restrictToTopId]);
+
   const [measureType, setMeasureType] = useState<"measure" | "perception">(initialMeasureType);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -1068,6 +1341,10 @@ function AddMeasurePanel({
   const [pendingL2Ids, setPendingL2Ids] = useState<Set<string> | null>(null);
   // Once the user has acknowledged cross-outcome for this add flow, don't re-prompt
   const [crossOutcomeAcknowledged, setCrossOutcomeAcknowledged] = useState(false);
+  const [showImplParentModal, setShowImplParentModal] = useState(false);
+  const [showImplFullModal, setShowImplFullModal] = useState(false);
+  const [pendingImplSelection, setPendingImplSelection] = useState<Set<string> | null>(null);
+  const [showDesignMultiModal, setShowDesignMultiModal] = useState(false);
 
   const toggleAllOutcomes = () => {
     setAllOutcomes((prev) => {
@@ -1081,6 +1358,43 @@ function AddMeasurePanel({
 
   const toggle = (id: string) => {
     if (allOutcomes) return;
+    if (isDesign) {
+      const next = new Set(selectedL2s);
+      if (next.has(id)) {
+        next.delete(id);
+        setSelectedL2s(next);
+        return;
+      }
+      next.add(id);
+      if (next.size <= 1) {
+        setSelectedL2s(next);
+        return;
+      }
+      setShowDesignMultiModal(true);
+      return;
+    }
+    if (isImpl) {
+      const next = new Set(selectedL2s);
+      if (next.has(id)) {
+        next.delete(id);
+        setSelectedL2s(next);
+        return;
+      }
+      next.add(id);
+      if (next.size <= 1) {
+        setSelectedL2s(next);
+        return;
+      }
+      const c = classifyImplementationMultiTagSelection(Array.from(next));
+      if (c.kind === "parent_overall") {
+        setPendingImplSelection(next);
+        setShowImplParentModal(true);
+ return;
+      }
+      setPendingImplSelection(next);
+      setShowImplFullModal(true);
+      return;
+    }
     const next = new Set(selectedL2s);
     if (next.has(id)) {
       // Deselecting — always allowed
@@ -1100,7 +1414,7 @@ function AddMeasurePanel({
   };
 
   const toggleAll = (l1: OutcomeSubDimL1) => {
-    if (allOutcomes) return;
+    if (allOutcomes || isImpl || isDesign) return;
     const childIds = l1.children.map((c) => c.id);
     const allSelected = childIds.every((id) => selectedL2s.has(id));
     const next = new Set(selectedL2s);
@@ -1125,6 +1439,36 @@ function AddMeasurePanel({
     m.description = description;
     (m as any).importance = importance;
     m.confidence = confidence;
+    if (isDesign) {
+      if (allOutcomes) {
+        m.subDimensionIds = [];
+      } else {
+        const arr = Array.from(selectedL2s);
+        if (arr.length === 0) m.subDimensionIds = [];
+        else if (classifyDesignMultiTagSelection(arr) === "overall_design") m.subDimensionIds = [];
+        else m.subDimensionIds = arr;
+      }
+      (m as any).crossOutcome = false;
+      onAdd(m);
+      return;
+    }
+    if (isImpl) {
+      if (allOutcomes) {
+        m.subDimensionIds = [];
+      } else {
+        const arr = Array.from(selectedL2s);
+        if (arr.length === 0) m.subDimensionIds = [];
+        else {
+          const c = classifyImplementationMultiTagSelection(arr);
+          if (c.kind === "full_implementation") m.subDimensionIds = [];
+          else if (c.kind === "parent_overall") m.subDimensionIds = [c.parentId];
+          else m.subDimensionIds = arr;
+        }
+      }
+      (m as any).crossOutcome = false;
+      onAdd(m);
+      return;
+    }
     const subDimIds = allOutcomes ? [] : Array.from(selectedL2s);
     m.subDimensionIds = subDimIds;
     (m as any).crossOutcome = subDimIds.length > 1;
@@ -1174,7 +1518,7 @@ function AddMeasurePanel({
         <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1 block">Description</Label>
         <Textarea value={description} onChange={(e) => setDescription(e.currentTarget.value)} placeholder="Brief description..." className="text-xs min-h-[40px]" />
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={cn("grid gap-2", isImpStyle ? "grid-cols-1" : "grid-cols-2")}>
         <div>
           <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1 block">Importance</Label>
           <select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold" value={importance} onChange={(e) => setImportance(e.target.value as any)}>
@@ -1183,20 +1527,23 @@ function AddMeasurePanel({
             <option value="L">Low</option>
           </select>
         </div>
-        <div>
-          <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1 block">Confidence</Label>
-          <select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold" value={confidence} onChange={(e) => setConfidence(e.target.value as any)}>
-            <option value="H">High</option>
-            <option value="M">Medium</option>
-            <option value="L">Low</option>
-          </select>
-        </div>
+        {!isImpStyle && (
+          <div>
+            <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1 block">Confidence</Label>
+            <select className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold" value={confidence} onChange={(e) => setConfidence(e.target.value as any)}>
+              <option value="H">High</option>
+              <option value="M">Medium</option>
+              <option value="L">Low</option>
+            </select>
+          </div>
+        )}
       </div>
 
       <div>
-        <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1.5 block">Sub-dimensions</Label>
+        <Label className="text-[10px] text-gray-400 uppercase font-semibold mb-1.5 block">
+          {isDesign ? "Design sub-dimensions" : isImpl ? "Implementation sub-dimensions" : "Sub-dimensions"}
+        </Label>
         <div className="space-y-3 max-h-52 overflow-y-auto border border-gray-200 rounded-lg p-2">
-          {/* All Outcomes toggle */}
           <button
             type="button"
             onClick={toggleAllOutcomes}
@@ -1207,35 +1554,85 @@ function AddMeasurePanel({
                 : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-400",
             )}
           >
-            All Outcomes
+            {isImpStyle ? "Overall (untagged)" : "All Outcomes"}
           </button>
-          {l2Options.map((l1) => {
-            const childIds = l1.children.map((c) => c.id);
-            const allSelected = childIds.length > 0 && childIds.every((id) => selectedL2s.has(id));
-            return (
-              <div key={l1.id} className={cn(allOutcomes && "opacity-50 pointer-events-none")}>
-                <div className="flex items-center gap-2 mb-1">
-                  <button
-                    type="button"
-                    onClick={() => toggleAll(l1)}
-                    className={cn(
-                      "text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-wide transition-colors",
-                      allSelected
-                        ? "bg-indigo-100 border-indigo-300 text-indigo-700"
-                        : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-400",
-                    )}
-                  >
-                    All {l1.label}
-                  </button>
+          {displayL2Options.map((l1) => {
+            if (l1.children.length === 0) {
+              const isOn = selectedL2s.has(l1.id);
+              return (
+                <div key={l1.id} className={cn(allOutcomes && "opacity-50 pointer-events-none")}>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      title={l1.label}
+                      onClick={() => toggle(l1.id)}
+                      className={cn(
+                        "text-[10px] px-2 py-1 rounded-full border transition-colors max-w-full truncate",
+                        isOn ? "bg-blue-100 border-blue-300 text-blue-800 font-semibold" : "bg-white border-gray-200 text-gray-600 hover:border-gray-300",
+                      )}
+                    >
+                      {l1.label.length > 42 ? `${l1.label.slice(0, 40)}…` : l1.label}
+                    </button>
+                  </div>
                 </div>
+              );
+            }
+            const childIds = l1.children.map((c) => c.id);
+            const allSelected = !isImpl && childIds.length > 0 && childIds.every((id) => selectedL2s.has(id));
+            return (
+              <div
+                key={l1.id}
+                className={cn(
+                  "rounded-lg border border-gray-100 bg-gray-50/50 p-2 space-y-2",
+                  allOutcomes && "opacity-50 pointer-events-none",
+                )}
+              >
+                {!isImpl && (
+                  <div className="flex items-center gap-2 mb-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleAll(l1)}
+                      className={cn(
+                        "text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-wide transition-colors",
+                        allSelected
+                          ? "bg-indigo-100 border-indigo-300 text-indigo-700"
+                          : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-400",
+                      )}
+                    >
+                      All {l1.label}
+                    </button>
+                  </div>
+                )}
+                {isImpl && (
+                  <>
+                    <div className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Whole sub-dimension</div>
+                    <button
+                      type="button"
+                      title={l1.label}
+                      onClick={() => toggle(l1.id)}
+                      className={cn(
+                        "text-[10px] px-2.5 py-1.5 rounded-md border text-left w-full transition-colors max-w-full truncate font-medium",
+                        selectedL2s.has(l1.id)
+                          ? "bg-blue-100 border-blue-300 text-blue-900"
+                          : "bg-white border-gray-200 text-gray-700 hover:border-gray-300",
+                      )}
+                    >
+                      {l1.label.length > 56 ? `${l1.label.slice(0, 54)}…` : l1.label}
+                    </button>
+                    <div className="text-[9px] font-bold uppercase tracking-wide text-gray-400 pt-1 border-t border-gray-200/80">
+                      Sub-components
+                    </div>
+                  </>
+                )}
                 <div className="flex flex-wrap gap-1.5">
                   {l1.children.map((l2) => (
                     <button
                       key={l2.id}
                       type="button"
+                      title={l2.label}
                       onClick={() => { if (!allSelected) toggle(l2.id); }}
                       className={cn(
-                        "text-[10px] px-2 py-1 rounded-full border transition-colors",
+                        "text-[10px] px-2 py-1 rounded-full border transition-colors max-w-[220px] truncate",
                         allSelected
                           ? "bg-blue-50 border-blue-200 text-blue-400 opacity-60 cursor-not-allowed"
                           : selectedL2s.has(l2.id)
@@ -1243,7 +1640,7 @@ function AddMeasurePanel({
                             : "bg-white border-gray-200 text-gray-600 hover:border-gray-300",
                       )}
                     >
-                      {l2.label}
+                      {l2.label.length > 42 ? `${l2.label.slice(0, 40)}…` : l2.label}
                     </button>
                   ))}
                 </div>
@@ -1291,6 +1688,144 @@ function AddMeasurePanel({
               }}
             >
               Confirm — dimension-level contribution
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showImplParentModal}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowImplParentModal(false);
+            setPendingImplSelection(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Overall measure for this sub-dimension</DialogTitle>
+            <DialogDescription className="text-sm leading-relaxed">
+              {pendingImplSelection && (() => {
+                const c = classifyImplementationMultiTagSelection(Array.from(pendingImplSelection));
+                if (c.kind !== "parent_overall") return null;
+                return (
+                  <>
+                    This measure will contribute to the score for{" "}
+                    <span className="font-semibold text-gray-800">{c.parentLabel}</span> as a whole, not to individual sub-components.
+                    <br /><br />
+                    Add separate measures if you need scores for each component.
+                  </>
+                );
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => { setShowImplParentModal(false); setPendingImplSelection(null); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => {
+                if (pendingImplSelection) {
+                  const c = classifyImplementationMultiTagSelection(Array.from(pendingImplSelection));
+                  if (c.kind === "parent_overall") setSelectedL2s(new Set([c.parentId]));
+                }
+                setPendingImplSelection(null);
+                setShowImplParentModal(false);
+              }}
+            >
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showImplFullModal}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowImplFullModal(false);
+            setPendingImplSelection(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Overall implementation measure</DialogTitle>
+            <DialogDescription className="text-sm leading-relaxed">
+              You selected tags from more than one implementation sub-dimension. This measure will contribute to the{" "}
+              <span className="font-semibold text-gray-800">overall implementation score</span> only, not to individual sub-dimensions.
+              <br /><br />
+              Add separate measures if you need scores for specific sub-dimensions.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => { setShowImplFullModal(false); setPendingImplSelection(null); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => {
+                setAllOutcomes(true);
+                setSelectedL2s(new Set());
+                setPendingImplSelection(null);
+                setShowImplFullModal(false);
+              }}
+            >
+              Confirm — overall implementation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showDesignMultiModal}
+        onOpenChange={(open) => {
+          if (!open) setShowDesignMultiModal(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Overall design score</DialogTitle>
+            <DialogDescription className="text-sm leading-relaxed">
+              You selected more than one design sub-dimension. This measure will contribute to the{" "}
+              <span className="font-semibold text-gray-800">overall design score</span> only (untagged), not to individual sub-dimensions.
+              <br /><br />
+              Add separate measures if you need scores for specific sub-dimensions.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => setShowDesignMultiModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => {
+                setAllOutcomes(true);
+                setSelectedL2s(new Set());
+                setShowDesignMultiModal(false);
+              }}
+            >
+              Confirm — overall design
             </Button>
           </DialogFooter>
         </DialogContent>

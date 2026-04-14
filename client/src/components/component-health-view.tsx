@@ -25,11 +25,12 @@ import { useQuery } from "@tanstack/react-query";
 import { componentQueries } from "@/lib/api";
 import OutcomeScoreView from "./outcome-score-view";
 import ExperienceScoreView from "./experience-score-view";
-import { calculateRingDesignMeasureDimensionScores, calculateRingDesignScore } from "@shared/ring-design-score";
-import type { RingDesignScoreData } from "@shared/schema";
-import RingDesignScoreView from "./ring-design-score-view";
-import RingImplementationScoreView from "./ring-implementation-score-view";
-import { calculateRingImplementationMeasureDimensionScores, calculateRingImplementationScore } from "@shared/ring-implementation-score";
+import DesignScoreView from "./design-score-view";
+import ImplementationScoreView from "./implementation-score-view";
+import { calcFinalImplementationScore, calcImplementationTopDimensionScore } from "@shared/implementation-score-calc";
+import { IMPLEMENTATION_SUBDIMENSION_TREE } from "@shared/implementation-subdimension-tree";
+import { calcFinalDesignScore, calcDesignDimensionScore } from "@shared/design-score-calc";
+import { DESIGN_SUBDIMENSION_TREE } from "@shared/design-subdimension-tree";
 import RingConditionsScoreView from "./ring-conditions-score-view";
 import { calculateRingConditionsScore, calculateRingConditionsScoreFromData, calculateRingConditionsSum } from "@shared/ring-conditions-score";
 import { effectiveFromInstances, UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
@@ -153,11 +154,13 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     };
 
     const hd: any = (comp as any)?.healthData || {};
-    const implActors: any[] = (hd?.ringImplementationScoreData as any)?.actors || [];
+    const implActors: any[] = (hd?.implementationScoreData as any)?.actors || [];
+    const designActors: any[] = (hd?.designScoreData as any)?.actors || [];
     const outActors: any[] = (outcomeScoreData as any)?.actors || [];
     const expActors: any[] = (experienceScoreData as any)?.actors || [];
 
     for (const a of implActors) add(a);
+    for (const a of designActors) add(a);
     for (const a of outActors) add(a);
     for (const a of expActors) add(a);
 
@@ -165,10 +168,10 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     return out;
   }, [comp, outcomeScoreData, experienceScoreData]);
 
-  const ringDesignScoreData = useMemo(() => {
+  const designScoreData = useMemo(() => {
     if (!comp) return null;
     const hd: any = comp.healthData || {};
-    return (hd.ringDesignScoreData || null) as RingDesignScoreData | null;
+    return hd.designScoreData || null;
   }, [comp]);
 
   const realOutcomeScore = useMemo(() => {
@@ -323,21 +326,23 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     return Math.round((((h as number) * hw + (b as number) * bw) / (hw + bw)) * 100) / 100;
   }, [comp, experienceScoreData]);
 
-  const computedRingDesignDimensionRows = useMemo(() => {
-    const data: any = (comp as any)?.healthData?.ringDesignScoreData || {};
-    const scores = calculateRingDesignMeasureDimensionScores({
-      ...data,
-      filter: globalFilter,
-    } as any);
-
-    return [
-      { key: "aims", label: "Richness/Robustness of Aims", score: scores.aimsScore },
-      { key: "experience-completeness", label: "Completeness of designed experience", score: scores.completenessDesignedExperienceScore },
-      { key: "srr-quality-completeness", label: "Quality & Completeness of SRR", score: scores.qualityCompletenessSrrScore },
-      { key: "coherence", label: "Coherence in the design experience", score: scores.coherenceDesignedExperienceScore },
-      { key: "alignment", label: "Alignment of the designed experience", score: scores.alignmentDesignedExperienceScore },
-    ] as const;
-  }, [comp, globalFilter]);
+  const designSummaryRows = useMemo(() => {
+    if (!designScoreData) return [];
+    const dsd = designScoreData as any;
+    const rawMeasures: any[] = Array.isArray(dsd?.measures) ? dsd.measures : [];
+    const rawOverall: any[] = Array.isArray(dsd?.overallMeasures) ? dsd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> =
+      dsd?.subDimensionWeights && typeof dsd.subDimensionWeights === "object" ? dsd.subDimensionWeights : {};
+    return DESIGN_SUBDIMENSION_TREE.map((top) => {
+      const s = calcDesignDimensionScore(top as any, rawMeasures, rawOverall, weights, globalFilter);
+      return {
+        id: top.id,
+        label: top.label,
+        weight: weights[top.id] || "M",
+        score: s !== null ? Math.max(1, Math.min(5, Math.round(s))) : null,
+      };
+    });
+  }, [designScoreData, globalFilter]);
 
   const outcomeDimensionRows = useMemo(() => {
     if (!outcomeScoreData) return OUTCOME_SUBDIMENSION_TREE.map((l1) => ({ key: l1.id, label: l1.label, score: null as number | null, count: 0 }));
@@ -354,36 +359,52 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
   }, [outcomeScoreData, globalFilter]);
 
   const computedRingDesignScore = useMemo(() => {
-    const data: any = (comp as any)?.healthData?.ringDesignScoreData;
-    if (!data) return calculateRingDesignScore(comp as any);
-    const tmp = {
-      ...(comp as any),
-      healthData: {
-        ...((comp as any)?.healthData || {}),
-        ringDesignScoreData: {
-          ...data,
-          filter: globalFilter,
-        },
-      },
-    };
-    return calculateRingDesignScore(tmp as any);
-  }, [comp, globalFilter]);
+    if (!designScoreData) return null;
+    const dsd = designScoreData as any;
+    const rawMeasures: any[] = Array.isArray(dsd?.measures) ? dsd.measures : [];
+    const rawOverall: any[] = Array.isArray(dsd?.overallMeasures) ? dsd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> =
+      dsd?.subDimensionWeights && typeof dsd.subDimensionWeights === "object" ? dsd.subDimensionWeights : {};
+    const score = calcFinalDesignScore(rawMeasures, rawOverall, weights, globalFilter);
+    if (score === null) return null;
+    return Math.max(1, Math.min(5, Math.round(score)));
+  }, [designScoreData, globalFilter]);
+
+  const implementationScoreData = useMemo(() => {
+    if (!comp) return null;
+    const hd: any = comp.healthData || {};
+    return hd.implementationScoreData || null;
+  }, [comp]);
 
   const computedRingImplementationScore = useMemo(() => {
-    const data: any = (comp as any)?.healthData?.ringImplementationScoreData;
-    if (!data) return calculateRingImplementationScore(comp as any);
-    const tmp = {
-      ...(comp as any),
-      healthData: {
-        ...((comp as any)?.healthData || {}),
-        ringImplementationScoreData: {
-          ...data,
-          filter: globalFilter,
-        },
-      },
-    };
-    return calculateRingImplementationScore(tmp as any);
-  }, [comp, globalFilter]);
+    if (!implementationScoreData) return null;
+    const isd = implementationScoreData as any;
+    const rawMeasures: any[] = Array.isArray(isd?.measures) ? isd.measures : [];
+    const rawOverall: any[] = Array.isArray(isd?.overallMeasures) ? isd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> =
+      isd?.subDimensionWeights && typeof isd.subDimensionWeights === "object" ? isd.subDimensionWeights : {};
+    const score = calcFinalImplementationScore(rawMeasures, rawOverall, weights, globalFilter);
+    if (score === null) return null;
+    return Math.max(1, Math.min(5, Math.round(score)));
+  }, [implementationScoreData, globalFilter]);
+
+  const implementationSummaryRows = useMemo(() => {
+    if (!implementationScoreData) return [];
+    const isd = implementationScoreData as any;
+    const rawMeasures: any[] = Array.isArray(isd?.measures) ? isd.measures : [];
+    const rawOverall: any[] = Array.isArray(isd?.overallMeasures) ? isd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> =
+      isd?.subDimensionWeights && typeof isd.subDimensionWeights === "object" ? isd.subDimensionWeights : {};
+    return IMPLEMENTATION_SUBDIMENSION_TREE.map((top) => {
+      const s = calcImplementationTopDimensionScore(top, rawMeasures, rawOverall, weights, globalFilter);
+      return {
+        id: top.id,
+        label: top.label,
+        weight: weights[top.id] || "M",
+        score: s !== null ? Math.max(1, Math.min(5, Math.round(s))) : null,
+      };
+    });
+  }, [implementationScoreData, globalFilter]);
 
   const getImplEffectiveFromInstances = (instances: any[], filter: any): { score: number | null; weightLabel: "H" | "M" | "L" | null } => {
     const inPeriod = (asOfDate: string) => {
@@ -528,7 +549,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
 
   if (showRingDesignScore) {
     return (
-      <RingDesignScoreView
+      <DesignScoreView
         nodeId={nodeId}
         title={title}
         onBack={() => setShowRingDesignScore(false)}
@@ -540,7 +561,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
 
   if (showRingImplementationScore) {
     return (
-      <RingImplementationScoreView
+      <ImplementationScoreView
         nodeId={nodeId}
         title={title}
         onBack={() => setShowRingImplementationScore(false)}
@@ -828,80 +849,57 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            {canUseRingDesign ? (
                              <>
                                <div className="space-y-1.5">
-                                 {ringDesignScoreData?.designScoringMode !== "multi" ? (
-                                   <div className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid="design-summary-overall-row">
-                                     <div className="flex items-center gap-2">
-                                       {(() => {
-                                         const overall = ringDesignScoreData?.overallDesignScore ?? null;
-                                         const color =
-                                           overall !== null
-                                             ? overall >= 4 ? "bg-emerald-100 text-emerald-700" :
-                                               overall >= 3 ? "bg-yellow-100 text-yellow-700" :
-                                               "bg-red-100 text-red-700"
-                                             : "bg-gray-100 text-gray-400";
-                                         return (
-                                       <div className={cn(
-                                         "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center",
-                                         color
-                                       )}>
-                                         {overall ?? "—"}
-                                       </div>
-                                         );
-                                       })()}
-                                       <span className="text-xs text-gray-700">Overall Design Score</span>
-                                     </div>
-                                     <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
-                                       Overall mode
-                                     </Badge>
-                                   </div>
+                                 {!designScoreData ? (
+                                   <p className="text-xs text-gray-500 py-1">
+                                     Open design scoring to add measures and sub-dimension weights.
+                                   </p>
+                                 ) : healthSummaryView === "flags" ? (
+                                   <ScoreFlags
+                                     collapsible={false}
+                                     overallScore={computedRingDesignScore}
+                                     items={designSummaryRows.map((row) => ({
+                                       key: row.id,
+                                       label: row.label,
+                                       score: row.score,
+                                     }))}
+                                     threshold={2}
+                                     testId="health-design-flags"
+                                   />
                                  ) : (
-                                  healthSummaryView === "flags" ? (
-                                    <ScoreFlags
-                                      collapsible={false}
-                                      overallScore={computedRingDesignScore}
-                                      items={computedRingDesignDimensionRows.map((row) => ({
-                                        key: row.key,
-                                        label: row.label,
-                                        score: row.score,
-                                      }))}
-                                      threshold={2}
-                                      testId="health-design-flags"
-                                    />
-                                  ) : (
-                                    <div className="space-y-1.5" data-testid="design-summary-rows">
-                                      {computedRingDesignDimensionRows.map((row) => {
-                                        const score = row.score ?? null;
-                                        const scoreLabel = score !== null ? String(score) : "—";
-                                        return (
-                                          <div
-                                            key={row.key}
-                                            className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0"
-                                            data-testid={`design-summary-row-${String(row.key)}`}
-                                          >
-                                            <div className="flex items-center gap-2 min-w-0">
-                                              <div
-                                                className={cn(
-                                                  "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center shrink-0",
-                                                  score !== null
-                                                    ? score >= 4
-                                                      ? "bg-emerald-100 text-emerald-700"
-                                                      : score >= 3
-                                                        ? "bg-yellow-100 text-yellow-700"
-                                                        : "bg-red-100 text-red-700"
-                                                    : "bg-gray-100 text-gray-400",
-                                                )}
-                                              >
-                                                {scoreLabel}
-                                              </div>
-                                              <span className="text-xs text-gray-700 truncate">
-                                                {row.label}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )
+                                   <div className="space-y-1.5" data-testid="design-summary-rows">
+                                     {designSummaryRows.map((row) => {
+                                       const score = row.score;
+                                       const scoreLabel = score !== null ? String(score) : "—";
+                                       return (
+                                         <div
+                                           key={row.id}
+                                           className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0"
+                                           data-testid={`design-summary-row-${row.id}`}
+                                         >
+                                           <div className="flex items-center gap-2 min-w-0">
+                                             <div
+                                               className={cn(
+                                                 "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center shrink-0",
+                                                 score !== null
+                                                   ? score >= 4
+                                                     ? "bg-emerald-100 text-emerald-700"
+                                                     : score >= 3
+                                                       ? "bg-yellow-100 text-yellow-700"
+                                                       : "bg-red-100 text-red-700"
+                                                   : "bg-gray-100 text-gray-400",
+                                               )}
+                                             >
+                                               {scoreLabel}
+                                             </div>
+                                             <span className="text-xs text-gray-700 truncate" title={row.label}>
+                                               {row.label.length > 48 ? `${row.label.slice(0, 46)}…` : row.label}{" "}
+                                               <span className="text-gray-400">(W: {row.weight})</span>
+                                             </span>
+                                           </div>
+                                         </div>
+                                       );
+                                     })}
+                                   </div>
                                  )}
                                </div>
                                <button
@@ -1180,108 +1178,58 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            {canUseRingImplementation ? (
                              <>
                                <div className="space-y-1.5">
-                                 {((comp as any)?.healthData?.ringImplementationScoreData?.implementationScoringMode === "overall") ? (
-                                   <div className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid="implementation-summary-overall-row">
-                                     <div className="flex items-center gap-2">
-                                       <div className={cn(
-                                         "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center",
-                                        computedRingImplementationScore !== null
-                                          ? (computedRingImplementationScore >= 4 ? "bg-emerald-100 text-emerald-700" :
-                                            computedRingImplementationScore >= 3 ? "bg-yellow-100 text-yellow-700" :
-                                             "bg-red-100 text-red-700")
-                                           : "bg-gray-100 text-gray-400"
-                                       )}>
-                                        {computedRingImplementationScore ?? "—"}
-                                       </div>
-                                       <span className="text-xs text-gray-700">Overall Implementation Score</span>
-                                     </div>
-                                     <Badge variant="secondary" className="text-[9px] h-5 bg-gray-200 text-gray-600">
-                                       Overall mode
-                                     </Badge>
+                                 {!implementationScoreData ? (
+                                   <p className="text-xs text-gray-500 py-1">
+                                     Open implementation scoring to add measures and sub-dimension weights.
+                                   </p>
+                                 ) : healthSummaryView === "flags" ? (
+                                   <ScoreFlags
+                                     collapsible={false}
+                                     overallScore={computedRingImplementationScore}
+                                     items={implementationSummaryRows.map((row) => ({
+                                       key: row.id,
+                                       label: row.label,
+                                       score: row.score,
+                                     }))}
+                                     threshold={2}
+                                     testId="health-implementation-flags"
+                                   />
+                                 ) : (
+                                   <div className="space-y-1.5" data-testid="implementation-summary-rows">
+                                     {implementationSummaryRows.map((row) => {
+                                       const score = row.score;
+                                       const scoreLabel = score !== null ? String(score) : "—";
+                                       return (
+                                         <div
+                                           key={row.id}
+                                           className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0"
+                                           data-testid={`implementation-summary-row-${row.id}`}
+                                         >
+                                           <div className="flex items-center gap-2 min-w-0">
+                                             <div
+                                               className={cn(
+                                                 "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center shrink-0",
+                                                 score !== null
+                                                   ? score >= 4
+                                                     ? "bg-emerald-100 text-emerald-700"
+                                                     : score >= 3
+                                                       ? "bg-yellow-100 text-yellow-700"
+                                                       : "bg-red-100 text-red-700"
+                                                   : "bg-gray-100 text-gray-400",
+                                               )}
+                                             >
+                                               {scoreLabel}
+                                             </div>
+                                             <span className="text-xs text-gray-700 truncate" title={row.label}>
+                                               {row.label.length > 48 ? `${row.label.slice(0, 46)}…` : row.label}{" "}
+                                               <span className="text-gray-400">(W: {row.weight})</span>
+                                             </span>
+                                           </div>
+                                         </div>
+                                       );
+                                     })}
                                    </div>
-                                ) : healthSummaryView === "flags" ? (
-                                  (() => {
-                                    const rows = [
-                                      { key: "studentsEnrollment", name: "Students involved / enrollment" },
-                                      { key: "feasibilitySustainability", name: "Perceived feasibility / sustainability" },
-                                      { key: "fidelityDesignedExperience", name: "Fidelity to designed experience" },
-                                      { key: "qualityDelivery", name: "Skillfulness of instruction & Facilitation" },
-                                      { key: "measurementAdministrationQuality", name: "Measurement administration quality" },
-                                    ] as const;
-
-                                    const implData: any = (comp as any)?.healthData?.ringImplementationScoreData || {};
-                                    const d = calculateRingImplementationMeasureDimensionScores({ ...implData, filter: globalFilter } as any);
-                                    const byKey: Record<string, number | null> = {
-                                      studentsEnrollment: d.studentsEnrollmentScore,
-                                      feasibilitySustainability: d.feasibilitySustainabilityScore,
-                                      fidelityDesignedExperience: d.fidelityDesignedExperienceScore,
-                                      qualityDelivery: d.skillfulnessInstructionFacilitationScore,
-                                      measurementAdministrationQuality: d.measurementAdministrationQualityScore,
-                                    };
-                                    const items = rows.map((row) => ({ key: row.key, label: row.name, score: byKey[row.key] ?? null }));
-
-                                    return (
-                                      <ScoreFlags
-                                        collapsible={false}
-                                        overallScore={computedRingImplementationScore}
-                                        items={items as any}
-                                        threshold={2}
-                                        testId="health-implementation-flags"
-                                      />
-                                    );
-                                  })()
-                                ) : (
-                                  <div className="space-y-1.5" data-testid="implementation-summary-rows">
-                                    {([
-                                      { key: "studentsEnrollment", name: "Students involved / enrollment", weightKey: "studentsEnrollmentWeight" },
-                                      { key: "feasibilitySustainability", name: "Perceived feasibility / sustainability", weightKey: "feasibilitySustainabilityWeight" },
-                                      { key: "fidelityDesignedExperience", name: "Fidelity to designed experience", weightKey: "fidelityDesignedExperienceWeight" },
-                                      { key: "qualityDelivery", name: "Skillfulness of instruction & Facilitation", weightKey: "skillfulnessInstructionFacilitationWeight" },
-                                      { key: "measurementAdministrationQuality", name: "Measurement administration quality", weightKey: "measurementAdministrationQualityWeight" },
-                                    ] as const).map((row) => {
-                                      const implData: any = (comp as any)?.healthData?.ringImplementationScoreData || {};
-                                      const d = calculateRingImplementationMeasureDimensionScores({ ...implData, filter: globalFilter } as any);
-                                      const scoreByKey: Record<string, number | null> = {
-                                        studentsEnrollment: d.studentsEnrollmentScore,
-                                        feasibilitySustainability: d.feasibilitySustainabilityScore,
-                                        fidelityDesignedExperience: d.fidelityDesignedExperienceScore,
-                                        qualityDelivery: d.skillfulnessInstructionFacilitationScore,
-                                        measurementAdministrationQuality: d.measurementAdministrationQualityScore,
-                                      };
-                                      const score = scoreByKey[row.key] ?? null;
-                                      const w = ((implData?.measureBasedImplementation?.weights || {}) as any)[row.weightKey] || "M";
-                                      const scoreLabel = score !== null ? String(score) : "—";
-
-                                      return (
-                                        <div
-                                          key={row.key}
-                                          className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0"
-                                          data-testid={`implementation-summary-row-${row.key}`}
-                                        >
-                                          <div className="flex items-center gap-2 min-w-0">
-                                            <div
-                                              className={cn(
-                                                "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center shrink-0",
-                                                score !== null
-                                                  ? score >= 4
-                                                    ? "bg-emerald-100 text-emerald-700"
-                                                    : score >= 3
-                                                      ? "bg-yellow-100 text-yellow-700"
-                                                      : "bg-red-100 text-red-700"
-                                                  : "bg-gray-100 text-gray-400",
-                                              )}
-                                            >
-                                              {scoreLabel}
-                                            </div>
-                                            <span className="text-xs text-gray-700 truncate">
-                                              {row.name} (W: {w})
-                                            </span>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
+                                 )}
                                </div>
                                <button
                                  onClick={() => setShowRingImplementationScore(true)}

@@ -307,6 +307,44 @@ export const outcomeScoreDataSchema = z.object({
 
 export type OutcomeScoreData = z.infer<typeof outcomeScoreDataSchema>;
 
+export const implementationScoreDataSchema = z.object({
+  actors: z.array(z.string()).default([]),
+  filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
+  subDimensionWeights: z.record(z.string(), z.enum(["H", "M", "L"])).default({}),
+  measures: z.array(outcomeMeasureSchema).default([]),
+  overallMeasures: z.array(outcomeMeasureSchema).default([]),
+  finalImplementationScore: z.number().nullable().default(null),
+  implementationNotes: z
+    .record(
+      z.string(),
+      z.object({
+        appliesDescription: z.string().default(""),
+      }),
+    )
+    .default({}),
+});
+
+export type ImplementationScoreData = z.infer<typeof implementationScoreDataSchema>;
+
+export const designScoreDataSchema = z.object({
+  actors: z.array(z.string()).default([]),
+  filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
+  subDimensionWeights: z.record(z.string(), z.enum(["H", "M", "L"])).default({}),
+  measures: z.array(outcomeMeasureSchema).default([]),
+  overallMeasures: z.array(outcomeMeasureSchema).default([]),
+  finalDesignScore: z.number().nullable().default(null),
+  designNotes: z
+    .record(
+      z.string(),
+      z.object({
+        appliesDescription: z.string().default(""),
+      }),
+    )
+    .default({}),
+});
+
+export type DesignScoreData = z.infer<typeof designScoreDataSchema>;
+
 export const experienceDimensionSchema = z.object({
   instances: z.array(scoreInstanceSchema).default([]),
   measures: z.array(measureSchema).default([]),

@@ -157,7 +157,7 @@ function deltaFromScores(current: number | null, previous: number | null): Delta
   return "same";
 }
 
-function previousMeasureVersion(m: OutcomeMeasure): OutcomeMeasure | null {
+export function previousMeasureVersion(m: OutcomeMeasure): OutcomeMeasure | null {
   const history: OutcomePeriodSnapshot[] = Array.isArray((m as any).periodHistory) ? (m as any).periodHistory : [];
   if (history.length === 0) return null;
   const prev = history[history.length - 1];
