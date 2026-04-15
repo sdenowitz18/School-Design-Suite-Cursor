@@ -9,75 +9,93 @@ export interface OutcomeSubDimL1 {
   children: OutcomeSubDimL2[];
 }
 
-export const OUTCOME_SUBDIMENSION_TREE: OutcomeSubDimL1[] = [
+/** Learning & advancement — five L1 siblings (four learning domains + Advancement). */
+export const LEARNING_ADVANCEMENT_OUTCOME_TREE: OutcomeSubDimL1[] = [
   {
-    id: "stem",
+    id: "la-stem",
     label: "STEM",
     children: [
-      { id: "stem-math", label: "Mathematics" },
-      { id: "stem-science", label: "Natural sciences" },
-      { id: "stem-comp", label: "Computational literacy" },
+      { id: "la-stem-math", label: "Mathematics" },
+      { id: "la-stem-science", label: "Natural sciences" },
+      { id: "la-stem-comp-ai", label: "Computational & AI literacies" },
     ],
   },
   {
-    id: "humanities",
-    label: "Humanities & Arts capacities",
+    id: "la-arts",
+    label: "Arts & Humanities",
     children: [
-      { id: "hum-ela", label: "English language arts" },
-      { id: "hum-social", label: "Social studies & civics" },
-      { id: "hum-lang", label: "World languages" },
-      { id: "hum-arts", label: "Performing & visual arts" },
+      { id: "la-arts-ela", label: "English language arts" },
+      { id: "la-arts-social", label: "Social studies & civics" },
+      { id: "la-arts-lang", label: "World languages" },
+      { id: "la-arts-performing", label: "Performing & visual arts" },
     ],
   },
   {
-    id: "tlc",
-    label: "Cross-cutting TLC",
+    id: "la-thinking",
+    label: "Thinking & relating",
     children: [
-      { id: "tlc-thinking", label: "Higher order thinking skills" },
-      { id: "tlc-learning", label: "Learning strategies & habits" },
-      { id: "tlc-collab", label: "Collaboration & communication skills" },
+      { id: "la-think-hots", label: "Higher order thinking skills" },
+      { id: "la-think-learning", label: "Learning strategies & habits" },
+      { id: "la-think-relationship", label: "Relationship skills" },
+      { id: "la-think-mindsets", label: "Productive mindsets & purpose" },
     ],
   },
   {
-    id: "wayfinding",
-    label: "Wayfinding",
+    id: "la-professional",
+    label: "Professional & practical",
     children: [
-      { id: "way-practical", label: "Practical, professional, and continuing-education capacities" },
-      { id: "way-post", label: "Postsecondary assets" },
-      { id: "way-milestones", label: "Transitional milestones" },
+      { id: "la-prof-practical", label: "Practical life skills" },
+      { id: "la-prof-career", label: "Career specific knowledge & skills" },
+      { id: "la-prof-nav", label: "Career & continuing-education navigation knowledge & skills" },
+      { id: "la-prof-physical", label: "Physical/athletic skills & habits" },
     ],
   },
   {
-    id: "wellbeing",
-    label: "Wellbeing",
+    id: "la-advancement",
+    label: "Advancement",
     children: [
-      { id: "well-se", label: "Social-emotional & engagement capacities" },
-      { id: "well-phys", label: "Physical capacities" },
+      { id: "la-adv-assets", label: "Assets for continuing education, career, and life" },
+      { id: "la-adv-milestones", label: "Transitional milestones" },
     ],
   },
 ];
 
-const _l2ById = new Map<string, OutcomeSubDimL2>();
-const _l1ByL2 = new Map<string, OutcomeSubDimL1>();
-for (const l1 of OUTCOME_SUBDIMENSION_TREE) {
-  for (const l2 of l1.children) {
-    _l2ById.set(l2.id, l2);
-    _l1ByL2.set(l2.id, l1);
+/** Wellbeing & conduct — two L1 groups (Wellbeing, Conduct). */
+export const WELLBEING_CONDUCT_OUTCOME_TREE: OutcomeSubDimL1[] = [
+  {
+    id: "wc-wellbeing",
+    label: "Wellbeing",
+    children: [
+      { id: "wc-wb-mental", label: "Mental & physical health" },
+      { id: "wc-wb-social", label: "Social wellbeing" },
+    ],
+  },
+  {
+    id: "wc-conduct",
+    label: "Conduct",
+    children: [
+      { id: "wc-cd-engagement", label: "Productive engagement & satisfaction" },
+      { id: "wc-cd-behavior", label: "Behavior & attendance" },
+    ],
+  },
+];
+
+export function allL2IdsFromTree(tree: OutcomeSubDimL1[]): string[] {
+  const ids: string[] = [];
+  for (const l1 of tree) {
+    for (const l2 of l1.children) ids.push(l2.id);
   }
+  return ids;
 }
 
-export function getL2ById(id: string): OutcomeSubDimL2 | undefined {
-  return _l2ById.get(id);
+export function getL1ByIdInTree(tree: OutcomeSubDimL1[], id: string): OutcomeSubDimL1 | undefined {
+  return tree.find((l1) => l1.id === id);
 }
 
-export function getL1ForL2(l2Id: string): OutcomeSubDimL1 | undefined {
-  return _l1ByL2.get(l2Id);
-}
-
-export function getL1ById(id: string): OutcomeSubDimL1 | undefined {
-  return OUTCOME_SUBDIMENSION_TREE.find((l1) => l1.id === id);
-}
-
-export function allL2Ids(): string[] {
-  return Array.from(_l2ById.keys());
+export function buildAllL2OptionsFromTree(tree: OutcomeSubDimL1[]): { id: string; label: string }[] {
+  const out: { id: string; label: string }[] = [];
+  for (const l of tree) {
+    for (const c of l.children) out.push({ id: c.id, label: c.label });
+  }
+  return out;
 }

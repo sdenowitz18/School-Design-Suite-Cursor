@@ -1,5 +1,7 @@
 "use client";
 
+import { isTargetingAimActive } from "@shared/aim-selection";
+
 export type TargetAimType = "outcome" | "leap";
 export type PriorityLevel = "H" | "M" | "L";
 export type LevelMode = "auto" | "override";
@@ -71,7 +73,11 @@ function upgrade(level: PriorityLevel): PriorityLevel {
 
 function listAimsByType(aims: unknown, type: TargetAimType): TargetAim[] {
   const list = Array.isArray(aims) ? aims : [];
-  return list.filter((a: any) => a?.type === type && String(a?.label || "").trim().length > 0) as TargetAim[];
+  return list.filter((a: any) => {
+    if (a?.type !== type || String(a?.label || "").trim().length === 0) return false;
+    if (type === "leap") return isTargetingAimActive(a);
+    return true;
+  }) as TargetAim[];
 }
 
 function mapByKey(aims: TargetAim[], type: TargetAimType): Map<string, TargetAim> {

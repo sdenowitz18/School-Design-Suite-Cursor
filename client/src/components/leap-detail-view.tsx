@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
+import { migrateLegacyExperienceScoreData } from "@shared/experience-score-calc";
+import { experienceSubdimensionIdForAim, remapExperienceSubdimensionIdsOnMeasures } from "@shared/experience-subdimension-tree";
 import { LEAP_DESCRIPTIONS } from "./designed-experience-schemas";
 import OutcomesLearnMoreView from "./outcomes-learn-more-view";
 
@@ -123,10 +125,21 @@ export default function LeapDetailView({
 
   const leapMeasures = useMemo(() => {
     const esd: any = (comp as any)?.healthData?.experienceScoreData || {};
-    const items: any[] = Array.isArray(esd?.leapItems) ? esd.leapItems : [];
-    const row = items.find((li: any) => norm(String(li?.label || "")) === norm(leapLabel));
-    return Array.isArray(row?.measures) ? row.measures : [];
-  }, [comp, leapLabel]);
+    const leapAims: any[] = ((comp as any)?.designedExperienceData?.keyDesignElements?.aims || []).filter(
+      (a: any) => a?.type === "leap" && typeof a?.label === "string",
+    );
+    const migrated = migrateLegacyExperienceScoreData(esd, leapAims);
+    const measures = comp
+      ? remapExperienceSubdimensionIdsOnMeasures(migrated.measures, comp)
+      : migrated.measures;
+    const tagId = experienceSubdimensionIdForAim({
+      id: leapAim?.id,
+      label: leapLabel,
+    });
+    return measures.filter(
+      (m: any) => Array.isArray(m?.subDimensionIds) && m.subDimensionIds.includes(tagId),
+    );
+  }, [comp, leapLabel, leapAim?.id]);
 
   const taggedSubRows = useMemo(() => {
     const subs: any[] = (comp as any)?.designedExperienceData?.subcomponents || [];

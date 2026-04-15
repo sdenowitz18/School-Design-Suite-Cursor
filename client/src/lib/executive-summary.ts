@@ -1,3 +1,5 @@
+import { migrateLegacyExperienceScoreData } from "@shared/experience-score-calc";
+
 export type ExecutiveSummary = {
   overview: string;
   designedExperience: string;
@@ -32,13 +34,15 @@ function joinTruncated(items: string[], maxItems: number): string {
   return remaining > 0 ? `${base} (+${remaining} more)` : base;
 }
 
-function count(items: unknown): number | null {
-  return Array.isArray(items) ? items.length : null;
-}
-
 function fmtScore(n: unknown): string {
   const v = typeof n === "number" && Number.isFinite(n) ? n : null;
   return v === null ? "—" : String(v);
+}
+
+function leapAimsFromDe(de: any): any[] {
+  const kde: any = de?.keyDesignElements || {};
+  const aims = Array.isArray(kde.aims) ? kde.aims : [];
+  return aims.filter((a: any) => clean(a?.type) === "leap" && typeof a?.label === "string");
 }
 
 export function buildExecutiveSummary(component: any | null | undefined): ExecutiveSummary {
@@ -120,7 +124,8 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
   if (deSubNames.length) designedExperienceLines.push(`Subcomponents: ${joinTruncated(deSubNames, 6)}`);
 
   // 3) Status & Health
-  const outcomeScoreData: any = hd.outcomeScoreData || null;
+  const learningOutcomeData: any = hd.learningAdvancementOutcomeScoreData || null;
+  const wellbeingOutcomeData: any = hd.wellbeingConductOutcomeScoreData || null;
   const experienceScoreData: any = hd.experienceScoreData || null;
   const designScoreData: any = hd.designScoreData || null;
   const implementationScoreData: any = hd.implementationScoreData || null;
@@ -129,15 +134,17 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
 
   const healthLines: string[] = [];
 
-  const finalOutcomeScore = outcomeScoreData ? outcomeScoreData.finalOutcomeScore ?? null : null;
-  const targetedOutcomes: any[] = Array.isArray(outcomeScoreData?.targetedOutcomes) ? outcomeScoreData.targetedOutcomes : [];
+  const finalLearningOutcomeScore = learningOutcomeData ? learningOutcomeData.finalOutcomeScore ?? null : null;
+  const finalWellbeingOutcomeScore = wellbeingOutcomeData ? wellbeingOutcomeData.finalOutcomeScore ?? null : null;
+  const targetedLearning: any[] = Array.isArray(learningOutcomeData?.targetedOutcomes) ? learningOutcomeData.targetedOutcomes : [];
+  const targetedWellbeing: any[] = Array.isArray(wellbeingOutcomeData?.targetedOutcomes) ? wellbeingOutcomeData.targetedOutcomes : [];
+  const targetedOutcomes = targetedLearning.concat(targetedWellbeing);
   const highPriorityOutcomes = targetedOutcomes
     .filter((o: any) => String(o?.priority || "").toUpperCase() === "H" && !o?.skipped)
     .map((o: any) => clean(o?.outcomeName))
     .filter(Boolean);
 
   const finalExperienceScore = experienceScoreData ? experienceScoreData.finalExperienceScore ?? null : null;
-  const leapItemsCount = count(experienceScoreData?.leapItems);
 
   const ringDesignFinal = designScoreData ? designScoreData.finalDesignScore ?? null : null;
   const ringImplFinal = implementationScoreData
@@ -149,7 +156,8 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
 
   healthLines.push(
     [
-      `Outcomes score: ${fmtScore(finalOutcomeScore)}`,
+      `Learning outcomes: ${fmtScore(finalLearningOutcomeScore)}`,
+      `Wellbeing & conduct: ${fmtScore(finalWellbeingOutcomeScore)}`,
       `Targeted outcomes: ${targetedOutcomes.length || "—"}`,
       `Experience score: ${fmtScore(finalExperienceScore)}`,
     ].join(" • "),
@@ -158,15 +166,22 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
 
   const dimParts: string[] = [];
   if (experienceScoreData) {
-    const leapsDim = experienceScoreData.leapsDimensionScore ?? null;
-    const healthDim = experienceScoreData.healthDimensionScore ?? null;
-    const behaviorDim = experienceScoreData.behaviorDimensionScore ?? null;
-    if (leapsDim !== null || healthDim !== null || behaviorDim !== null) {
-      dimParts.push(`Leaps: ${fmtScore(leapsDim)}`);
-      dimParts.push(`Health: ${fmtScore(healthDim)}`);
-      dimParts.push(`Behavior: ${fmtScore(behaviorDim)}`);
+    const migrated = migrateLegacyExperienceScoreData(experienceScoreData, leapAimsFromDe(de));
+    const expMode = String(experienceScoreData.scoringMode || "dimensions");
+    const taggedCount = (migrated.measures || []).filter(
+      (m: any) => Array.isArray(m.subDimensionIds) && m.subDimensionIds.length > 0,
+    ).length;
+    const overallCount = Array.isArray(migrated.overallMeasures) ? migrated.overallMeasures.length : 0;
+    if (expMode === "overall") {
+      if (overallCount > 0) {
+        dimParts.push(`Experience data: ${overallCount} overall measure${overallCount === 1 ? "" : "s"}`);
+      }
+    } else if (taggedCount > 0 || overallCount > 0) {
+      const bits: string[] = [];
+      if (taggedCount) bits.push(`${taggedCount} by subdimension`);
+      if (overallCount) bits.push(`${overallCount} overall`);
+      dimParts.push(`Experience data: ${bits.join(", ")}`);
     }
-    if (leapItemsCount !== null && leapItemsCount > 0) dimParts.push(`Leap items: ${leapItemsCount}`);
   }
   if (dimParts.length) healthLines.push(dimParts.join(" • "));
 
@@ -218,13 +233,18 @@ export function buildExecutiveSummaryText(component: any | null | undefined): st
   const keyPractices = practices.filter((p: any) => !!p?.isKey).map((p: any) => clean(p?.label)).filter(Boolean);
   const keySupports = supports.filter((s: any) => !!s?.isKey).map((s: any) => clean(s?.label)).filter(Boolean);
 
-  const osd: any = hd.outcomeScoreData || {};
+  const laOsd: any = hd.learningAdvancementOutcomeScoreData || {};
+  const wbOsd: any = hd.wellbeingConductOutcomeScoreData || {};
   const esd: any = hd.experienceScoreData || {};
 
-  const outcomeScore = typeof osd.finalOutcomeScore === "number" ? osd.finalOutcomeScore : null;
+  const learningOutcomeScore = typeof laOsd.finalOutcomeScore === "number" ? laOsd.finalOutcomeScore : null;
+  const wellbeingOutcomeScore = typeof wbOsd.finalOutcomeScore === "number" ? wbOsd.finalOutcomeScore : null;
   const experienceScore = typeof esd.finalExperienceScore === "number" ? esd.finalExperienceScore : null;
 
-  const targetedOutcomes: any[] = Array.isArray(osd.targetedOutcomes) ? osd.targetedOutcomes : [];
+  const targetedOutcomes: any[] = ([] as any[]).concat(
+    Array.isArray(laOsd.targetedOutcomes) ? laOsd.targetedOutcomes : [],
+    Array.isArray(wbOsd.targetedOutcomes) ? wbOsd.targetedOutcomes : [],
+  );
   const highPriorityTargeted = targetedOutcomes
     .filter((o: any) => String(o?.priority || "").toUpperCase() === "H" && !o?.skipped)
     .map((o: any) => clean(o?.outcomeName))
@@ -270,7 +290,7 @@ export function buildExecutiveSummaryText(component: any | null | undefined): st
 
   const statusAndHealth = [
     "Status & Health",
-    `Current scores: Outcomes ${fmtScore(outcomeScore)} • Experience ${fmtScore(experienceScore)}.`.trim(),
+    `Current scores: Learning outcomes ${fmtScore(learningOutcomeScore)} • Wellbeing & conduct ${fmtScore(wellbeingOutcomeScore)} • Experience ${fmtScore(experienceScore)}.`.trim(),
     targetedOutcomes.length ? `There are ${targetedOutcomes.length} targeted outcomes being measured.` : "",
     highPriorityTargeted.length ? `High-priority outcomes: ${joinTruncated(highPriorityTargeted, 5)}.` : "",
     [ringDesignFinal, ringImplFinal, ringConditionsFinal].some((v) => typeof v === "number")

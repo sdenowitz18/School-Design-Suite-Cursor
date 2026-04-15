@@ -575,8 +575,12 @@ export default function AICompanionPanel({
         return;
       }
       if (q.includes("targeted outcome")) {
-        const osd: any = hd.outcomeScoreData || {};
-        const tos = Array.isArray(osd.targetedOutcomes) ? osd.targetedOutcomes : [];
+        const la: any = hd.learningAdvancementOutcomeScoreData || {};
+        const wb: any = hd.wellbeingConductOutcomeScoreData || {};
+        const tos = ([] as any[]).concat(
+          Array.isArray(la.targetedOutcomes) ? la.targetedOutcomes : [],
+          Array.isArray(wb.targetedOutcomes) ? wb.targetedOutcomes : [],
+        );
         const list = tos.map((o: any) => String(o?.outcomeName || "").trim()).filter(Boolean);
         reply(
           list.length
@@ -586,9 +590,13 @@ export default function AICompanionPanel({
         return;
       }
       if (q.includes("outcome score")) {
-        const osd: any = hd.outcomeScoreData || {};
-        const v = typeof osd.finalOutcomeScore === "number" ? osd.finalOutcomeScore : null;
-        reply(`Outcome score: ${v === null ? "—" : v}`);
+        const la: any = hd.learningAdvancementOutcomeScoreData || {};
+        const wb: any = hd.wellbeingConductOutcomeScoreData || {};
+        const v1 = typeof la.finalOutcomeScore === "number" ? la.finalOutcomeScore : null;
+        const v2 = typeof wb.finalOutcomeScore === "number" ? wb.finalOutcomeScore : null;
+        reply(
+          `Learning & advancement outcome score: ${v1 === null ? "—" : v1}; Wellbeing & conduct: ${v2 === null ? "—" : v2}`,
+        );
         return;
       }
       if (q.includes("experience score")) {

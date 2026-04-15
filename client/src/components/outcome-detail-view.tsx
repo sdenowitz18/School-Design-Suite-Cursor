@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
+import { outcomeHealthBucketForLabel } from "@/lib/outcome-health-bucket";
 import type { ScoreFilter } from "@shared/schema";
 import OutcomesLearnMoreView from "./outcomes-learn-more-view";
 
@@ -108,6 +109,8 @@ export default function OutcomeDetailView({
 
   const [showLearnMore, setShowLearnMore] = useState(false);
 
+  const outcomeHdKey = useMemo(() => outcomeHealthBucketForLabel(outcomeLabel), [outcomeLabel]);
+
   const outcomeAim = useMemo(() => {
     const aims: any[] = (comp as any)?.designedExperienceData?.keyDesignElements?.aims || [];
     return aims.find((a: any) => a?.type === "outcome" && norm(a?.label) === norm(outcomeLabel)) || null;
@@ -154,6 +157,10 @@ export default function OutcomeDetailView({
   const [initialized, setInitialized] = useState(false);
   const componentName = title || (comp as any)?.title || "this component";
 
+  useEffect(() => {
+    setInitialized(false);
+  }, [outcomeLabel, outcomeHdKey]);
+
   const setPriority = useCallback(
     (p: "H" | "M" | "L") => {
       if (!nodeId || !comp) return;
@@ -166,7 +173,7 @@ export default function OutcomeDetailView({
       );
 
       const existingHd: any = (comp as any).healthData || {};
-      const osd: any = existingHd.outcomeScoreData || {};
+      const osd: any = existingHd[outcomeHdKey] || {};
       const targeted: any[] = osd.targetedOutcomes || [];
       const nextTargeted = targeted.map((o: any) =>
         norm(o?.outcomeName) === norm(outcomeLabel) ? { ...o, priority: p } : o,
@@ -181,7 +188,7 @@ export default function OutcomeDetailView({
           },
           healthData: {
             ...existingHd,
-            outcomeScoreData: {
+            [outcomeHdKey]: {
               ...osd,
               targetedOutcomes: nextTargeted,
             },
@@ -189,16 +196,17 @@ export default function OutcomeDetailView({
         },
       });
     },
-    [comp, nodeId, outcomeLabel, updateMutation],
+    [comp, nodeId, outcomeHdKey, outcomeLabel, updateMutation],
   );
 
   useEffect(() => {
     if (!comp || initialized) return;
-    const osd: any = (comp as any)?.healthData?.outcomeScoreData || {};
+    const hd: any = (comp as any)?.healthData || {};
+    const osd: any = hd[outcomeHdKey] || {};
     const notes: any = osd.outcomeNotes || {};
     setAppliesDescription(String(notes[norm(outcomeLabel)]?.appliesDescription || ""));
     setInitialized(true);
-  }, [comp, initialized, outcomeLabel]);
+  }, [comp, initialized, outcomeHdKey, outcomeLabel]);
 
   const doSaveNotes = useCallback(
     (desc: string) => {
@@ -206,14 +214,14 @@ export default function OutcomeDetailView({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         const existing: any = comp?.healthData || {};
-        const osd: any = existing.outcomeScoreData || {};
+        const osd: any = existing[outcomeHdKey] || {};
         const outcomeNotes: any = osd.outcomeNotes || {};
         updateMutation.mutate({
           nodeId,
           data: {
             healthData: {
               ...existing,
-              outcomeScoreData: {
+              [outcomeHdKey]: {
                 ...osd,
                 outcomeNotes: {
                   ...outcomeNotes,
@@ -225,7 +233,7 @@ export default function OutcomeDetailView({
         });
       }, 500);
     },
-    [comp, nodeId, outcomeLabel, updateMutation],
+    [comp, nodeId, outcomeHdKey, outcomeLabel, updateMutation],
   );
 
   useEffect(() => {

@@ -35,7 +35,19 @@ import RingConditionsScoreView from "./ring-conditions-score-view";
 import { calculateRingConditionsScore, calculateRingConditionsScoreFromData, calculateRingConditionsSum } from "@shared/ring-conditions-score";
 import { effectiveFromInstances, UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
 import { calcOverallOutcomeScore, calcL1Score } from "@shared/outcome-score-calc";
-import { OUTCOME_SUBDIMENSION_TREE } from "@shared/outcome-subdimension-tree";
+import { calcFinalExperienceScore, migrateLegacyExperienceScoreData } from "@shared/experience-score-calc";
+import { isLeapAimActive } from "@shared/aim-selection";
+import {
+  experienceHealthSubdimensions,
+  experienceWeightsForComponent,
+  remapExperienceSubdimensionIdsOnMeasures,
+} from "@shared/experience-subdimension-tree";
+import type { OutcomeMeasure } from "@shared/schema";
+import {
+  LEARNING_ADVANCEMENT_OUTCOME_TREE,
+  WELLBEING_CONDUCT_OUTCOME_TREE,
+  type OutcomeSubDimL1,
+} from "@shared/outcome-subdimension-tree";
 import { getSchoolYearKey, getSemesterKey, listSelectableSemesterKeys, listSelectableYearKeys, parseIsoDate } from "@shared/marking-period";
 import type { ScoreFilter, ScoreInstance } from "@shared/schema";
 import ScoreFilterBar from "./score-filter-bar";
@@ -47,6 +59,14 @@ function scorePillClass(score: number | null): string {
   if (score >= 4) return "bg-emerald-50 text-emerald-700 border-emerald-200";
   if (score >= 3) return "bg-yellow-50 text-yellow-700 border-yellow-200";
   return "bg-red-50 text-red-700 border-red-200";
+}
+
+/** SVG / connector stroke color aligned with score bands (null → neutral gray). */
+function flowConnectorStroke(score: number | null): string {
+  if (score === null) return "#cbd5e1";
+  if (score >= 4) return "#10b981";
+  if (score >= 3) return "#ca8a04";
+  return "#ef4444";
 }
 
 interface ComponentHealthViewProps {
@@ -106,16 +126,18 @@ const PERFORMANCE_DATA = {
 
 export default function ComponentHealthView({ nodeId, title }: ComponentHealthViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
+  const { data: allComponents } = useQuery(componentQueries.all as any);
 
   const isOverall = String(nodeId || "") === "overall";
   const isRingNode = !!nodeId && (RING_NODE_IDS as readonly string[]).includes(nodeId);
-  const canUseRingConditions = !!comp && (isRingNode || isOverall);
-  const canUseRingDesign = !!comp && (isRingNode || isOverall);
-  const canUseRingImplementation = !!comp && (isRingNode || isOverall);
+  const canUseRingConditions = !!comp;
+  const canUseRingDesign = !!comp;
+  const canUseRingImplementation = !!comp;
   const canOpenDriverScoring = !!comp;
 
   const [status, setStatus] = useState("Test & Refine");
-  const [showOutcomeScore, setShowOutcomeScore] = useState(false);
+  const [showLearningOutcomeScore, setShowLearningOutcomeScore] = useState(false);
+  const [showWellbeingOutcomeScore, setShowWellbeingOutcomeScore] = useState(false);
   const [showExperienceScore, setShowExperienceScore] = useState(false);
   const [showRingDesignScore, setShowRingDesignScore] = useState(false);
   const [showRingImplementationScore, setShowRingImplementationScore] = useState(false);
@@ -128,10 +150,16 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     aggregation: "singleLatest",
   } as any);
 
-  const outcomeScoreData = useMemo(() => {
+  const learningAdvancementOutcomeScoreData = useMemo(() => {
     if (!comp) return null;
     const hd: any = comp.healthData || {};
-    return hd.outcomeScoreData || null;
+    return hd.learningAdvancementOutcomeScoreData || null;
+  }, [comp]);
+
+  const wellbeingConductOutcomeScoreData = useMemo(() => {
+    if (!comp) return null;
+    const hd: any = comp.healthData || {};
+    return hd.wellbeingConductOutcomeScoreData || null;
   }, [comp]);
 
   const experienceScoreData = useMemo(() => {
@@ -156,17 +184,19 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     const hd: any = (comp as any)?.healthData || {};
     const implActors: any[] = (hd?.implementationScoreData as any)?.actors || [];
     const designActors: any[] = (hd?.designScoreData as any)?.actors || [];
-    const outActors: any[] = (outcomeScoreData as any)?.actors || [];
+    const laActors: any[] = (learningAdvancementOutcomeScoreData as any)?.actors || [];
+    const wbActors: any[] = (wellbeingConductOutcomeScoreData as any)?.actors || [];
     const expActors: any[] = (experienceScoreData as any)?.actors || [];
 
     for (const a of implActors) add(a);
     for (const a of designActors) add(a);
-    for (const a of outActors) add(a);
+    for (const a of laActors) add(a);
+    for (const a of wbActors) add(a);
     for (const a of expActors) add(a);
 
     out.sort((a, b) => a.localeCompare(b));
     return out;
-  }, [comp, outcomeScoreData, experienceScoreData]);
+  }, [comp, learningAdvancementOutcomeScoreData, wellbeingConductOutcomeScoreData, experienceScoreData]);
 
   const designScoreData = useMemo(() => {
     if (!comp) return null;
@@ -174,23 +204,58 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     return hd.designScoreData || null;
   }, [comp]);
 
-  const realOutcomeScore = useMemo(() => {
-    if (!outcomeScoreData) return null;
-    const osd = outcomeScoreData as any;
+  const realLearningOutcomeScore = useMemo(() => {
+    if (!learningAdvancementOutcomeScoreData) return null;
+    const osd = learningAdvancementOutcomeScoreData as any;
     const rawMeasures: any[] = Array.isArray(osd?.measures) ? osd.measures : [];
     const rawOverall: any[] = Array.isArray(osd?.overallMeasures) ? osd.overallMeasures : [];
     const weights: Record<string, "H" | "M" | "L"> = osd?.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? osd.subDimensionWeights : {};
-    const score = calcOverallOutcomeScore(rawMeasures, rawOverall, weights, globalFilter);
+    const score = calcOverallOutcomeScore(rawMeasures, rawOverall, weights, globalFilter, LEARNING_ADVANCEMENT_OUTCOME_TREE);
     if (score === null) return null;
     return Math.max(1, Math.min(5, Math.round(score)));
-  }, [outcomeScoreData, globalFilter]);
+  }, [learningAdvancementOutcomeScoreData, globalFilter]);
+
+  const realWellbeingOutcomeScore = useMemo(() => {
+    if (!wellbeingConductOutcomeScoreData) return null;
+    const osd = wellbeingConductOutcomeScoreData as any;
+    const rawMeasures: any[] = Array.isArray(osd?.measures) ? osd.measures : [];
+    const rawOverall: any[] = Array.isArray(osd?.overallMeasures) ? osd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> = osd?.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? osd.subDimensionWeights : {};
+    const score = calcOverallOutcomeScore(rawMeasures, rawOverall, weights, globalFilter, WELLBEING_CONDUCT_OUTCOME_TREE);
+    if (score === null) return null;
+    return Math.max(1, Math.min(5, Math.round(score)));
+  }, [wellbeingConductOutcomeScoreData, globalFilter]);
+
+  const leapAimsForExperience = useMemo(() => {
+    const aims: any[] = ((comp as any)?.designedExperienceData?.keyDesignElements?.aims || []) as any[];
+    return aims.filter((a) => a?.type === "leap" && typeof a?.label === "string" && isLeapAimActive(a));
+  }, [comp]);
+
+  const experienceTopsHealth = useMemo(
+    () => experienceHealthSubdimensions((allComponents as any[]) || []),
+    [allComponents],
+  );
+
+  const migratedExperienceData = useMemo(() => {
+    if (!experienceScoreData) {
+      return {
+        measures: [] as OutcomeMeasure[],
+        overallMeasures: [] as OutcomeMeasure[],
+        subDimensionWeights: {} as Record<string, "H" | "M" | "L">,
+      };
+    }
+    const m = migrateLegacyExperienceScoreData(experienceScoreData, leapAimsForExperience);
+    return {
+      ...m,
+      measures: comp ? remapExperienceSubdimensionIdsOnMeasures(m.measures, comp) : m.measures,
+    };
+  }, [experienceScoreData, leapAimsForExperience, comp]);
 
   const realExperienceScore = useMemo(() => {
     if (!experienceScoreData) return null;
     const stored = (experienceScoreData as any)?.finalExperienceScore;
     if (typeof stored === "number" && Number.isFinite(stored)) return Math.max(1, Math.min(5, Math.round(stored)));
 
-    const W: Record<string, number> = { H: 6, M: 3, L: 1 };
     const roundFinal1to5 = (score: number | null): number | null => {
       if (score === null) return null;
       const rounded = Math.round(score);
@@ -198,143 +263,71 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
       if (rounded > 5) return 5;
       return rounded;
     };
-    const weightedAvg = (items: { rating: number | null; priority: string; skipped: boolean }[]): number | null => {
-      let totalWeight = 0;
-      let totalScore = 0;
-      for (const item of items) {
-        if (item.skipped || item.rating === null) continue;
-        const w = W[item.priority] ?? 1;
-        totalWeight += w;
-        totalScore += item.rating * w;
-      }
-      if (totalWeight <= 0) return null;
-      return Math.round((totalScore / totalWeight) * 100) / 100;
-    };
-    const measureRating = (m: any): number | null => {
-      const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-      if (insts.length === 0) return null;
-      return effectiveFromInstances(insts, globalFilter).score;
-    };
-    const dimScore = (dim: any): number | null => {
-      const ms: any[] = Array.isArray(dim?.measures) ? dim.measures : [];
-      return weightedAvg(ms.map((m) => ({ rating: measureRating(m), priority: String(m?.priority || "M"), skipped: !!m?.skipped })));
-    };
-    const itemScore = (measures: any[]): number | null => {
-      const ms: any[] = Array.isArray(measures) ? measures : [];
-      return weightedAvg(ms.map((m) => ({ rating: measureRating(m), priority: String(m?.priority || "M"), skipped: !!m?.skipped })));
+
+    const { measures, overallMeasures, subDimensionWeights } = migratedExperienceData;
+    const esdW =
+      (experienceScoreData as any)?.subDimensionWeights && typeof (experienceScoreData as any).subDimensionWeights === "object"
+        ? (experienceScoreData as any).subDimensionWeights
+        : {};
+    const weights: Record<string, "H" | "M" | "L"> = {
+      ...(comp ? experienceWeightsForComponent(comp, experienceTopsHealth) : {}),
+      ...subDimensionWeights,
+      ...esdW,
     };
 
-    const leapAims: any[] = ((comp as any)?.designedExperienceData?.keyDesignElements?.aims || []).filter((a: any) => a?.type === "leap");
-    const leapCount = new Set(leapAims.map((a: any) => String(a?.label || "").trim().toLowerCase()).filter(Boolean)).size;
-    const calcWeights = (count: number) => {
-      let leapsWeight = 0;
-      if (count >= 5) leapsWeight = 0.6;
-      else if (count >= 3) leapsWeight = 0.5;
-      else if (count >= 1) leapsWeight = 0.4;
-      const remaining = 1 - leapsWeight;
-      return { leapsWeight, healthWeight: remaining / 2, behaviorWeight: remaining / 2 };
-    };
-    const baseWeights = calcWeights(leapCount);
-
-    const scoringMode = String((experienceScoreData as any)?.scoringMode || "dimensions");
-    if (scoringMode === "overall") {
-      const overallMeasures: any[] = Array.isArray((experienceScoreData as any)?.overallMeasures) ? (experienceScoreData as any).overallMeasures : [];
-      const raw = weightedAvg(overallMeasures.map((m) => ({ rating: measureRating(m), priority: String(m?.priority || "M"), skipped: !!m?.skipped })));
-      return roundFinal1to5(raw);
-    }
-
-    const leapsScoringMode = String((experienceScoreData as any)?.leapsScoringMode || "across");
-    const leaps = (experienceScoreData as any)?.leaps || { measures: [] };
-    const health = (experienceScoreData as any)?.health || { measures: [] };
-    const behavior = (experienceScoreData as any)?.behavior || { measures: [] };
-    const leapItems: any[] = Array.isArray((experienceScoreData as any)?.leapItems) ? (experienceScoreData as any).leapItems : [];
-
-    const leapsDimScore =
-      leapsScoringMode === "individual"
-        ? (() => {
-            let totalWeight = 0;
-            let total = 0;
-            for (const it of leapItems) {
-              const s = itemScore(it?.measures || []);
-              if (s === null) continue;
-              const w = W[String(it?.weight || "M")] ?? 1;
-              totalWeight += w;
-              total += s * w;
-            }
-            if (totalWeight <= 0) return null;
-            return Math.round((total / totalWeight) * 100) / 100;
-          })()
-        : dimScore(leaps);
-
-    const healthDimScore = dimScore(health);
-    const behaviorDimScore = dimScore(behavior);
-
-    // Redistribute missing weights across scored dimensions.
-    const dims: { score: number; weight: number }[] = [];
-    const missingWeights: number[] = [];
-    if (baseWeights.leapsWeight > 0) {
-      if (leapsDimScore !== null) dims.push({ score: leapsDimScore, weight: baseWeights.leapsWeight });
-      else missingWeights.push(baseWeights.leapsWeight);
-    }
-    if (healthDimScore !== null && baseWeights.healthWeight > 0) dims.push({ score: healthDimScore, weight: baseWeights.healthWeight });
-    else missingWeights.push(baseWeights.healthWeight);
-    if (behaviorDimScore !== null && baseWeights.behaviorWeight > 0) dims.push({ score: behaviorDimScore, weight: baseWeights.behaviorWeight });
-    else missingWeights.push(baseWeights.behaviorWeight);
-    if (dims.length === 0) return null;
-    if (baseWeights.leapsWeight > 0 && leapsDimScore === null) return null;
-
-    const totalMissing = missingWeights.reduce((s, w) => s + w, 0);
-    const redistPerDim = totalMissing / dims.length;
-    let total = 0;
-    for (const d of dims) {
-      total += d.score * (d.weight + redistPerDim);
-    }
-    const raw = Math.round(total * 100) / 100;
+    const raw = calcFinalExperienceScore(
+      measures as OutcomeMeasure[],
+      overallMeasures as OutcomeMeasure[],
+      weights,
+      globalFilter,
+      experienceTopsHealth,
+    );
     return roundFinal1to5(raw);
-  }, [comp, experienceScoreData, globalFilter]);
-  const experienceDimensions = useMemo(() => {
-    if (!experienceScoreData)
-      return {
-        leaps: { instances: [], measures: [], excluded: false },
-        health: { instances: [], measures: [], excluded: false },
-        behavior: { instances: [], measures: [], excluded: false },
-      };
-    return {
-      leaps: (experienceScoreData as any).leaps || { instances: [], measures: [], excluded: false },
-      health: (experienceScoreData as any).health || { instances: [], measures: [], excluded: false },
-      behavior: (experienceScoreData as any).behavior || { instances: [], measures: [], excluded: false },
-    };
-  }, [experienceScoreData]);
+  }, [comp, experienceScoreData, experienceTopsHealth, globalFilter, migratedExperienceData]);
 
-  const experienceEmergentDimensionScore = useMemo(() => {
-    const healthScore = (experienceScoreData as any)?.healthDimensionScore;
-    const behaviorScore = (experienceScoreData as any)?.behaviorDimensionScore;
-    const h = typeof healthScore === "number" ? healthScore : null;
-    const b = typeof behaviorScore === "number" ? behaviorScore : null;
-    if (h === null && b === null) return null;
-    if (h !== null && b === null) return h;
-    if (b !== null && h === null) return b;
-    const aims: any[] = ((comp as any)?.designedExperienceData?.keyDesignElements?.aims || []) as any[];
-    const leapCount = aims.filter((a) => a?.type === "leap").length;
-    let leapsWeight = 0;
-    if (leapCount >= 5) leapsWeight = 0.6;
-    else if (leapCount >= 3) leapsWeight = 0.5;
-    else if (leapCount >= 1) leapsWeight = 0.4;
-    const remaining = 1.0 - leapsWeight;
-    const hw = remaining / 2;
-    const bw = remaining / 2;
-    return Math.round((((h as number) * hw + (b as number) * bw) / (hw + bw)) * 100) / 100;
-  }, [comp, experienceScoreData]);
+  const experienceWeightsResolved = useMemo(() => {
+    const base = comp ? experienceWeightsForComponent(comp, experienceTopsHealth) : {};
+    if (!experienceScoreData) {
+      return base;
+    }
+    const { subDimensionWeights } = migratedExperienceData;
+    const esdW =
+      (experienceScoreData as any)?.subDimensionWeights && typeof (experienceScoreData as any).subDimensionWeights === "object"
+        ? (experienceScoreData as any).subDimensionWeights
+        : {};
+    return { ...base, ...subDimensionWeights, ...esdW };
+  }, [comp, experienceScoreData, experienceTopsHealth, migratedExperienceData]);
+
+  const experienceSubdimensionRows = useMemo(() => {
+    if (experienceTopsHealth.length === 0) return [];
+    const { measures, overallMeasures } = migratedExperienceData;
+    return experienceTopsHealth.map((top) => {
+      const s = calcImplementationTopDimensionScore(
+        top as any,
+        measures as OutcomeMeasure[],
+        overallMeasures as OutcomeMeasure[],
+        experienceWeightsResolved,
+        globalFilter,
+      );
+      return {
+        key: top.id,
+        label: top.label,
+        weight: experienceWeightsResolved[top.id] || "M",
+        score: s !== null ? Math.max(1, Math.min(5, Math.round(s))) : null,
+      };
+    });
+  }, [experienceTopsHealth, experienceWeightsResolved, globalFilter, migratedExperienceData]);
 
   const designSummaryRows = useMemo(() => {
-    if (!designScoreData) return [];
     const dsd = designScoreData as any;
-    const rawMeasures: any[] = Array.isArray(dsd?.measures) ? dsd.measures : [];
-    const rawOverall: any[] = Array.isArray(dsd?.overallMeasures) ? dsd.overallMeasures : [];
+    const rawMeasures: any[] = dsd && Array.isArray(dsd?.measures) ? dsd.measures : [];
+    const rawOverall: any[] = dsd && Array.isArray(dsd?.overallMeasures) ? dsd.overallMeasures : [];
     const weights: Record<string, "H" | "M" | "L"> =
       dsd?.subDimensionWeights && typeof dsd.subDimensionWeights === "object" ? dsd.subDimensionWeights : {};
     return DESIGN_SUBDIMENSION_TREE.map((top) => {
-      const s = calcDesignDimensionScore(top as any, rawMeasures, rawOverall, weights, globalFilter);
+      const s = designScoreData
+        ? calcDesignDimensionScore(top as any, rawMeasures, rawOverall, weights, globalFilter)
+        : null;
       return {
         id: top.id,
         label: top.label,
@@ -344,19 +337,41 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     });
   }, [designScoreData, globalFilter]);
 
-  const outcomeDimensionRows = useMemo(() => {
-    if (!outcomeScoreData) return OUTCOME_SUBDIMENSION_TREE.map((l1) => ({ key: l1.id, label: l1.label, score: null as number | null, count: 0 }));
-    const osd = outcomeScoreData as any;
-    const rawMeasures: any[] = Array.isArray(osd?.measures) ? osd.measures : [];
-    const rawOverall: any[] = Array.isArray(osd?.overallMeasures) ? osd.overallMeasures : [];
-    const weights: Record<string, "H" | "M" | "L"> = osd?.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? osd.subDimensionWeights : {};
-    return OUTCOME_SUBDIMENSION_TREE.map((l1) => {
+  /** Learning & advancement — same five L1 areas as OutcomeScoreView (drivers + performance cards). */
+  const learningOutcomeDimensionRows = useMemo(() => {
+    const tree = LEARNING_ADVANCEMENT_OUTCOME_TREE;
+    const osd = learningAdvancementOutcomeScoreData as any;
+    const rawMeasures: any[] = osd && Array.isArray(osd?.measures) ? osd.measures : [];
+    const rawOverall: any[] = osd && Array.isArray(osd?.overallMeasures) ? osd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> =
+      osd?.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? osd.subDimensionWeights : {};
+    return tree.map((l1: OutcomeSubDimL1) => {
       const l2Ids = new Set(l1.children.map((c) => c.id));
-      const tagged = rawMeasures.filter((m: any) => Array.isArray(m?.subDimensionIds) && m.subDimensionIds.some((id: string) => l2Ids.has(id)));
-      const score = calcL1Score(l1, rawMeasures, rawOverall, weights, globalFilter);
+      const tagged = rawMeasures.filter(
+        (m: any) => Array.isArray(m?.subDimensionIds) && m.subDimensionIds.some((id: string) => l2Ids.has(id)),
+      );
+      const score = osd ? calcL1Score(l1, rawMeasures, rawOverall, weights, globalFilter) : null;
       return { key: l1.id, label: l1.label, score, count: tagged.length };
     });
-  }, [outcomeScoreData, globalFilter]);
+  }, [learningAdvancementOutcomeScoreData, globalFilter]);
+
+  /** Wellbeing & conduct — same two L1 groups as OutcomeScoreView. */
+  const wellbeingOutcomeDimensionRows = useMemo(() => {
+    const tree = WELLBEING_CONDUCT_OUTCOME_TREE;
+    const osd = wellbeingConductOutcomeScoreData as any;
+    const rawMeasures: any[] = osd && Array.isArray(osd?.measures) ? osd.measures : [];
+    const rawOverall: any[] = osd && Array.isArray(osd?.overallMeasures) ? osd.overallMeasures : [];
+    const weights: Record<string, "H" | "M" | "L"> =
+      osd?.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? osd.subDimensionWeights : {};
+    return tree.map((l1: OutcomeSubDimL1) => {
+      const l2Ids = new Set(l1.children.map((c) => c.id));
+      const tagged = rawMeasures.filter(
+        (m: any) => Array.isArray(m?.subDimensionIds) && m.subDimensionIds.some((id: string) => l2Ids.has(id)),
+      );
+      const score = osd ? calcL1Score(l1, rawMeasures, rawOverall, weights, globalFilter) : null;
+      return { key: l1.id, label: l1.label, score, count: tagged.length };
+    });
+  }, [wellbeingConductOutcomeScoreData, globalFilter]);
 
   const computedRingDesignScore = useMemo(() => {
     if (!designScoreData) return null;
@@ -389,14 +404,15 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
   }, [implementationScoreData, globalFilter]);
 
   const implementationSummaryRows = useMemo(() => {
-    if (!implementationScoreData) return [];
     const isd = implementationScoreData as any;
-    const rawMeasures: any[] = Array.isArray(isd?.measures) ? isd.measures : [];
-    const rawOverall: any[] = Array.isArray(isd?.overallMeasures) ? isd.overallMeasures : [];
+    const rawMeasures: any[] = isd && Array.isArray(isd?.measures) ? isd.measures : [];
+    const rawOverall: any[] = isd && Array.isArray(isd?.overallMeasures) ? isd.overallMeasures : [];
     const weights: Record<string, "H" | "M" | "L"> =
       isd?.subDimensionWeights && typeof isd.subDimensionWeights === "object" ? isd.subDimensionWeights : {};
     return IMPLEMENTATION_SUBDIMENSION_TREE.map((top) => {
-      const s = calcImplementationTopDimensionScore(top, rawMeasures, rawOverall, weights, globalFilter);
+      const s = implementationScoreData
+        ? calcImplementationTopDimensionScore(top, rawMeasures, rawOverall, weights, globalFilter)
+        : null;
       return {
         id: top.id,
         label: top.label,
@@ -535,12 +551,26 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     );
   }
 
-  if (showOutcomeScore) {
+  if (showLearningOutcomeScore) {
     return (
       <OutcomeScoreView
         nodeId={nodeId}
         title={title}
-        onBack={() => setShowOutcomeScore(false)}
+        variant="learningAdvancement"
+        onBack={() => setShowLearningOutcomeScore(false)}
+        sourceFilter={globalFilter}
+        onFilterChange={setGlobalFilter}
+      />
+    );
+  }
+
+  if (showWellbeingOutcomeScore) {
+    return (
+      <OutcomeScoreView
+        nodeId={nodeId}
+        title={title}
+        variant="wellbeingConduct"
+        onBack={() => setShowWellbeingOutcomeScore(false)}
         sourceFilter={globalFilter}
         onFilterChange={setGlobalFilter}
       />
@@ -644,164 +674,256 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
             <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Snapshot</span>
          </div>
 
-         <div className="p-6 grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-            
-            {/* Left: Experience Score (Clickable) */}
-            <button
-               className="md:col-span-3 flex flex-col items-center justify-center space-y-2 cursor-pointer group rounded-xl p-3 -m-3 hover:bg-emerald-50/50 transition-all"
-               onClick={() => setShowExperienceScore(true)}
-               data-testid="button-experience-score"
-            >
-               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1">Experience</span>
-               <div className={cn(
-                  "relative flex items-center justify-center w-24 h-16 rounded-lg border shadow-sm group-hover:shadow-md transition-all",
-                  realExperienceScore !== null
-                    ? realExperienceScore >= 4 ? "bg-emerald-100 border-emerald-200 group-hover:border-emerald-300" :
-                      realExperienceScore >= 3 ? "bg-yellow-100 border-yellow-200 group-hover:border-yellow-300" :
-                      "bg-red-100 border-red-200 group-hover:border-red-300"
-                    : "bg-gray-100 border-gray-200 group-hover:border-gray-300"
-               )}>
-                  <span className={cn(
-                    "text-4xl font-bold",
-                    realExperienceScore !== null
-                      ? realExperienceScore >= 4 ? "text-emerald-700" :
-                        realExperienceScore >= 3 ? "text-yellow-700" :
-                        "text-red-700"
-                      : "text-gray-400"
-                  )}>
-                    {realExperienceScore !== null ? Math.round(realExperienceScore) : "—"}
-                  </span>
-               </div>
-               <div className="flex items-center text-[10px] text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-full">
-                  {realExperienceScore === null ? "Not scored yet" : realExperienceScore >= 4 ? "On Track" : realExperienceScore >= 3 ? "Moderate" : "Below Target"}
-               </div>
-               <span className="text-[9px] text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity font-medium">Click to score</span>
-            </button>
+         <div className="p-6">
+            <div className="w-full max-w-4xl mx-auto">
+               <span className="block text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Drivers</span>
 
-            {/* Middle: Drivers (Visual) */}
-            <div className="md:col-span-6 flex flex-col items-center justify-center relative">
-               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Drivers</span>
-               
-               <div className="relative w-full bg-gray-50/80 rounded-2xl border border-gray-100 p-4">
-                  <div className="flex justify-between items-start mb-6 px-4">
-                      <div className="text-center">
-                         <div className="text-xs font-bold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-4 mb-1">Design</div>
-                         <button
-                           type="button"
-                           disabled={!canOpenDriverScoring}
-                           onClick={() => setShowRingDesignScore(true)}
-                           className={cn(!canOpenDriverScoring && "cursor-default")}
-                           data-testid="button-design-score"
-                         >
-                           <Badge
-                             variant="outline"
-                             className={cn(
-                              "text-[10px] h-5",
-                              scorePillClass(computedRingDesignScore),
-                              canOpenDriverScoring && "cursor-pointer hover:opacity-90"
-                             )}
-                           >
-                             {(computedRingDesignScore ?? "—")}/5
-                           </Badge>
-                         </button>
-                      </div>
-                      <div className="text-center">
-                         <div className="text-xs font-bold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-4 mb-1">Conditions</div>
-                         <button
-                           type="button"
-                           disabled={!canOpenDriverScoring}
-                           onClick={() => setShowRingConditionsScore(true)}
-                           className={cn(!canOpenDriverScoring && "cursor-default")}
-                           data-testid="button-conditions-score"
-                         >
-                           <Badge
-                             variant="outline"
-                             className={cn(
-                              "text-[10px] h-5",
-                              scorePillClass(computedRingConditionsScore),
-                              canOpenDriverScoring && "cursor-pointer hover:opacity-90"
-                             )}
-                           >
-                             {(computedRingConditionsScore ?? "—")}/5
-                           </Badge>
-                         </button>
-                      </div>
-                  </div>
-                  
-                  {/* Flow Arrows Visual - Simplified Flux Capacitor */}
-                  <div className="relative h-16 w-full flex justify-center items-center">
-                     {/* Y Shape */}
-                     <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 60" preserveAspectRatio="none">
-                        <path d="M 60 10 L 100 35 L 140 10" fill="none" stroke="#e2e8f0" strokeWidth="4" strokeLinecap="round" />
-                        <line x1="100" y1="35" x2="100" y2="60" stroke="#e2e8f0" strokeWidth="4" strokeLinecap="round" />
-                        {/* Status Colors Overlay */}
-                        <path d="M 60 10 L 100 35" fill="none" stroke="#fca5a5" strokeWidth="4" strokeLinecap="round" className="opacity-80" /> {/* Design (Red-ish for mock) */}
-                        <path d="M 140 10 L 100 35" fill="none" stroke="#86efac" strokeWidth="4" strokeLinecap="round" className="opacity-80" /> {/* Conditions (Green-ish) */}
-                        <line x1="100" y1="35" x2="100" y2="60" stroke="#fde047" strokeWidth="4" strokeLinecap="round" className="opacity-80" /> {/* Implementation (Yellow) */}
-                        
-                        {/* Arrow Head */}
-                        <path d="M 96 55 L 100 60 L 104 55" fill="none" stroke="#fbbf24" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                     </svg>
-                  </div>
-
-                  <div className="text-center mt-1">
-                      <div className="text-xs font-bold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-4 mb-1">Implementation</div>
-                      <button
+               <div className="flex flex-col md:flex-row md:items-start md:justify-center gap-6 md:gap-2 lg:gap-4">
+                  <div className="flex justify-center md:w-36 lg:w-40 shrink-0 md:pt-10 order-2 md:order-1">
+                     <button
                         type="button"
-                        disabled={!canOpenDriverScoring}
-                        onClick={() => setShowRingImplementationScore(true)}
-                        className={cn(!canOpenDriverScoring && "cursor-default")}
-                        data-testid="button-implementation-score"
-                      >
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-[10px] h-5",
-                            scorePillClass(computedRingImplementationScore),
-                            canOpenDriverScoring && "cursor-pointer hover:opacity-90"
-                          )}
+                        className="flex flex-col items-center justify-center space-y-2 cursor-pointer group rounded-xl p-3 border border-transparent hover:border-gray-200 hover:bg-slate-50/80 transition-all"
+                        onClick={() => setShowLearningOutcomeScore(true)}
+                        data-testid="button-learning-outcome-score"
+                     >
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1 text-center leading-tight">
+                           Learning &amp; advancement
+                        </span>
+                        <div
+                           className={cn(
+                              "relative flex items-center justify-center w-24 h-16 rounded-lg border shadow-sm group-hover:shadow-md transition-all",
+                              realLearningOutcomeScore !== null
+                                 ? realLearningOutcomeScore >= 4
+                                    ? "bg-emerald-100 border-emerald-200 group-hover:border-emerald-300"
+                                    : realLearningOutcomeScore >= 3
+                                      ? "bg-yellow-100 border-yellow-200 group-hover:border-yellow-300"
+                                      : "bg-red-100 border-red-200 group-hover:border-red-300"
+                                 : "bg-gray-100 border-gray-200 group-hover:border-gray-300",
+                           )}
                         >
-                          {(computedRingImplementationScore ?? "—")}/5
-                        </Badge>
-                      </button>
+                           <span
+                              className={cn(
+                                 "text-4xl font-bold",
+                                 realLearningOutcomeScore !== null
+                                    ? realLearningOutcomeScore >= 4 ? "text-emerald-700"
+                                       : realLearningOutcomeScore >= 3
+                                         ? "text-yellow-700"
+                                         : "text-red-700"
+                                    : "text-gray-400",
+                              )}
+                           >
+                              {realLearningOutcomeScore !== null ? Math.round(realLearningOutcomeScore) : "—"}
+                           </span>
+                        </div>
+                        <span className="text-[9px] text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity font-medium">
+                           Click to score
+                        </span>
+                     </button>
+                  </div>
+
+                  <div className="order-1 md:order-2 flex-1 min-w-0 max-w-md mx-auto w-full">
+                     <div className="relative w-full bg-gray-50/80 rounded-2xl border border-gray-100 p-4 pb-5">
+                        <div className="flex justify-between items-start mb-1 px-2 sm:px-4">
+                           <div className="text-center">
+                              <div className="text-xs font-bold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-4 mb-1">
+                                 Design
+                              </div>
+                              <button
+                                 type="button"
+                                 disabled={!canOpenDriverScoring}
+                                 onClick={() => setShowRingDesignScore(true)}
+                                 className={cn(!canOpenDriverScoring && "cursor-default")}
+                                 data-testid="button-design-score"
+                              >
+                                 <Badge
+                                    variant="outline"
+                                    className={cn(
+                                       "text-[10px] h-5",
+                                       scorePillClass(computedRingDesignScore),
+                                       canOpenDriverScoring && "cursor-pointer hover:opacity-90",
+                                    )}
+                                 >
+                                    {(computedRingDesignScore ?? "—")}/5
+                                 </Badge>
+                              </button>
+                           </div>
+                           <div className="text-center">
+                              <div className="text-xs font-bold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-4 mb-1">
+                                 Conditions
+                              </div>
+                              <button
+                                 type="button"
+                                 disabled={!canOpenDriverScoring}
+                                 onClick={() => setShowRingConditionsScore(true)}
+                                 className={cn(!canOpenDriverScoring && "cursor-default")}
+                                 data-testid="button-conditions-score"
+                              >
+                                 <Badge
+                                    variant="outline"
+                                    className={cn(
+                                       "text-[10px] h-5",
+                                       scorePillClass(computedRingConditionsScore),
+                                       canOpenDriverScoring && "cursor-pointer hover:opacity-90",
+                                    )}
+                                 >
+                                    {(computedRingConditionsScore ?? "—")}/5
+                                 </Badge>
+                              </button>
+                           </div>
+                        </div>
+
+                        <div className="relative h-12 w-full flex justify-center items-center">
+                           <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 48" preserveAspectRatio="none">
+                              <path
+                                 d="M 60 6 L 100 34"
+                                 fill="none"
+                                 stroke={flowConnectorStroke(computedRingDesignScore)}
+                                 strokeWidth="4"
+                                 strokeLinecap="round"
+                                 opacity={0.9}
+                              />
+                              <path
+                                 d="M 140 6 L 100 34"
+                                 fill="none"
+                                 stroke={flowConnectorStroke(computedRingConditionsScore)}
+                                 strokeWidth="4"
+                                 strokeLinecap="round"
+                                 opacity={0.9}
+                              />
+                              <line
+                                 x1="100"
+                                 y1="34"
+                                 x2="100"
+                                 y2="46"
+                                 stroke={flowConnectorStroke(computedRingImplementationScore)}
+                                 strokeWidth="4"
+                                 strokeLinecap="round"
+                                 opacity={0.9}
+                              />
+                           </svg>
+                        </div>
+
+                        <div className="text-center -mt-1 relative z-10">
+                           <div className="text-xs font-bold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-4 mb-1">
+                              Implementation
+                           </div>
+                           <button
+                              type="button"
+                              disabled={!canOpenDriverScoring}
+                              onClick={() => setShowRingImplementationScore(true)}
+                              className={cn(!canOpenDriverScoring && "cursor-default")}
+                              data-testid="button-implementation-score"
+                           >
+                              <Badge
+                                 variant="outline"
+                                 className={cn(
+                                    "text-[10px] h-5",
+                                    scorePillClass(computedRingImplementationScore),
+                                    canOpenDriverScoring && "cursor-pointer hover:opacity-90",
+                                 )}
+                              >
+                                 {(computedRingImplementationScore ?? "—")}/5
+                              </Badge>
+                           </button>
+                        </div>
+
+                        <div className="flex flex-col items-center py-1">
+                           <div
+                              className="w-0.5 h-5 rounded-full shrink-0"
+                              style={{ backgroundColor: flowConnectorStroke(computedRingImplementationScore) }}
+                              aria-hidden
+                           />
+                           <svg
+                              className="-mt-0.5"
+                              width="12"
+                              height="8"
+                              viewBox="0 0 12 8"
+                              fill="none"
+                              aria-hidden
+                           >
+                              <path
+                                 d="M1 1.5L6 6.5L11 1.5"
+                                 stroke={flowConnectorStroke(computedRingImplementationScore)}
+                                 strokeWidth="1.5"
+                                 strokeLinecap="round"
+                                 strokeLinejoin="round"
+                              />
+                           </svg>
+                        </div>
+
+                        <div className="text-center">
+                           <div className="text-xs font-bold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-4 mb-1">
+                              Experience
+                           </div>
+                           <button
+                              type="button"
+                              disabled={!canOpenDriverScoring}
+                              onClick={() => setShowExperienceScore(true)}
+                              className={cn(!canOpenDriverScoring && "cursor-default")}
+                              data-testid="button-experience-score"
+                           >
+                              <Badge
+                                 variant="outline"
+                                 className={cn(
+                                    "text-[10px] h-5",
+                                    scorePillClass(realExperienceScore),
+                                    canOpenDriverScoring && "cursor-pointer hover:opacity-90",
+                                 )}
+                              >
+                                 {(realExperienceScore ?? "—")}/5
+                              </Badge>
+                           </button>
+                        </div>
+                     </div>
+                     <span className="mt-3 block text-center text-[9px] text-gray-400 uppercase tracking-widest">
+                        Performance drivers
+                     </span>
+                  </div>
+
+                  <div className="flex justify-center md:w-36 lg:w-40 shrink-0 md:pt-10 order-3">
+                     <button
+                        type="button"
+                        className="flex flex-col items-center justify-center space-y-2 cursor-pointer group rounded-xl p-3 border border-transparent hover:border-gray-200 hover:bg-slate-50/80 transition-all"
+                        onClick={() => setShowWellbeingOutcomeScore(true)}
+                        data-testid="button-wellbeing-outcome-score"
+                     >
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1 text-center leading-tight">
+                           Wellbeing &amp; conduct
+                        </span>
+                        <div
+                           className={cn(
+                              "relative flex items-center justify-center w-24 h-16 rounded-lg border shadow-sm group-hover:shadow-md transition-all",
+                              realWellbeingOutcomeScore !== null
+                                 ? realWellbeingOutcomeScore >= 4
+                                    ? "bg-emerald-100 border-emerald-200 group-hover:border-emerald-300"
+                                    : realWellbeingOutcomeScore >= 3
+                                      ? "bg-yellow-100 border-yellow-200 group-hover:border-yellow-300"
+                                      : "bg-red-100 border-red-200 group-hover:border-red-300"
+                                 : "bg-gray-100 border-gray-200 group-hover:border-gray-300",
+                           )}
+                        >
+                           <span
+                              className={cn(
+                                 "text-4xl font-bold",
+                                 realWellbeingOutcomeScore !== null
+                                    ? realWellbeingOutcomeScore >= 4
+                                       ? "text-emerald-700"
+                                       : realWellbeingOutcomeScore >= 3
+                                         ? "text-yellow-700"
+                                         : "text-red-700"
+                                    : "text-gray-400",
+                              )}
+                           >
+                              {realWellbeingOutcomeScore !== null ? Math.round(realWellbeingOutcomeScore) : "—"}
+                           </span>
+                        </div>
+                        <span className="text-[9px] text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity font-medium">
+                           Click to score
+                        </span>
+                     </button>
                   </div>
                </div>
-               
-               <div className="absolute top-1/2 left-0 right-0 h-px bg-gray-200 -z-10 hidden md:block border-t border-dashed" />
-               <span className="absolute bottom-0 text-[9px] text-gray-400 bg-white px-2 uppercase tracking-widest translate-y-1/2">Performance Drivers</span>
             </div>
-
-            {/* Right: Outcomes Score (Clickable) */}
-            <button
-               className="md:col-span-3 flex flex-col items-center justify-center space-y-2 cursor-pointer group rounded-xl p-3 -m-3 hover:bg-red-50/50 transition-all"
-               onClick={() => setShowOutcomeScore(true)}
-               data-testid="button-outcome-score"
-            >
-               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1">Outcomes</span>
-               <div className={cn(
-                  "relative flex items-center justify-center w-24 h-16 rounded-lg border shadow-sm group-hover:shadow-md transition-all",
-                  realOutcomeScore !== null
-                    ? realOutcomeScore >= 4 ? "bg-emerald-100 border-emerald-200 group-hover:border-emerald-300" :
-                      realOutcomeScore >= 3 ? "bg-yellow-100 border-yellow-200 group-hover:border-yellow-300" :
-                      "bg-red-100 border-red-200 group-hover:border-red-300"
-                    : "bg-gray-100 border-gray-200 group-hover:border-gray-300"
-               )}>
-                  <span className={cn(
-                    "text-4xl font-bold",
-                    realOutcomeScore !== null
-                      ? realOutcomeScore >= 4 ? "text-emerald-700" :
-                        realOutcomeScore >= 3 ? "text-yellow-700" :
-                        "text-red-700"
-                      : "text-gray-400"
-                  )}>
-                    {realOutcomeScore !== null ? Math.round(realOutcomeScore) : "—"}
-                  </span>
-               </div>
-               <div className="flex items-center text-[10px] text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-full">
-                  {realOutcomeScore === null ? "Not scored yet" : realOutcomeScore >= 4 ? "On Track" : realOutcomeScore >= 3 ? "Moderate" : "Below Target"}
-               </div>
-               <span className="text-[9px] text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity font-medium">Click to score</span>
-            </button>
          </div>
       </section>
 
@@ -849,11 +971,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            {canUseRingDesign ? (
                              <>
                                <div className="space-y-1.5">
-                                 {!designScoreData ? (
-                                   <p className="text-xs text-gray-500 py-1">
-                                     Open design scoring to add measures and sub-dimension weights.
-                                   </p>
-                                 ) : healthSummaryView === "flags" ? (
+                                 {healthSummaryView === "flags" ? (
                                    <ScoreFlags
                                      collapsible={false}
                                      overallScore={computedRingDesignScore}
@@ -902,6 +1020,11 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                    </div>
                                  )}
                                </div>
+                               {!designScoreData && (
+                                 <p className="text-[10px] text-gray-400">
+                                   No measures yet — use View &amp; edit to add scores and weights.
+                                 </p>
+                               )}
                                <button
                                  onClick={() => setShowRingDesignScore(true)}
                                  className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
@@ -1178,11 +1301,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            {canUseRingImplementation ? (
                              <>
                                <div className="space-y-1.5">
-                                 {!implementationScoreData ? (
-                                   <p className="text-xs text-gray-500 py-1">
-                                     Open implementation scoring to add measures and sub-dimension weights.
-                                   </p>
-                                 ) : healthSummaryView === "flags" ? (
+                                 {healthSummaryView === "flags" ? (
                                    <ScoreFlags
                                      collapsible={false}
                                      overallScore={computedRingImplementationScore}
@@ -1231,6 +1350,11 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                    </div>
                                  )}
                                </div>
+                               {!implementationScoreData && (
+                                 <p className="text-[10px] text-gray-400">
+                                   No measures yet — use View &amp; edit to add scores and weights.
+                                 </p>
+                               )}
                                <button
                                  onClick={() => setShowRingImplementationScore(true)}
                                  className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
@@ -1264,6 +1388,109 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                </div>
                              </>
                            )}
+                        </div>
+                     </CollapsibleContent>
+                  </div>
+               </Collapsible>
+
+               {/* Experience — same drill-down as Performance outcomes; lives under Drivers */}
+               <Collapsible className="group" defaultOpen>
+                  <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                     <CollapsibleTrigger className="w-full flex items-center justify-between p-4 text-left">
+                        <div className="flex items-center gap-3">
+                           <div className={cn(
+                              "flex flex-col items-center justify-center w-8 h-8 rounded font-bold text-sm",
+                              realExperienceScore !== null
+                                ? realExperienceScore >= 4 ? "bg-emerald-100 text-emerald-700" :
+                                  realExperienceScore >= 3 ? "bg-yellow-100 text-yellow-700" :
+                                  "bg-red-100 text-red-700"
+                                : "bg-gray-100 text-gray-400"
+                           )}>
+                              {realExperienceScore !== null ? Math.round(realExperienceScore) : "—"}
+                           </div>
+                           <div>
+                              <h4 className="font-semibold text-gray-900 text-sm">Experience Score</h4>
+                              <p className="text-xs text-gray-500">
+                                {experienceTopsHealth.length} experience areas (6 core leaps + school design principles)
+                              </p>
+                           </div>
+                        </div>
+                        <ChevronDown className="w-4 h-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+                     </CollapsibleTrigger>
+                     <CollapsibleContent>
+                        <div className="px-4 pb-4 pt-0 space-y-3">
+                           <Separator />
+                           <div className="space-y-1.5">
+                              {(() => {
+                                if (healthSummaryView === "flags") {
+                                  const items = experienceSubdimensionRows.map((r) => ({
+                                    key: r.key,
+                                    label: r.label,
+                                    score: r.score,
+                                  }));
+                                  return (
+                                    <ScoreFlags
+                                      collapsible={false}
+                                      overallScore={realExperienceScore}
+                                      items={items as any}
+                                      threshold={2}
+                                      maxPerSide={6}
+                                      testId="health-experience-flags"
+                                    />
+                                  );
+                                }
+
+                                return experienceSubdimensionRows.map(({ key, label, weight, score }) => {
+                                  const l2Ids = new Set([key]);
+                                  const tagged = (migratedExperienceData.measures as any[]).filter(
+                                    (m: any) =>
+                                      Array.isArray(m?.subDimensionIds) &&
+                                      m.subDimensionIds.some((id: string) => l2Ids.has(id)),
+                                  );
+                                  const ratedCount = (tagged as any[]).filter((m: any) => {
+                                    const insts: ScoreInstance[] = Array.isArray(m?.instances)
+                                      ? (m.instances as ScoreInstance[])
+                                      : [];
+                                    return insts.length > 0 && effectiveFromInstances(insts, globalFilter).score !== null;
+                                  }).length;
+                                  const scoreLabel = score !== null ? String(score) : "—";
+                                  return (
+                                    <div
+                                      key={key}
+                                      className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0"
+                                      data-testid={`health-experience-dim-${key}`}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <div
+                                          className={cn(
+                                            "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center",
+                                            score !== null
+                                              ? score >= 4
+                                                ? "bg-emerald-100 text-emerald-700"
+                                                : score >= 3
+                                                  ? "bg-yellow-100 text-yellow-700"
+                                                  : "bg-red-100 text-red-700"
+                                              : "bg-gray-100 text-gray-400",
+                                          )}
+                                        >
+                                          {scoreLabel}
+                                        </div>
+                                        <span className="text-xs text-gray-700">
+                                          {label} ({weight}) · {ratedCount} rated
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                });
+                              })()}
+                           </div>
+                           <button
+                              onClick={() => setShowExperienceScore(true)}
+                              className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
+                              data-testid="link-view-experience-details"
+                           >
+                              View & edit experience scores
+                           </button>
                         </div>
                      </CollapsibleContent>
                   </div>
@@ -1310,24 +1537,24 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
             </div>
 
              <div className="space-y-3">
-               {/* Experience Panel - Real Data from healthData */}
+               {/* Learning & advancement outcomes */}
                <Collapsible className="group" defaultOpen>
                   <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
                      <CollapsibleTrigger className="w-full flex items-center justify-between p-4 text-left">
                         <div className="flex items-center gap-3">
                            <div className={cn(
                               "flex flex-col items-center justify-center w-8 h-8 rounded font-bold text-sm",
-                              realExperienceScore !== null
-                                ? realExperienceScore >= 4 ? "bg-emerald-100 text-emerald-700" :
-                                  realExperienceScore >= 3 ? "bg-yellow-100 text-yellow-700" :
+                              realLearningOutcomeScore !== null
+                                ? realLearningOutcomeScore >= 4 ? "bg-emerald-100 text-emerald-700" :
+                                  realLearningOutcomeScore >= 3 ? "bg-yellow-100 text-yellow-700" :
                                   "bg-red-100 text-red-700"
                                 : "bg-gray-100 text-gray-400"
                            )}>
-                              {realExperienceScore !== null ? Math.round(realExperienceScore) : "—"}
+                              {realLearningOutcomeScore !== null ? Math.round(realLearningOutcomeScore) : "—"}
                            </div>
                            <div>
-                              <h4 className="font-semibold text-gray-900 text-sm">Experience Score</h4>
-                              <p className="text-xs text-gray-500">2 dimensions</p>
+                              <h4 className="font-semibold text-gray-900 text-sm">Learning &amp; advancement</h4>
+                              <p className="text-xs text-gray-500">{learningOutcomeDimensionRows.length} dimensions</p>
                            </div>
                         </div>
                         <ChevronDown className="w-4 h-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
@@ -1335,181 +1562,26 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                      <CollapsibleContent>
                         <div className="px-4 pb-4 pt-0 space-y-3">
                            <Separator />
-                           <div className="space-y-1.5">
-                              {(() => {
-                                const aims: any[] = ((comp as any)?.designedExperienceData?.keyDesignElements?.aims || []) as any[];
-                                const leapCount = aims.filter((a) => a?.type === "leap").length;
-                                let leapsWeight = 0;
-                                if (leapCount >= 5) leapsWeight = 0.60;
-                                else if (leapCount >= 3) leapsWeight = 0.50;
-                                else if (leapCount >= 1) leapsWeight = 0.40;
-                                const remaining = 1.0 - leapsWeight;
-                                const base = { leaps: leapsWeight, health: remaining / 2, behavior: remaining / 2 };
-
-                                const leapsScore = (experienceScoreData as any)?.leapsDimensionScore ?? null;
-                                const healthScore = (experienceScoreData as any)?.healthDimensionScore ?? null;
-                                const behaviorScore = (experienceScoreData as any)?.behaviorDimensionScore ?? null;
-                                const hasLeaps = leapsScore !== null;
-                                const hasHealth = healthScore !== null;
-                                const hasBehavior = behaviorScore !== null;
-
-                                const scored3 = [
-                                  { key: "leaps", weight: base.leaps, scored: hasLeaps },
-                                  { key: "health", weight: base.health, scored: hasHealth },
-                                  { key: "behavior", weight: base.behavior, scored: hasBehavior },
-                                ];
-                                const scored3Count = scored3.filter((d) => d.scored).length;
-                                const missing3 = scored3.filter((d) => !d.scored).reduce((s, d) => s + d.weight, 0);
-                                const redist3 = scored3Count > 0 ? missing3 / scored3Count : 0;
-                                const adjusted3 = {
-                                  leaps: hasLeaps ? base.leaps + redist3 : 0,
-                                  health: hasHealth ? base.health + redist3 : 0,
-                                  behavior: hasBehavior ? base.behavior + redist3 : 0,
-                                };
-
-                                const dims = [
-                                  { key: "leaps" as const, name: "Core Experience Tenants", dim: experienceDimensions.leaps, score: leapsScore },
-                                  {
-                                    key: "emergent" as const,
-                                    name: "Emergent States",
-                                    dim: { measures: [ ...(experienceDimensions.health?.measures || []), ...(experienceDimensions.behavior?.measures || []) ] },
-                                    score: experienceEmergentDimensionScore,
-                                  },
-                                ];
-
-                                const scored = dims.map((d) => {
-                                  const hasScore = d.key === "leaps" ? hasLeaps : (hasHealth || hasBehavior);
-                                  return { ...d, excluded: !hasScore, hasScore };
-                                });
-
-                                const adjusted: Record<string, number> = {
-                                  leaps: adjusted3.leaps,
-                                  emergent: adjusted3.health + adjusted3.behavior,
-                                };
-
-                                if (healthSummaryView === "flags") {
-                                  const leapsMode = String((experienceScoreData as any)?.leapsScoringMode || "across");
-                                  const leapItems =
-                                    leapsMode === "individual"
-                                      ? (((experienceScoreData as any)?.leapItems || []) as any[]).map((li: any) => ({
-                                          key: `leap:${String(li?.id || Math.random())}`,
-                                          label: String(li?.label || "Leap"),
-                                          score: effectiveFromInstances((li?.instances || []) as any, globalFilter).score,
-                                        }))
-                                      : [];
-                                  const items = [
-                                    ...leapItems,
-                                    { key: "dim:emergent", label: "Emergent States", score: experienceEmergentDimensionScore },
-                                  ];
-
-                                  return (
-                                    <ScoreFlags
-                                      collapsible={false}
-                                      overallScore={realExperienceScore}
-                                      items={items as any}
-                                      threshold={2}
-                                      maxPerSide={6}
-                                      testId="health-experience-flags"
-                                    />
-                                  );
-                                }
-
-                                return scored.map(({ key, name, dim, score }) => {
-                                const ratedCount = isOverall
-                                  ? (() => {
-                                      const insts: ScoreInstance[] = Array.isArray((dim as any)?.instances) ? ((dim as any).instances as ScoreInstance[]) : [];
-                                      return insts.filter((i: any) => effectiveFromInstances([i] as any, globalFilter).score !== null).length;
-                                    })()
-                                  : (() => {
-                                      const measures = (dim as any)?.measures || [];
-                                      return (measures as any[]).filter((m: any) => {
-                                        const insts: ScoreInstance[] = Array.isArray(m?.instances) ? (m.instances as ScoreInstance[]) : [];
-                                        const eff = insts.length > 0 ? effectiveFromInstances(insts, globalFilter).score : null;
-                                        return eff !== null;
-                                      }).length;
-                                    })();
-                                const scoreLabel = score !== null ? String(Math.max(1, Math.min(5, Math.round(score)))) : "—";
-                                const wtLabel = `${Math.round((adjusted as any)[key] * 100)}%`;
-                                return (
-                                  <div key={key} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid={`health-experience-dim-${key}`}>
-                                    <div className="flex items-center gap-2">
-                                      <div className={cn(
-                                        "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center",
-                                        score !== null
-                                          ? score >= 4 ? "bg-emerald-100 text-emerald-700" :
-                                            score >= 3 ? "bg-yellow-100 text-yellow-700" :
-                                            "bg-red-100 text-red-700"
-                                          : "bg-gray-100 text-gray-400"
-                                      )}>
-                                        {scoreLabel}
-                                      </div>
-                                      <span className="text-xs text-gray-700">{name} ({wtLabel})</span>
-                                    </div>
-                                  </div>
-                                );
-                              });
-                              })()}
-                           </div>
-                           <button
-                              onClick={() => setShowExperienceScore(true)}
-                              className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
-                              data-testid="link-view-experience-details"
-                           >
-                              View & edit experience scores
-                           </button>
-                        </div>
-                     </CollapsibleContent>
-                  </div>
-               </Collapsible>
-
-               {/* Outcomes Panel - Real Data from healthData */}
-               <Collapsible className="group" defaultOpen>
-                  <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
-                     <CollapsibleTrigger className="w-full flex items-center justify-between p-4 text-left">
-                        <div className="flex items-center gap-3">
-                           <div className={cn(
-                              "flex flex-col items-center justify-center w-8 h-8 rounded font-bold text-sm",
-                              realOutcomeScore !== null
-                                ? realOutcomeScore >= 4 ? "bg-emerald-100 text-emerald-700" :
-                                  realOutcomeScore >= 3 ? "bg-yellow-100 text-yellow-700" :
-                                  "bg-red-100 text-red-700"
-                                : "bg-gray-100 text-gray-400"
-                           )}>
-                              {realOutcomeScore !== null ? Math.round(realOutcomeScore) : "—"}
-                           </div>
-                           <div>
-                              <h4 className="font-semibold text-gray-900 text-sm">Outcomes Score</h4>
-                              <p className="text-xs text-gray-500">{outcomeDimensionRows.length} dimensions</p>
-                           </div>
-                        </div>
-                        <ChevronDown className="w-4 h-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
-                     </CollapsibleTrigger>
-                     <CollapsibleContent>
-                        <div className="px-4 pb-4 pt-0 space-y-3">
-                           <Separator />
-                           {outcomeDimensionRows.every((r) => r.score === null) ? (
-                              <div className="text-xs text-gray-400 italic py-2">No outcomes scored yet. Click the Outcomes box above to add and score outcomes.</div>
-                           ) : (
-                             healthSummaryView === "flags" ? (
+                           {healthSummaryView === "flags" ? (
                                <ScoreFlags
                                  collapsible={false}
-                                 overallScore={realOutcomeScore}
-                                items={outcomeDimensionRows.map((row) => ({
+                                 overallScore={realLearningOutcomeScore}
+                                items={learningOutcomeDimensionRows.map((row) => ({
                                   key: row.key,
                                   label: row.label,
                                   score: row.score,
                                 }))}
                                  threshold={2}
-                                 testId="health-outcomes-flags"
+                                 testId="health-outcomes-learning-flags"
                                />
                              ) : (
                                <div className="space-y-1.5">
-                                {outcomeDimensionRows.map((o: any) => {
+                                {learningOutcomeDimensionRows.map((o: any) => {
                                   const score = o.score ?? null;
                                   const name = `${o.label || "Dimension"} (${o.count ?? 0})`;
                                    const scoreLabel = score !== null ? String(Math.max(1, Math.min(5, Math.round(score)))) : "—";
                                    return (
-                                    <div key={o.key} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid={`health-outcome-row-${o.key}`}>
+                                    <div key={o.key} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid={`health-outcome-learning-row-${o.key}`}>
                                        <div className="flex items-center gap-2 min-w-0">
                                          <div
                                            className={cn(
@@ -1530,14 +1602,103 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                    );
                                  })}
                                </div>
-                             )
-                           )}
+                             )}
+                           {learningOutcomeDimensionRows.length > 0 &&
+                             learningOutcomeDimensionRows.every((r) => r.score === null) && (
+                               <p className="text-[10px] text-gray-400 pt-1">
+                                 No scores for this period yet — open the editor to add measures.
+                               </p>
+                             )}
                            <button
-                              onClick={() => setShowOutcomeScore(true)}
+                              onClick={() => setShowLearningOutcomeScore(true)}
                               className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
-                              data-testid="link-view-outcome-details"
+                              data-testid="link-view-learning-outcome-details"
                            >
-                              View & edit outcome scores
+                              View &amp; edit learning outcomes
+                           </button>
+                        </div>
+                     </CollapsibleContent>
+                  </div>
+               </Collapsible>
+
+               {/* Wellbeing & conduct outcomes */}
+               <Collapsible className="group" defaultOpen>
+                  <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                     <CollapsibleTrigger className="w-full flex items-center justify-between p-4 text-left">
+                        <div className="flex items-center gap-3">
+                           <div className={cn(
+                              "flex flex-col items-center justify-center w-8 h-8 rounded font-bold text-sm",
+                              realWellbeingOutcomeScore !== null
+                                ? realWellbeingOutcomeScore >= 4 ? "bg-emerald-100 text-emerald-700" :
+                                  realWellbeingOutcomeScore >= 3 ? "bg-yellow-100 text-yellow-700" :
+                                  "bg-red-100 text-red-700"
+                                : "bg-gray-100 text-gray-400"
+                           )}>
+                              {realWellbeingOutcomeScore !== null ? Math.round(realWellbeingOutcomeScore) : "—"}
+                           </div>
+                           <div>
+                              <h4 className="font-semibold text-gray-900 text-sm">Wellbeing &amp; conduct</h4>
+                              <p className="text-xs text-gray-500">{wellbeingOutcomeDimensionRows.length} dimensions</p>
+                           </div>
+                        </div>
+                        <ChevronDown className="w-4 h-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+                     </CollapsibleTrigger>
+                     <CollapsibleContent>
+                        <div className="px-4 pb-4 pt-0 space-y-3">
+                           <Separator />
+                           {healthSummaryView === "flags" ? (
+                               <ScoreFlags
+                                 collapsible={false}
+                                 overallScore={realWellbeingOutcomeScore}
+                                items={wellbeingOutcomeDimensionRows.map((row) => ({
+                                  key: row.key,
+                                  label: row.label,
+                                  score: row.score,
+                                }))}
+                                 threshold={2}
+                                 testId="health-outcomes-wellbeing-flags"
+                               />
+                             ) : (
+                               <div className="space-y-1.5">
+                                {wellbeingOutcomeDimensionRows.map((o: any) => {
+                                  const score = o.score ?? null;
+                                  const name = `${o.label || "Dimension"} (${o.count ?? 0})`;
+                                   const scoreLabel = score !== null ? String(Math.max(1, Math.min(5, Math.round(score)))) : "—";
+                                   return (
+                                    <div key={o.key} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0" data-testid={`health-outcome-wellbeing-row-${o.key}`}>
+                                       <div className="flex items-center gap-2 min-w-0">
+                                         <div
+                                           className={cn(
+                                             "w-6 h-6 rounded text-[10px] font-bold flex items-center justify-center shrink-0",
+                                             score !== null
+                                               ? score >= 4 ? "bg-emerald-100 text-emerald-700" :
+                                                 score >= 3 ? "bg-yellow-100 text-yellow-700" :
+                                                 "bg-red-100 text-red-700"
+                                               : "bg-gray-100 text-gray-400"
+                                           )}
+                                         >
+                                           {scoreLabel}
+                                         </div>
+                                        <span className="text-xs text-gray-700 truncate">{name}</span>
+                                       </div>
+                                       <div className="flex items-center gap-2 shrink-0" />
+                                     </div>
+                                   );
+                                 })}
+                               </div>
+                             )}
+                           {wellbeingOutcomeDimensionRows.length > 0 &&
+                             wellbeingOutcomeDimensionRows.every((r) => r.score === null) && (
+                               <p className="text-[10px] text-gray-400 pt-1">
+                                 No scores for this period yet — open the editor to add measures.
+                               </p>
+                             )}
+                           <button
+                              onClick={() => setShowWellbeingOutcomeScore(true)}
+                              className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
+                              data-testid="link-view-wellbeing-outcome-details"
+                           >
+                              View &amp; edit wellbeing &amp; conduct
                            </button>
                         </div>
                      </CollapsibleContent>

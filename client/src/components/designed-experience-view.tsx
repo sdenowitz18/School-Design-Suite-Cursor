@@ -92,6 +92,7 @@ import {
 } from "./targeting-rollup-utils";
 import { isAdultRingComponent, isLearnerRingComponent } from "@/lib/ring-experience-audience";
 import { scheduleMigrateLegacyOverallAdultSubcomponents } from "@/lib/legacy-overall-adult-subs-migration";
+import { isTargetingAimActive, leapAimUsesSoftDeselect } from "@shared/aim-selection";
 
 import artifactDoc from "@/assets/images/artifact-doc.png";
 import artifactSlide from "@/assets/images/artifact-slide.png";
@@ -390,29 +391,89 @@ function KeyDesignElementsSummary({
   const keyPractices = practices.filter(p => !!p.isKey);
   const keySupports = supports.filter(s => !!s.isKey);
 
-  const aimLabels = aims.map(a => a.label);
+  const aimLabels = aims.filter((a) => isTargetingAimActive(a as any)).map((a) => a.label);
   const practiceLabels = practices.map(p => p.label);
   const supportLabels = supports.map(s => s.label);
 
   const current = { aims, practices, supports };
 
   const toggleAim = (label: string, type: TagType) => {
-    const exists = aims.some(a => a.label === label);
-    if (exists) {
-      onChange({ ...current, aims: aims.filter(a => a.label !== label) });
+    const aim = aims.find(
+      (a) => String(a.label || "").trim().toLowerCase() === String(label || "").trim().toLowerCase() && a.type === type,
+    );
+    if (aim) {
+      if (type === "leap" && leapAimUsesSoftDeselect(aim as any)) {
+        if ((aim as any).selected === false) {
+          onChange({
+            ...current,
+            aims: aims.map((a) =>
+              String(a.label || "").trim().toLowerCase() === String(label || "").trim().toLowerCase() && a.type === "leap"
+                ? ({
+                    ...a,
+                    selected: true,
+                    overrideLevel: (a as any).overrideLevel || "M",
+                    level: (a as any).level || "Medium",
+                    levelMode: "override",
+                  } as any)
+                : a,
+            ),
+          });
+        } else {
+          onChange({
+            ...current,
+            aims: aims.map((a) =>
+              String(a.label || "").trim().toLowerCase() === String(label || "").trim().toLowerCase() && a.type === "leap"
+                ? ({ ...a, selected: false } as any)
+                : a,
+            ),
+          });
+        }
+      } else {
+        onChange({
+          ...current,
+          aims: aims.filter(
+            (a) =>
+              !(String(a.label || "").trim().toLowerCase() === String(label || "").trim().toLowerCase() && a.type === type),
+          ),
+        });
+      }
     } else {
+      const isNewUserLeap = type === "leap" && leapAimUsesSoftDeselect({ type: "leap", label } as any);
       onChange({
         ...current,
         aims: [
           ...aims,
-          { id: generateId(), type, label, level: null, levelMode: "auto", overrideLevel: null } as any,
+          {
+            id: generateId(),
+            type,
+            label,
+            level: "Medium",
+            levelMode: "override",
+            overrideLevel: "M",
+            ...(isNewUserLeap ? { isCustom: true } : {}),
+          } as any,
         ],
       });
     }
   };
 
   const removeAim = (label: string) => {
-    onChange({ ...current, aims: aims.filter(a => a.label !== label) });
+    const aim = aims.find((a) => String(a.label || "").trim().toLowerCase() === String(label || "").trim().toLowerCase());
+    if (aim?.type === "leap" && leapAimUsesSoftDeselect(aim as any)) {
+      onChange({
+        ...current,
+        aims: aims.map((a) =>
+          String(a.label || "").trim().toLowerCase() === String(label || "").trim().toLowerCase() && a.type === "leap"
+            ? ({ ...a, selected: false } as any)
+            : a,
+        ),
+      });
+    } else {
+      onChange({
+        ...current,
+        aims: aims.filter((a) => String(a.label || "").trim().toLowerCase() !== String(label || "").trim().toLowerCase()),
+      });
+    }
   };
 
   const togglePractice = (label: string) => {
@@ -516,8 +577,8 @@ function KeyDesignElementsSummary({
           label: scenario.label,
           level: rollupPriorityToLevel(scenario.resolvedLevel || scenario.computedLevel || "M"),
           computedLevel: scenario.computedLevel,
-          levelMode: "auto",
-          overrideLevel: null,
+          levelMode: "override",
+          overrideLevel: scenario.resolvedLevel || scenario.computedLevel || "M",
         } as any,
       ],
     });
@@ -1332,7 +1393,14 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   }, [portraitOfGraduate]);
 
   if (showOutcomeScore) {
-    return <OutcomeScoreView nodeId={nodeId} title={title} onBack={() => setShowOutcomeScore(false)} />;
+    return (
+      <OutcomeScoreView
+        nodeId={nodeId}
+        title={title}
+        variant="learningAdvancement"
+        onBack={() => setShowOutcomeScore(false)}
+      />
+    );
   }
 
   if (selectedOutcomeLabel) {

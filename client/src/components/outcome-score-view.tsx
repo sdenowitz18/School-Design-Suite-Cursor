@@ -54,9 +54,11 @@ import ScoreFilterBar from "./score-filter-bar";
 import ScoreFlags from "./score-flags";
 import { useGlobalActors } from "@/lib/actors-store";
 import {
-  OUTCOME_SUBDIMENSION_TREE,
-  getL1ById,
-  allL2Ids,
+  LEARNING_ADVANCEMENT_OUTCOME_TREE,
+  WELLBEING_CONDUCT_OUTCOME_TREE,
+  allL2IdsFromTree,
+  getL1ByIdInTree,
+  buildAllL2OptionsFromTree,
   type OutcomeSubDimL1,
   type OutcomeSubDimL2,
 } from "@shared/outcome-subdimension-tree";
@@ -75,6 +77,31 @@ import {
   type DeltaDirection,
 } from "@shared/outcome-score-calc";
 import { IMPLEMENTATION_MEASURE_WEIGHT_VALUES } from "@shared/implementation-score-calc";
+
+export type OutcomeScoreVariant = "learningAdvancement" | "wellbeingConduct";
+
+const OUTCOME_VARIANT_CONFIG: Record<
+  OutcomeScoreVariant,
+  {
+    healthDataKey: string;
+    tree: OutcomeSubDimL1[];
+    scoreTitle: string;
+    dashboardHeading: string;
+  }
+> = {
+  learningAdvancement: {
+    healthDataKey: "learningAdvancementOutcomeScoreData",
+    tree: LEARNING_ADVANCEMENT_OUTCOME_TREE,
+    scoreTitle: "Learning & advancement outcomes",
+    dashboardHeading: "Learning & advancement outcome score",
+  },
+  wellbeingConduct: {
+    healthDataKey: "wellbeingConductOutcomeScoreData",
+    tree: WELLBEING_CONDUCT_OUTCOME_TREE,
+    scoreTitle: "Wellbeing & conduct outcomes",
+    dashboardHeading: "Wellbeing & conduct outcome score",
+  },
+};
 
 function generateId() {
   return Math.random().toString(36).substring(2, 10);
@@ -360,7 +387,7 @@ export function OutcomeMeasureCard({
   const mWeightDisplay = isImpStyle
     ? String(IMPLEMENTATION_MEASURE_WEIGHT_VALUES[imp])
     : computedWeightDisplay(measure);
-  const tagTree = dimensionTagTree ?? OUTCOME_SUBDIMENSION_TREE;
+  const tagTree = dimensionTagTree ?? LEARNING_ADVANCEMENT_OUTCOME_TREE;
   const overallTagLabel =
     measureScoringMode === "implementation"
       ? "Overall"
@@ -1838,6 +1865,8 @@ export function AddMeasurePanel({
 
 function L2SubDimensionPage({
   l1,
+  subdimensionTree,
+  parentScoreTitle,
   measures,
   overallMeasures,
   subDimensionWeights,
@@ -1851,6 +1880,8 @@ function L2SubDimensionPage({
   onBack,
 }: {
   l1: OutcomeSubDimL1;
+  subdimensionTree: OutcomeSubDimL1[];
+  parentScoreTitle: string;
   measures: OutcomeMeasure[];
   overallMeasures: OutcomeMeasure[];
   subDimensionWeights: Record<string, "H" | "M" | "L">;
@@ -1895,17 +1926,13 @@ function L2SubDimensionPage({
     return measuresForL1.filter((m) => (m.subDimensionIds || []).includes(filterL2Id));
   }, [measuresForL1, filterL2Id]);
 
-  const allL2s = useMemo(() => {
-    const out: { id: string; label: string }[] = [];
-    for (const l of OUTCOME_SUBDIMENSION_TREE) for (const c of l.children) out.push({ id: c.id, label: c.label });
-    return out;
-  }, []);
+  const allL2s = useMemo(() => buildAllL2OptionsFromTree(subdimensionTree), [subdimensionTree]);
 
   return (
     <div className="space-y-4">
       <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
         <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to Outcome Score
+        Back to {parentScoreTitle}
       </button>
 
       {/* Score dashboard – matches L1 page layout */}
@@ -1998,7 +2025,7 @@ function L2SubDimensionPage({
         </div>
         {addPanelType !== null && (
           <AddMeasurePanel
-            l2Options={OUTCOME_SUBDIMENSION_TREE}
+            l2Options={subdimensionTree}
             defaultL2Ids={[filterL2Id || l1.children[0]?.id].filter(Boolean)}
             measureType={addPanelType}
             onAdd={(m) => { onAddMeasure(m); setAddPanelType(null); }}
@@ -2021,6 +2048,7 @@ function L2SubDimensionPage({
               filter={filter}
               allL2s={allL2s}
               subDimensionWeights={subDimensionWeights}
+              dimensionTagTree={subdimensionTree}
             />
           ))
         )}
@@ -2037,9 +2065,19 @@ interface OutcomeScoreViewProps {
   onBack: () => void;
   sourceFilter?: ScoreFilter;
   onFilterChange?: (next: ScoreFilter) => void;
+  /** Which healthData outcome bucket and subdimension tree to use. */
+  variant?: OutcomeScoreVariant;
 }
 
-export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, onFilterChange }: OutcomeScoreViewProps) {
+export default function OutcomeScoreView({
+  nodeId,
+  title,
+  onBack,
+  sourceFilter,
+  onFilterChange,
+  variant = "learningAdvancement",
+}: OutcomeScoreViewProps) {
+  const outCfg = OUTCOME_VARIANT_CONFIG[variant];
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2098,7 +2136,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
   useEffect(() => {
     if (comp && !initialized) {
       const hd: any = comp.healthData || {};
-      const osd: Partial<OutcomeScoreData> = hd.outcomeScoreData || {};
+      const osd: Partial<OutcomeScoreData> = hd[outCfg.healthDataKey] || {};
       setActors(Array.isArray(osd.actors) ? (osd.actors as string[]) : []);
       const saved: any = osd.filter || {};
       setFilter(
@@ -2106,7 +2144,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
           ? (saved as any)
           : ({ mode: "year", yearKey: listSelectableYearKeys(new Date(), 5)[0] } as any),
       );
-      const validL2 = new Set(allL2Ids());
+      const validL2 = new Set(allL2IdsFromTree(outCfg.tree));
       const rawMeasures = Array.isArray(osd.measures) ? (osd.measures as OutcomeMeasure[]) : [];
       setMeasures(rawMeasures.filter((m) => {
         const ids = m.subDimensionIds || [];
@@ -2116,12 +2154,12 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
       setSubDimensionWeights(osd.subDimensionWeights && typeof osd.subDimensionWeights === "object" ? (osd.subDimensionWeights as any) : {});
       setInitialized(true);
     }
-  }, [comp, initialized, setFilter]);
+  }, [comp, initialized, setFilter, outCfg.healthDataKey, outCfg.tree]);
 
   // Compute final score using instance date-based filtering
   const finalScore = useMemo(
-    () => calcOverallOutcomeScore(measures, overallMeasures, subDimensionWeights, filter),
-    [measures, overallMeasures, subDimensionWeights, filter],
+    () => calcOverallOutcomeScore(measures, overallMeasures, subDimensionWeights, filter, outCfg.tree),
+    [measures, overallMeasures, subDimensionWeights, filter, outCfg.tree],
   );
 
   // Autosave
@@ -2131,13 +2169,13 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const existing: any = compRef.current?.healthData || {};
-      const existingOsd: any = existing.outcomeScoreData || {};
+      const existingOsd: any = existing[outCfg.healthDataKey] || {};
       updateMutation.mutate({
         nodeId: nid,
         data: {
           healthData: {
             ...existing,
-            outcomeScoreData: {
+            [outCfg.healthDataKey]: {
               ...existingOsd,
               actors,
               filter,
@@ -2150,7 +2188,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
         },
       });
     }, 800);
-  }, [nodeId, actors, filter, measures, overallMeasures, subDimensionWeights, finalScore, updateMutation]);
+  }, [nodeId, actors, filter, measures, overallMeasures, subDimensionWeights, finalScore, updateMutation, outCfg.healthDataKey]);
 
   useEffect(() => {
     if (initialized) doSave();
@@ -2178,11 +2216,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
     return out;
   }, [actors, globalActors, measures, overallMeasures]);
 
-  const allL2s = useMemo(() => {
-    const out: { id: string; label: string }[] = [];
-    for (const l of OUTCOME_SUBDIMENSION_TREE) for (const c of l.children) out.push({ id: c.id, label: c.label });
-    return out;
-  }, []);
+  const allL2s = useMemo(() => buildAllL2OptionsFromTree(outCfg.tree), [outCfg.tree]);
 
   // Measure CRUD
   const deleteMeasure = useCallback((id: string) => {
@@ -2231,15 +2265,15 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
     // crossOutcome measures live under "Overall Outcome Dimension Measures", not here
     const subdimOnly = measures.filter((m) => !(m as any).crossOutcome);
     if (!filterL1Id) return subdimOnly;
-    const l1 = OUTCOME_SUBDIMENSION_TREE.find((l) => l.id === filterL1Id);
+    const l1 = getL1ByIdInTree(outCfg.tree, filterL1Id);
     if (!l1) return subdimOnly;
     const l2Ids = new Set(l1.children.map((c) => c.id));
     return subdimOnly.filter((m) => (m.subDimensionIds || []).some((id) => l2Ids.has(id)));
-  }, [measures, filterL1Id]);
+  }, [measures, filterL1Id, outCfg.tree]);
 
   // ── L2 Page ──
   if (selectedL1Id) {
-    const l1 = getL1ById(selectedL1Id);
+    const l1 = getL1ByIdInTree(outCfg.tree, selectedL1Id);
     if (!l1) {
       setSelectedL1Id(null);
       return null;
@@ -2249,6 +2283,8 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
         <ScoreFilterBar filter={filter} onChange={setFilter as any} actors={actorOptions} testId="outcome-filter-bar" />
         <L2SubDimensionPage
           l1={l1}
+          subdimensionTree={outCfg.tree}
+          parentScoreTitle={outCfg.scoreTitle}
           measures={measures}
           overallMeasures={overallMeasures}
           subDimensionWeights={subDimensionWeights}
@@ -2266,7 +2302,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
   }
 
   // ── L1 Page ──
-  const l1Rows = OUTCOME_SUBDIMENSION_TREE.map((l1) => {
+  const l1Rows = outCfg.tree.map((l1) => {
     const l2Ids = new Set(l1.children.map((c) => c.id));
     const tagged = measures.filter((m) => !(m as any).crossOutcome && (m.subDimensionIds || []).some((id) => l2Ids.has(id)));
     const flagItems = collectInstanceFlagItems(tagged, filter);
@@ -2298,7 +2334,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="space-y-1">
-              <h2 className="text-xl font-serif font-bold text-gray-900">Outcome Score</h2>
+              <h2 className="text-xl font-serif font-bold text-gray-900">{outCfg.dashboardHeading}</h2>
               <p className="text-sm text-gray-500">{title}</p>
             </div>
             <div className="text-right space-y-1">
@@ -2317,7 +2353,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
                   <ScoreChip score={finalScore} size="lg" />
                 </div>
               </div>
-              <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Outcome Score</p>
+              <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">{outCfg.scoreTitle}</p>
             </div>
           </div>
 
@@ -2343,7 +2379,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
             const flagMeasures = filterL1Id
               ? measures.filter((m) =>
                   (m.subDimensionIds || []).some((id) =>
-                    OUTCOME_SUBDIMENSION_TREE.find((l) => l.id === filterL1Id)?.children.map((c) => c.id).includes(id)
+                    getL1ByIdInTree(outCfg.tree, filterL1Id)?.children.map((c) => c.id).includes(id)
                   )
                 )
               : [...measures, ...overallMeasures];
@@ -2390,7 +2426,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
 
         {addOverallType !== null && (
           <AddMeasurePanel
-            l2Options={OUTCOME_SUBDIMENSION_TREE}
+            l2Options={outCfg.tree}
             measureType={addOverallType}
             onAdd={(m) => {
               const isOverall = !m.subDimensionIds || m.subDimensionIds.length === 0;
@@ -2419,6 +2455,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
               filter={filter}
               allL2s={allL2s}
               subDimensionWeights={subDimensionWeights}
+              dimensionTagTree={outCfg.tree}
             />
           ))
         )}
@@ -2449,9 +2486,9 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
 
         {addSubdimType !== null && (
           <AddMeasurePanel
-            l2Options={OUTCOME_SUBDIMENSION_TREE}
+            l2Options={outCfg.tree}
             measureType={addSubdimType}
-            defaultL2Ids={filterL1Id ? OUTCOME_SUBDIMENSION_TREE.find((l) => l.id === filterL1Id)?.children.map((c) => c.id) : undefined}
+            defaultL2Ids={filterL1Id ? getL1ByIdInTree(outCfg.tree, filterL1Id)?.children.map((c) => c.id) : undefined}
             onAdd={(m) => {
               const isOverall = !m.subDimensionIds || m.subDimensionIds.length === 0;
               if (isOverall) addOverallMeasure(m);
@@ -2491,6 +2528,7 @@ export default function OutcomeScoreView({ nodeId, title, onBack, sourceFilter, 
               filter={filter}
               allL2s={allL2s}
               subDimensionWeights={subDimensionWeights}
+              dimensionTagTree={outCfg.tree}
             />
           ))
         )}

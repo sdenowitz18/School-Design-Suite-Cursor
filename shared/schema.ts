@@ -288,6 +288,7 @@ export const targetedOutcomeSchema = z.object({
 
 export type TargetedOutcome = z.infer<typeof targetedOutcomeSchema>;
 
+/** Shared shape for `learningAdvancementOutcomeScoreData` and `wellbeingConductOutcomeScoreData` on healthData. */
 export const outcomeScoreDataSchema = z.object({
   actors: z.array(z.string()).default([]),
   filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
@@ -303,9 +304,13 @@ export const outcomeScoreDataSchema = z.object({
       }),
     )
     .default({}),
+  scoringMode: z.enum(["targeted", "overall"]).optional(),
+  targetedOutcomes: z.array(targetedOutcomeSchema).optional(),
+  overallInstances: z.array(scoreInstanceSchema).optional(),
 });
 
 export type OutcomeScoreData = z.infer<typeof outcomeScoreDataSchema>;
+export type OutcomeBucketScoreData = OutcomeScoreData;
 
 export const implementationScoreDataSchema = z.object({
   actors: z.array(z.string()).default([]),
@@ -355,30 +360,23 @@ export type ExperienceDimension = z.infer<typeof experienceDimensionSchema>;
 
 export const experienceScoreDataSchema = z.object({
   scoringMode: z.enum(["dimensions", "overall"]).default("dimensions"),
-  leapsScoringMode: z.enum(["across", "individual"]).default("across"),
   actors: z.array(z.string()).default([]),
   filter: scoreFilterSchema.default({ mode: "none", aggregation: "singleLatest" }),
-  canonicalTree: scoreTreeSchema.optional(),
-  leaps: experienceDimensionSchema.default({ measures: [], excluded: false }),
-  health: experienceDimensionSchema.default({ measures: [], excluded: false }),
-  behavior: experienceDimensionSchema.default({ measures: [], excluded: false }),
-  leapItems: z
-    .array(
-      z.object({
-        id: z.string(),
-        label: z.string(),
-        weight: z.enum(["H", "M", "L"]).default("M"),
-        instances: z.array(scoreInstanceSchema).default([]),
-        measures: z.array(measureSchema).default([]),
-      }),
-    )
-    .default([]),
-  overallInstances: z.array(scoreInstanceSchema).default([]),
-  overallMeasures: z.array(measureSchema).default([]),
-  leapsDimensionScore: z.number().nullable().default(null),
-  healthDimensionScore: z.number().nullable().default(null),
-  behaviorDimensionScore: z.number().nullable().default(null),
+  subDimensionWeights: z.record(z.string(), z.enum(["H", "M", "L"])).default({}),
+  measures: z.array(outcomeMeasureSchema).default([]),
+  overallMeasures: z.array(outcomeMeasureSchema).default([]),
   finalExperienceScore: z.number().nullable().default(null),
+  /** Legacy fields (pre–flat model). Ignored when `measures` is present. */
+  leapsScoringMode: z.enum(["across", "individual"]).optional(),
+  canonicalTree: scoreTreeSchema.optional(),
+  leaps: experienceDimensionSchema.optional(),
+  health: experienceDimensionSchema.optional(),
+  behavior: experienceDimensionSchema.optional(),
+  leapItems: z.array(z.any()).optional(),
+  overallInstances: z.array(scoreInstanceSchema).optional(),
+  leapsDimensionScore: z.number().nullable().optional(),
+  healthDimensionScore: z.number().nullable().optional(),
+  behaviorDimensionScore: z.number().nullable().optional(),
 });
 
 export type ExperienceScoreData = z.infer<typeof experienceScoreDataSchema>;

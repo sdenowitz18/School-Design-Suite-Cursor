@@ -1,5 +1,5 @@
 import type { OutcomeMeasure, OutcomePeriodSnapshot, ScoreFilter, ScoreInstance } from "./schema";
-import { OUTCOME_SUBDIMENSION_TREE, type OutcomeSubDimL1 } from "./outcome-subdimension-tree";
+import type { OutcomeSubDimL1 } from "./outcome-subdimension-tree";
 import { computeMeasureWeightNumeric, OUTCOME_WEIGHT_VALUES, effectiveFromInstances, effectiveInstanceBreakdown } from "./score-instances";
 
 const W = OUTCOME_WEIGHT_VALUES;
@@ -106,6 +106,7 @@ export function calcOverallOutcomeScore(
   overallMeasures: OutcomeMeasure[],
   subDimensionWeights: Record<string, "H" | "M" | "L">,
   filter: ScoreFilter | any,
+  tree: OutcomeSubDimL1[],
 ): number | null {
   const pool: { score: number; weight: number }[] = [];
 
@@ -114,7 +115,7 @@ export function calcOverallOutcomeScore(
   );
   const allMeasures = taggedOverall.length > 0 ? [...measures, ...taggedOverall] : measures;
 
-  for (const l1 of OUTCOME_SUBDIMENSION_TREE) {
+  for (const l1 of tree) {
     for (const l2 of l1.children) {
       const score = calcL2Score(l2.id, allMeasures, filter);
       if (score !== null) {

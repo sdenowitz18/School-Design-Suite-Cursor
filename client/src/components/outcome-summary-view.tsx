@@ -5,8 +5,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
+import { outcomeHealthBucketForLabel } from "@/lib/outcome-health-bucket";
 import { OUTCOME_SCHEMA } from "./designed-experience-schemas";
 import OutcomeDetailView from "./outcome-detail-view";
 import OutcomesLearnMoreView from "./outcomes-learn-more-view";
@@ -15,6 +22,66 @@ import { normOutcomeKey } from "./outcomes-utils";
 
 function norm(s: string) {
   return (s || "").trim().toLowerCase();
+}
+
+function aimPriorityFields(p: "H" | "M" | "L") {
+  return {
+    overrideLevel: p,
+    levelMode: "override" as const,
+    level: p === "H" ? "High" : p === "M" ? "Medium" : "Low",
+  };
+}
+
+function subHasL2WholeOutcome(sub: any, l2Name: string): boolean {
+  const aims = Array.isArray(sub?.aims) ? sub.aims : [];
+  return aims.some(
+    (a: any) =>
+      a?.type === "outcome" &&
+      norm(String(a.label || "")) === norm(l2Name) &&
+      (!Array.isArray(a.subSelections) || a.subSelections.length === 0),
+  );
+}
+
+function readOutcomePriorityFromAim(a: any): "H" | "M" | "L" {
+  const ov = a?.overrideLevel;
+  if (ov === "H" || ov === "M" || ov === "L") return ov;
+  const lv = a?.level;
+  if (lv === "High") return "H";
+  if (lv === "Low") return "L";
+  if (lv === "Medium") return "M";
+  return "M";
+}
+
+function getSubOutcomePriorityForL2(sub: any, l2Name: string): "H" | "M" | "L" {
+  const aims = Array.isArray(sub?.aims) ? sub.aims : [];
+  const a = aims.find(
+    (x: any) =>
+      x?.type === "outcome" &&
+      norm(String(x.label || "")) === norm(l2Name) &&
+      (!Array.isArray(x.subSelections) || x.subSelections.length === 0),
+  );
+  return a ? readOutcomePriorityFromAim(a) : "M";
+}
+
+function ringTopHasL2WholeOutcome(ringComp: any, l2Name: string): boolean {
+  const aims = (ringComp as any)?.designedExperienceData?.keyDesignElements?.aims ?? [];
+  return aims.some(
+    (a: any) =>
+      a?.type === "outcome" &&
+      norm(String(a.label || "")) === norm(l2Name) &&
+      (!Array.isArray(a.subSelections) || a.subSelections.length === 0),
+  );
+}
+
+function getRingTopOutcomePriority(ringComp: any, l2Name: string): "H" | "M" | "L" {
+  const aims = (ringComp as any)?.designedExperienceData?.keyDesignElements?.aims ?? [];
+  const a = aims.find(
+    (x: any) =>
+      x?.type === "outcome" &&
+      norm(String(x.label || "")) === norm(l2Name) &&
+      (!Array.isArray(x.subSelections) || x.subSelections.length === 0),
+  );
+  return a ? readOutcomePriorityFromAim(a) : "M";
 }
 
 const L1_AREAS = Object.keys(OUTCOME_SCHEMA).map((key) => ({ key, label: key }));
@@ -93,13 +160,22 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
     return deAims.filter((a: any) => a?.type === "outcome" && typeof a?.label === "string");
   }, [deAims]);
 
-  const osd = useMemo(() => ((comp as any)?.healthData?.outcomeScoreData || {}) as any, [comp]);
-  const savedNotes = useMemo(() => osd?.outcomeNotes || {}, [osd]);
+  const savedNotes = useMemo(() => {
+    const hd = (comp as any)?.healthData || {};
+    const la = hd.learningAdvancementOutcomeScoreData || {};
+    const wb = hd.wellbeingConductOutcomeScoreData || {};
+    return { ...(la.outcomeNotes || {}), ...(wb.outcomeNotes || {}) } as Record<string, { appliesDescription?: string }>;
+  }, [comp]);
 
   const ringComponents = useMemo(() => {
     const list = Array.isArray(allComponents) ? allComponents : [];
     return list.filter((c: any) => String(c?.nodeId || c?.node_id || "") !== "overall");
   }, [allComponents]);
+
+  const deSubcomponents = useMemo(() => {
+    const subs = (comp as any)?.designedExperienceData?.subcomponents;
+    return Array.isArray(subs) ? subs : [];
+  }, [comp]);
 
   // ── Notes init ─────────────────────────────────────────────
   useEffect(() => {
@@ -133,16 +209,29 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         const existing: any = (comp as any)?.healthData || {};
-        const existingOsd: any = existing.outcomeScoreData || {};
-        const merged: any = { ...(existingOsd.outcomeNotes || {}) };
-        for (const [k, v] of Object.entries(next)) merged[k] = { appliesDescription: v };
+        const laOsd: any = existing.learningAdvancementOutcomeScoreData || {};
+        const wbOsd: any = existing.wellbeingConductOutcomeScoreData || {};
+        const laNotes: any = { ...(laOsd.outcomeNotes || {}) };
+        const wbNotes: any = { ...(wbOsd.outcomeNotes || {}) };
+        for (const [k, v] of Object.entries(next)) {
+          const aim = deOutcomes.find((a: any) => normOutcomeKey(a.label) === k);
+          const bucketKey = aim ? outcomeHealthBucketForLabel(String(aim.label)) : "learningAdvancementOutcomeScoreData";
+          const slot = bucketKey === "wellbeingConductOutcomeScoreData" ? wbNotes : laNotes;
+          slot[k] = { appliesDescription: v };
+        }
         updateMutation.mutate({
           nodeId,
-          data: { healthData: { ...existing, outcomeScoreData: { ...existingOsd, outcomeNotes: merged } } },
+          data: {
+            healthData: {
+              ...existing,
+              learningAdvancementOutcomeScoreData: { ...laOsd, outcomeNotes: laNotes },
+              wellbeingConductOutcomeScoreData: { ...wbOsd, outcomeNotes: wbNotes },
+            },
+          },
         });
       }, 500);
     },
-    [comp, nodeId, updateMutation],
+    [comp, deOutcomes, nodeId, updateMutation],
   );
 
   useEffect(() => {
@@ -222,6 +311,17 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
 
   function getAssignedComponents(l2Name: string): string[] {
     return getAimForL2(l2Name)?.assignedComponents ?? [];
+  }
+
+  function getAssignedSubcomponentIds(l2Name: string): string[] {
+    return getAimForL2(l2Name)?.assignedSubcomponentIds ?? [];
+  }
+
+  function isSubLinkedOrPresent(l2Name: string, subId: string): boolean {
+    const sub = deSubcomponents.find((s: any) => s.id === subId);
+    const explicit = getAssignedSubcomponentIds(l2Name).includes(subId);
+    const present = sub ? subHasL2WholeOutcome(sub, l2Name) : false;
+    return explicit || present;
   }
 
   function getSubAssignedComponents(l2Name: string, l3Name: string): string[] {
@@ -332,6 +432,7 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
           subSelections,
           subPriorities: subPrioritiesOverride ?? {},
           assignedComponents: [],
+          assignedSubcomponentIds: [],
         },
       ];
     }
@@ -371,8 +472,208 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
     }
   }
 
+  function propagateL2PriorityToAllTargets(l2Name: string, p: "H" | "M" | "L") {
+    const fields = aimPriorityFields(p);
+    const aimSnap = getAimForL2(l2Name);
+    if (isOverall) {
+      const rings: string[] = aimSnap?.assignedComponents ?? [];
+      for (const rid of rings) {
+        const targetComp = ringComponents.find(
+          (c: any) => String(c?.nodeId || c?.node_id || "") === rid,
+        );
+        if (!targetComp || !ringTopHasL2WholeOutcome(targetComp, l2Name)) continue;
+        const tDe: any = (targetComp as any).designedExperienceData || {};
+        const tKde = tDe.keyDesignElements || { aims: [], practices: [], supports: [] };
+        const tAims: any[] = tKde.aims || [];
+        updateMutation.mutate({
+          nodeId: rid,
+          data: {
+            designedExperienceData: {
+              ...tDe,
+              keyDesignElements: {
+                ...tKde,
+                aims: tAims.map((a: any) =>
+                  a?.type === "outcome" &&
+                  norm(a.label) === norm(l2Name) &&
+                  (!Array.isArray(a.subSelections) || a.subSelections.length === 0)
+                    ? { ...a, ...fields }
+                    : a,
+                ),
+              },
+            },
+          },
+        });
+      }
+    } else if (nodeId && comp) {
+      const de: any = (comp as any).designedExperienceData || {};
+      const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+      const subs: any[] = Array.isArray(de.subcomponents) ? de.subcomponents.map((s: any) => ({ ...s })) : [];
+      let changed = false;
+      const newSubs = subs.map((sub) => {
+        if (!subHasL2WholeOutcome(sub, l2Name)) return sub;
+        changed = true;
+        const saims = Array.isArray(sub.aims) ? [...sub.aims] : [];
+        return {
+          ...sub,
+          aims: saims.map((a: any) =>
+            a?.type === "outcome" &&
+            norm(a.label) === norm(l2Name) &&
+            (!Array.isArray(a.subSelections) || a.subSelections.length === 0)
+              ? { ...a, ...fields }
+              : a,
+          ),
+        };
+      });
+      if (changed) {
+        updateMutation.mutate({
+          nodeId,
+          data: {
+            designedExperienceData: {
+              ...de,
+              subcomponents: newSubs,
+              keyDesignElements: kde,
+            },
+          },
+        });
+      }
+    }
+  }
+
   function handleSetPriority(l2Name: string, p: "H" | "M" | "L") {
     addOrUpdateAim(l2Name, getSubSelections(l2Name), p);
+    propagateL2PriorityToAllTargets(l2Name, p);
+  }
+
+  function handleSetRingOutcomePriority(l2Name: string, ringNodeId: string, p: "H" | "M" | "L") {
+    const fields = aimPriorityFields(p);
+    const targetComp = ringComponents.find(
+      (c: any) => String(c?.nodeId || c?.node_id || "") === ringNodeId,
+    );
+    if (!targetComp || !ringTopHasL2WholeOutcome(targetComp, l2Name)) return;
+    const tDe: any = (targetComp as any).designedExperienceData || {};
+    const tKde = tDe.keyDesignElements || { aims: [], practices: [], supports: [] };
+    const tAims: any[] = tKde.aims || [];
+    updateMutation.mutate({
+      nodeId: ringNodeId,
+      data: {
+        designedExperienceData: {
+          ...tDe,
+          keyDesignElements: {
+            ...tKde,
+            aims: tAims.map((a: any) =>
+              a?.type === "outcome" &&
+              norm(a.label) === norm(l2Name) &&
+              (!Array.isArray(a.subSelections) || a.subSelections.length === 0)
+                ? { ...a, ...fields }
+                : a,
+            ),
+          },
+        },
+      },
+    });
+  }
+
+  function handleSetSubOutcomePriority(l2Name: string, subId: string, p: "H" | "M" | "L") {
+    if (!nodeId || !comp) return;
+    const fields = aimPriorityFields(p);
+    const de: any = (comp as any).designedExperienceData || {};
+    const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+    const subs: any[] = Array.isArray(de.subcomponents) ? de.subcomponents.map((s: any) => ({ ...s })) : [];
+    const idx = subs.findIndex((s) => s.id === subId);
+    if (idx < 0 || !subHasL2WholeOutcome(subs[idx], l2Name)) return;
+    const sub = subs[idx];
+    const saims = Array.isArray(sub.aims) ? [...sub.aims] : [];
+    subs[idx] = {
+      ...sub,
+      aims: saims.map((a: any) =>
+        a?.type === "outcome" &&
+        norm(a.label) === norm(l2Name) &&
+        (!Array.isArray(a.subSelections) || a.subSelections.length === 0)
+          ? { ...a, ...fields }
+          : a,
+      ),
+    };
+    updateMutation.mutate({
+      nodeId,
+      data: {
+        designedExperienceData: {
+          ...de,
+          subcomponents: subs,
+          keyDesignElements: kde,
+        },
+      },
+    });
+  }
+
+  function handleToggleSubcomponentAssignment(l2Name: string, subId: string) {
+    if (!nodeId || !comp) return;
+    const aim = getAimForL2(l2Name);
+    if (!aim) return;
+    const de: any = (comp as any).designedExperienceData || {};
+    const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+    const subs: any[] = Array.isArray(de.subcomponents) ? [...de.subcomponents] : [];
+    const idx = subs.findIndex((s: any) => s.id === subId);
+    if (idx < 0) return;
+
+    const current: string[] = aim.assignedSubcomponentIds ?? [];
+    const explicit = current.includes(subId);
+    const sub = subs[idx];
+    const present = subHasL2WholeOutcome(sub, l2Name);
+
+    if (explicit) {
+      const newAssigned = current.filter((id: string) => id !== subId);
+      updateMutation.mutate({
+        nodeId,
+        data: {
+          designedExperienceData: {
+            ...de,
+            keyDesignElements: {
+              ...kde,
+              aims: (kde.aims || []).map((a: any) =>
+                a?.type === "outcome" && norm(a.label) === norm(l2Name)
+                  ? { ...a, assignedSubcomponentIds: newAssigned }
+                  : a,
+              ),
+            },
+          },
+        },
+      });
+      return;
+    }
+
+    const newAssigned = [...current, subId];
+    let newSubs = subs;
+    if (!present) {
+      const saims = Array.isArray(sub.aims) ? [...sub.aims] : [];
+      saims.push({
+        id: `aim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: "outcome",
+        label: l2Name.trim(),
+        subSelections: [],
+        ...aimPriorityFields("M"),
+        assignedComponents: [],
+        assignedSubcomponentIds: [],
+      });
+      newSubs = subs.map((s, i) => (i === idx ? { ...s, aims: saims } : s));
+    }
+
+    updateMutation.mutate({
+      nodeId,
+      data: {
+        designedExperienceData: {
+          ...de,
+          subcomponents: newSubs,
+          keyDesignElements: {
+            ...kde,
+            aims: (kde.aims || []).map((a: any) =>
+              a?.type === "outcome" && norm(a.label) === norm(l2Name)
+                ? { ...a, assignedSubcomponentIds: newAssigned }
+                : a,
+            ),
+          },
+        },
+      },
+    });
   }
 
   function handleSetL3Priority(l2Name: string, l3Name: string, p: "H" | "M" | "L") {
@@ -509,11 +810,14 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
     });
 
     // Push to / pull from the target ring component
-    const targetComp = ringComponents.find((c: any) => String(c?.nodeId || "") === targetNodeId);
+    const targetComp = ringComponents.find(
+      (c: any) => String(c?.nodeId || c?.node_id || "") === targetNodeId,
+    );
     if (!targetComp) return;
     const tDe: any = (targetComp as any).designedExperienceData || {};
     const tKde = tDe.keyDesignElements || { aims: [], practices: [], supports: [] };
     const tAims: any[] = tKde.aims || [];
+    const pushPri = aimPriorityFields(getPriority(l2Name) ?? "M");
 
     if (!isAssigned) {
       if (!tAims.some((a: any) => a?.type === "outcome" && norm(a.label) === norm(l2Name))) {
@@ -530,11 +834,10 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
                     id: `aim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                     type: "outcome",
                     label: l2Name.trim(),
-                    level: aim.level ?? null,
-                    levelMode: "auto",
-                    overrideLevel: null,
                     subSelections: aim.subSelections ?? [],
                     assignedComponents: [],
+                    assignedSubcomponentIds: [],
+                    ...pushPri,
                   },
                 ],
               },
@@ -589,7 +892,9 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
     });
 
     // Push/pull the L3 on the ring component
-    const targetComp = ringComponents.find((c: any) => String(c?.nodeId || "") === targetNodeId);
+    const targetComp = ringComponents.find(
+      (c: any) => String(c?.nodeId || c?.node_id || "") === targetNodeId,
+    );
     if (!targetComp) return;
     const tDe: any = (targetComp as any).designedExperienceData || {};
     const tKde = tDe.keyDesignElements || { aims: [], practices: [], supports: [] };
@@ -1051,21 +1356,123 @@ export default function OutcomeSummaryView({ nodeId, title, onBack, onOpenOutcom
                             {ringComponents.map((rc: any) => {
                               const rcNodeId = String(rc?.nodeId || rc?.node_id || "");
                               const isAssigned = assigned.includes(rcNodeId);
+                              const ringHas = ringTopHasL2WholeOutcome(rc, l2Name);
+                              const isLinked = isAssigned || ringHas;
+                              const ringP = getRingTopOutcomePriority(rc, l2Name);
                               return (
-                                <button
+                                <div
                                   key={rcNodeId}
-                                  type="button"
-                                  onClick={() => handleToggleComponentAssignment(l2Name, rcNodeId)}
-                                  className={cn(
-                                    "px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors flex items-center gap-1.5",
-                                    isAssigned
-                                      ? "bg-emerald-50 border-emerald-300 text-emerald-700"
-                                      : "bg-white border-gray-200 text-gray-600 hover:border-emerald-300 hover:text-emerald-700",
-                                  )}
+                                  className="inline-flex items-stretch rounded-full border border-gray-200 overflow-hidden bg-white"
                                 >
-                                  {isAssigned && <Check className="w-3 h-3" />}
-                                  {String(rc?.title || rcNodeId)}
-                                </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleComponentAssignment(l2Name, rcNodeId)}
+                                    className={cn(
+                                      "pl-2.5 pr-1.5 py-1 text-[11px] font-medium transition-colors flex items-center gap-1.5",
+                                      isLinked
+                                        ? "bg-emerald-50 text-emerald-700"
+                                        : "text-gray-600 hover:bg-gray-50 hover:text-emerald-700",
+                                    )}
+                                  >
+                                    {isLinked && <Check className="w-3 h-3 shrink-0" />}
+                                    {String(rc?.title || rcNodeId)}
+                                  </button>
+                                  {ringHas ? (
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <button
+                                          type="button"
+                                          className={cn(
+                                            "px-1.5 py-1 text-[10px] font-bold border-l border-gray-200 flex items-center gap-0.5 shrink-0",
+                                            PRIORITY_STYLES[ringP],
+                                          )}
+                                        >
+                                          {ringP}
+                                          <ChevronDown className="w-3 h-3 opacity-70" />
+                                        </button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="start" className="min-w-[7rem]">
+                                        {(["H", "M", "L"] as const).map((p) => (
+                                          <DropdownMenuItem
+                                            key={p}
+                                            className="text-xs"
+                                            onClick={() => handleSetRingOutcomePriority(l2Name, rcNodeId, p)}
+                                          >
+                                            {p === "H" ? "High" : p === "M" ? "Medium" : "Low"}
+                                          </DropdownMenuItem>
+                                        ))}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {!isOverall && deSubcomponents.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-[11px] font-semibold text-gray-600">
+                            Push to subcomponents{" "}
+                            <span className="text-gray-400 font-normal">
+                              — unlink only removes tracking here; sub data stays
+                            </span>
+                          </Label>
+                          <div className="flex flex-wrap gap-2">
+                            {deSubcomponents.map((sub: any) => {
+                              const sid = String(sub?.id || "");
+                              if (!sid) return null;
+                              const subLinked = isSubLinkedOrPresent(l2Name, sid);
+                              const subHas = subHasL2WholeOutcome(sub, l2Name);
+                              const subP = getSubOutcomePriorityForL2(sub, l2Name);
+                              return (
+                                <div
+                                  key={sid}
+                                  className="inline-flex items-stretch rounded-full border border-gray-200 overflow-hidden bg-white"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleSubcomponentAssignment(l2Name, sid)}
+                                    className={cn(
+                                      "pl-2.5 pr-1.5 py-1 text-[11px] font-medium transition-colors flex items-center gap-1.5 max-w-[200px]",
+                                      subLinked
+                                        ? "bg-emerald-50 text-emerald-700"
+                                        : "text-gray-600 hover:bg-gray-50 hover:text-emerald-700",
+                                    )}
+                                  >
+                                    {subLinked && <Check className="w-3 h-3 shrink-0" />}
+                                    <span className="truncate">
+                                      {String(sub?.title || sub?.name || sid)}
+                                    </span>
+                                  </button>
+                                  {subHas ? (
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <button
+                                          type="button"
+                                          className={cn(
+                                            "px-1.5 py-1 text-[10px] font-bold border-l border-gray-200 flex items-center gap-0.5 shrink-0",
+                                            PRIORITY_STYLES[subP],
+                                          )}
+                                        >
+                                          {subP}
+                                          <ChevronDown className="w-3 h-3 opacity-70" />
+                                        </button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="start" className="min-w-[7rem]">
+                                        {(["H", "M", "L"] as const).map((p) => (
+                                          <DropdownMenuItem
+                                            key={p}
+                                            className="text-xs"
+                                            onClick={() => handleSetSubOutcomePriority(l2Name, sid, p)}
+                                          >
+                                            {p === "H" ? "High" : p === "M" ? "Medium" : "Low"}
+                                          </DropdownMenuItem>
+                                        ))}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  ) : null}
+                                </div>
                               );
                             })}
                           </div>

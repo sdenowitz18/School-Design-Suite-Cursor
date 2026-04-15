@@ -2,15 +2,67 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 import { PlainLanguageInput } from "./expert-view/PlainLanguageInput";
 import { LEAP_DESCRIPTIONS, LEAP_SCHEMA } from "./designed-experience-schemas";
+import { isLeapAimActive, isCanonicalLeapLabel, leapAimUsesSoftDeselect } from "@shared/aim-selection";
 
 function norm(s: string) {
   return (s || "").trim().toLowerCase();
+}
+
+function aimPriorityFieldsLeap(p: "H" | "M" | "L") {
+  const levelMap = { H: "High", M: "Medium", L: "Low" } as const;
+  return { overrideLevel: p, level: levelMap[p], levelMode: "override" as const };
+}
+
+function subHasL2WholeLeap(sub: any, leapLabel: string): boolean {
+  const aims = Array.isArray(sub?.aims) ? sub.aims : [];
+  return aims.some(
+    (a: any) => a?.type === "leap" && norm(String(a.label || "")) === norm(leapLabel),
+  );
+}
+
+function readLeapPriorityFromAim(a: any): "H" | "M" | "L" {
+  const ov = a?.overrideLevel ?? a?.computedLevel;
+  if (ov === "H" || ov === "M" || ov === "L") return ov;
+  const lv = a?.level;
+  if (lv === "High") return "H";
+  if (lv === "Low") return "L";
+  if (lv === "Medium") return "M";
+  return "M";
+}
+
+function getSubLeapPriority(sub: any, leapLabel: string): "H" | "M" | "L" {
+  const aims = Array.isArray(sub?.aims) ? sub.aims : [];
+  const a = aims.find(
+    (x: any) => x?.type === "leap" && norm(String(x.label || "")) === norm(leapLabel),
+  );
+  return a ? readLeapPriorityFromAim(a) : "M";
+}
+
+function ringTopHasL2Leap(ringComp: any, leapLabel: string): boolean {
+  const aims = (ringComp as any)?.designedExperienceData?.keyDesignElements?.aims ?? [];
+  return aims.some(
+    (a: any) => a?.type === "leap" && norm(String(a.label || "")) === norm(leapLabel),
+  );
+}
+
+function getRingTopLeapPriority(ringComp: any, leapLabel: string): "H" | "M" | "L" {
+  const aims = (ringComp as any)?.designedExperienceData?.keyDesignElements?.aims ?? [];
+  const a = aims.find(
+    (x: any) => x?.type === "leap" && norm(String(x.label || "")) === norm(leapLabel),
+  );
+  return a ? readLeapPriorityFromAim(a) : "M";
 }
 
 const FIXED_LEAPS: string[] = LEAP_SCHEMA["Level 1"] ?? [];
@@ -79,9 +131,14 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
     return Array.isArray(kde.aims) ? kde.aims : [];
   }, [comp]);
 
-  const deLeaps = React.useMemo(
+  const allLeapAims = React.useMemo(
     () => deAims.filter((a: any) => a?.type === "leap"),
     [deAims],
+  );
+
+  const activeLeapAims = React.useMemo(
+    () => allLeapAims.filter((a: any) => isLeapAimActive(a)),
+    [allLeapAims],
   );
 
   const ringComponents = React.useMemo(() => {
@@ -91,6 +148,11 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
     );
   }, [isOverall, allComponents]);
 
+  const deSubcomponents = React.useMemo(() => {
+    const subs = (comp as any)?.designedExperienceData?.subcomponents;
+    return Array.isArray(subs) ? subs : [];
+  }, [comp]);
+
   useEffect(() => {
     if (!focusLeapLabel) return;
     setExpandedDescriptions((prev) => new Set(prev).add(norm(focusLeapLabel)));
@@ -98,30 +160,46 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
 
   // ── Sync notes from server ──────────────────────────────────
   useEffect(() => {
-    if (notesInitialized || deLeaps.length === 0) return;
+    if (notesInitialized || allLeapAims.length === 0) return;
     const initial: Record<string, string> = {};
-    for (const a of deLeaps) {
+    for (const a of allLeapAims) {
       if (a?.label && a?.notes) initial[norm(a.label)] = a.notes;
     }
     setNotesByKey(initial);
     setNotesInitialized(true);
-  }, [deLeaps, notesInitialized]);
+  }, [allLeapAims, notesInitialized]);
 
   // ── Helpers ─────────────────────────────────────────────────
   function getLeapAim(label: string): any | undefined {
-    return deLeaps.find((a: any) => norm(a.label) === norm(label));
+    return allLeapAims.find((a: any) => norm(a.label) === norm(label));
   }
 
   function isSelected(label: string): boolean {
-    return !!getLeapAim(label);
+    const aim = getLeapAim(label);
+    return !!aim && isLeapAimActive(aim);
   }
 
   function getPriority(label: string): "H" | "M" | "L" | null {
-    return getLeapAim(label)?.overrideLevel ?? null;
+    const aim = getLeapAim(label);
+    if (!aim || !isLeapAimActive(aim)) return null;
+    const p = aim.overrideLevel ?? aim.computedLevel;
+    if (p === "H" || p === "M" || p === "L") return p;
+    return "M";
   }
 
   function getAssigned(label: string): string[] {
     return getLeapAim(label)?.assignedComponents ?? [];
+  }
+
+  function getAssignedSubIds(label: string): string[] {
+    return getLeapAim(label)?.assignedSubcomponentIds ?? [];
+  }
+
+  function isSubLinkedOrPresentLeap(label: string, subId: string): boolean {
+    const sub = deSubcomponents.find((s: any) => s.id === subId);
+    const explicit = getAssignedSubIds(label).includes(subId);
+    const present = sub ? subHasL2WholeLeap(sub, label) : false;
+    return explicit || present;
   }
 
   // ── Write helpers ───────────────────────────────────────────
@@ -143,16 +221,65 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
     [nodeId, comp, updateMutation],
   );
 
-  function toggleLeap(label: string, isCustom = false) {
+  function toggleLeap(label: string, _fromCustomSection = false) {
     if (!nodeId || !comp) return;
     const de: any = (comp as any).designedExperienceData || {};
     const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
     const aims: any[] = kde.aims || [];
 
-    if (isSelected(label)) {
+    const existing = aims.find((a: any) => a?.type === "leap" && norm(a.label) === norm(label));
+
+    if (existing && leapAimUsesSoftDeselect(existing)) {
+      if (isLeapAimActive(existing)) {
+        writeAims(
+          aims.map((a: any) =>
+            a?.type === "leap" && norm(a.label) === norm(label) ? { ...a, selected: false } : a,
+          ),
+        );
+      } else {
+        writeAims(
+          aims.map((a: any) =>
+            a?.type === "leap" && norm(a.label) === norm(label)
+              ? {
+                  ...a,
+                  selected: true,
+                  overrideLevel: a.overrideLevel ?? "M",
+                  level: a.level ?? "Medium",
+                  levelMode: "override",
+                }
+              : a,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (isCanonicalLeapLabel(label) && isSelected(label)) {
       writeAims(aims.filter((a: any) => !(a?.type === "leap" && norm(a.label) === norm(label))));
-    } else {
-      const newAim = {
+      return;
+    }
+
+    if (isCanonicalLeapLabel(label) && !isSelected(label)) {
+      writeAims([
+        ...aims,
+        {
+          id: `leap_aim_${Date.now()}`,
+          type: "leap",
+          label: label.trim(),
+          level: "Medium",
+          levelMode: "override",
+          overrideLevel: "M" as const,
+          notes: "",
+          assignedComponents: [],
+          assignedSubcomponentIds: [],
+        },
+      ]);
+      return;
+    }
+
+    writeAims([
+      ...aims,
+      {
         id: `leap_aim_${Date.now()}`,
         type: "leap",
         label: label.trim(),
@@ -161,9 +288,68 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
         overrideLevel: "M" as const,
         notes: "",
         assignedComponents: [],
-        ...(isCustom ? { isCustom: true } : {}),
-      };
-      writeAims([...aims, newAim]);
+        assignedSubcomponentIds: [],
+        isCustom: true,
+      },
+    ]);
+  }
+
+  function propagateLeapPriorityToAllTargets(label: string, p: "H" | "M" | "L") {
+    const fields = aimPriorityFieldsLeap(p);
+    const aimSnap = getLeapAim(label);
+    if (isOverall) {
+      const rings: string[] = aimSnap?.assignedComponents ?? [];
+      for (const rid of rings) {
+        const targetComp = ringComponents.find(
+          (c: any) => String(c?.nodeId || c?.node_id || "") === rid,
+        );
+        if (!targetComp || !ringTopHasL2Leap(targetComp, label)) continue;
+        const tDe: any = (targetComp as any).designedExperienceData || {};
+        const tKde = tDe.keyDesignElements || { aims: [], practices: [], supports: [] };
+        const tAims: any[] = tKde.aims || [];
+        updateMutation.mutate({
+          nodeId: rid,
+          data: {
+            designedExperienceData: {
+              ...tDe,
+              keyDesignElements: {
+                ...tKde,
+                aims: tAims.map((a: any) =>
+                  a?.type === "leap" && norm(a.label) === norm(label) ? { ...a, ...fields } : a,
+                ),
+              },
+            },
+          },
+        });
+      }
+    } else if (nodeId && comp) {
+      const de: any = (comp as any).designedExperienceData || {};
+      const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+      const subs: any[] = Array.isArray(de.subcomponents) ? de.subcomponents.map((s: any) => ({ ...s })) : [];
+      let changed = false;
+      const newSubs = subs.map((sub) => {
+        if (!subHasL2WholeLeap(sub, label)) return sub;
+        changed = true;
+        const saims = Array.isArray(sub.aims) ? [...sub.aims] : [];
+        return {
+          ...sub,
+          aims: saims.map((a: any) =>
+            a?.type === "leap" && norm(a.label) === norm(label) ? { ...a, ...fields } : a,
+          ),
+        };
+      });
+      if (changed) {
+        updateMutation.mutate({
+          nodeId,
+          data: {
+            designedExperienceData: {
+              ...de,
+              subcomponents: newSubs,
+              keyDesignElements: kde,
+            },
+          },
+        });
+      }
     }
   }
 
@@ -172,14 +358,138 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
     const de: any = (comp as any).designedExperienceData || {};
     const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
     const aims: any[] = kde.aims || [];
-    const levelMap = { H: "High", M: "Medium", L: "Low" };
+    const fields = aimPriorityFieldsLeap(p);
     writeAims(
       aims.map((a: any) =>
-        a?.type === "leap" && norm(a.label) === norm(label)
-          ? { ...a, overrideLevel: p, level: levelMap[p], levelMode: "override" }
-          : a,
+        a?.type === "leap" && norm(a.label) === norm(label) ? { ...a, ...fields } : a,
       ),
     );
+    propagateLeapPriorityToAllTargets(label, p);
+  }
+
+  function handleSetRingLeapPriority(label: string, ringNodeId: string, p: "H" | "M" | "L") {
+    const fields = aimPriorityFieldsLeap(p);
+    const targetComp = ringComponents.find(
+      (c: any) => String(c?.nodeId || c?.node_id || "") === ringNodeId,
+    );
+    if (!targetComp || !ringTopHasL2Leap(targetComp, label)) return;
+    const tDe: any = (targetComp as any).designedExperienceData || {};
+    const tKde = tDe.keyDesignElements || { aims: [], practices: [], supports: [] };
+    const tAims: any[] = tKde.aims || [];
+    updateMutation.mutate({
+      nodeId: ringNodeId,
+      data: {
+        designedExperienceData: {
+          ...tDe,
+          keyDesignElements: {
+            ...tKde,
+            aims: tAims.map((a: any) =>
+              a?.type === "leap" && norm(a.label) === norm(label) ? { ...a, ...fields } : a,
+            ),
+          },
+        },
+      },
+    });
+  }
+
+  function handleSetSubLeapPriority(label: string, subId: string, p: "H" | "M" | "L") {
+    if (!nodeId || !comp) return;
+    const fields = aimPriorityFieldsLeap(p);
+    const de: any = (comp as any).designedExperienceData || {};
+    const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+    const subs: any[] = Array.isArray(de.subcomponents) ? de.subcomponents.map((s: any) => ({ ...s })) : [];
+    const idx = subs.findIndex((s) => s.id === subId);
+    if (idx < 0 || !subHasL2WholeLeap(subs[idx], label)) return;
+    const sub = subs[idx];
+    const saims = Array.isArray(sub.aims) ? [...sub.aims] : [];
+    subs[idx] = {
+      ...sub,
+      aims: saims.map((a: any) =>
+        a?.type === "leap" && norm(a.label) === norm(label) ? { ...a, ...fields } : a,
+      ),
+    };
+    updateMutation.mutate({
+      nodeId,
+      data: {
+        designedExperienceData: {
+          ...de,
+          subcomponents: subs,
+          keyDesignElements: kde,
+        },
+      },
+    });
+  }
+
+  function handleToggleSubcomponentAssignmentLeap(label: string, subId: string) {
+    if (!nodeId || !comp) return;
+    const aim = getLeapAim(label);
+    if (!aim) return;
+    const de: any = (comp as any).designedExperienceData || {};
+    const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+    const subs: any[] = Array.isArray(de.subcomponents) ? [...de.subcomponents] : [];
+    const idx = subs.findIndex((s: any) => s.id === subId);
+    if (idx < 0) return;
+
+    const current: string[] = aim.assignedSubcomponentIds ?? [];
+    const explicit = current.includes(subId);
+    const sub = subs[idx];
+    const present = subHasL2WholeLeap(sub, label);
+
+    if (explicit) {
+      const newAssigned = current.filter((id: string) => id !== subId);
+      updateMutation.mutate({
+        nodeId,
+        data: {
+          designedExperienceData: {
+            ...de,
+            keyDesignElements: {
+              ...kde,
+              aims: (kde.aims || []).map((a: any) =>
+                a?.type === "leap" && norm(a.label) === norm(label)
+                  ? { ...a, assignedSubcomponentIds: newAssigned }
+                  : a,
+              ),
+            },
+          },
+        },
+      });
+      return;
+    }
+
+    const newAssigned = [...current, subId];
+    let newSubs = subs;
+    if (!present) {
+      const saims = Array.isArray(sub.aims) ? [...sub.aims] : [];
+      saims.push({
+        id: `leap_aim_${Date.now()}_sub`,
+        type: "leap",
+        label: label.trim(),
+        notes: "",
+        assignedComponents: [],
+        assignedSubcomponentIds: [],
+        ...aimPriorityFieldsLeap("M"),
+        ...(leapAimUsesSoftDeselect(aim) ? { isCustom: true } : {}),
+      });
+      newSubs = subs.map((s, i) => (i === idx ? { ...s, aims: saims } : s));
+    }
+
+    updateMutation.mutate({
+      nodeId,
+      data: {
+        designedExperienceData: {
+          ...de,
+          subcomponents: newSubs,
+          keyDesignElements: {
+            ...kde,
+            aims: (kde.aims || []).map((a: any) =>
+              a?.type === "leap" && norm(a.label) === norm(label)
+                ? { ...a, assignedSubcomponentIds: newAssigned }
+                : a,
+            ),
+          },
+        },
+      },
+    });
   }
 
   function handleSetNotes(label: string, text: string) {
@@ -228,17 +538,18 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
       const alreadyOnRing = rcAims.some((a: any) => a?.type === "leap" && norm(a.label) === norm(label));
       let newRcAims: any[];
       if (!alreadyOnRing && !current.includes(componentId)) {
+        const pri = getPriority(label) ?? "M";
         newRcAims = [
           ...rcAims,
           {
             id: `leap_aim_${Date.now()}_ring`,
             type: "leap",
             label: label.trim(),
-            level: aim?.level ?? "Medium",
-            levelMode: "override",
-            overrideLevel: aim?.overrideLevel ?? "M",
             notes: aim?.notes ?? "",
             assignedComponents: [],
+            assignedSubcomponentIds: [],
+            ...aimPriorityFieldsLeap(pri),
+            ...(aim && leapAimUsesSoftDeselect(aim) ? { isCustom: true } : {}),
           },
         ];
       } else if (alreadyOnRing && current.includes(componentId)) {
@@ -268,7 +579,35 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
 
   function handleAddPrinciple() {
     const trimmed = newPrincipleText.trim();
-    if (!trimmed || isSelected(trimmed)) return;
+    if (!trimmed || !nodeId || !comp) return;
+    const de: any = (comp as any).designedExperienceData || {};
+    const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+    const aims: any[] = kde.aims || [];
+    const existing = aims.find((a: any) => a?.type === "leap" && norm(a.label) === norm(trimmed));
+
+    if (existing && leapAimUsesSoftDeselect(existing)) {
+      if (!isLeapAimActive(existing)) {
+        writeAims(
+          aims.map((a: any) =>
+            a?.type === "leap" && norm(a.label) === norm(trimmed)
+              ? {
+                  ...a,
+                  selected: true,
+                  overrideLevel: a.overrideLevel ?? "M",
+                  level: a.level ?? "Medium",
+                  levelMode: "override",
+                }
+              : a,
+          ),
+        );
+      }
+      setNewPrincipleText("");
+      setAddingPrinciple(false);
+      return;
+    }
+
+    if (isSelected(trimmed)) return;
+
     toggleLeap(trimmed, true);
     setNewPrincipleText("");
     setAddingPrinciple(false);
@@ -282,7 +621,7 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
     writeAims(aims.filter((a: any) => !(a?.type === "leap" && norm(a.label) === norm(label))));
   }
 
-  const customPrinciples = deLeaps.filter((a: any) => a?.isCustom);
+  const customPrinciples = allLeapAims.filter((a: any) => leapAimUsesSoftDeselect(a));
 
   const componentName = title || (comp as any)?.title || "this component";
 
@@ -421,21 +760,123 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
                   {ringComponents.map((rc: any) => {
                     const rcNodeId = String(rc?.nodeId || rc?.node_id || "");
                     const isAssigned = assigned.includes(rcNodeId);
+                    const ringHas = ringTopHasL2Leap(rc, label);
+                    const isLinked = isAssigned || ringHas;
+                    const ringP = getRingTopLeapPriority(rc, label);
                     return (
-                      <button
+                      <div
                         key={rcNodeId}
-                        type="button"
-                        onClick={() => handleToggleAssignment(label, rcNodeId)}
-                        className={cn(
-                          "px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors flex items-center gap-1.5",
-                          isAssigned
-                            ? "bg-emerald-50 border-emerald-300 text-emerald-700"
-                            : "bg-white border-gray-200 text-gray-600 hover:border-emerald-300 hover:text-emerald-700",
-                        )}
+                        className="inline-flex items-stretch rounded-full border border-gray-200 overflow-hidden bg-white"
                       >
-                        {isAssigned && <Check className="w-3 h-3" />}
-                        {String(rc?.title || rcNodeId)}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleAssignment(label, rcNodeId)}
+                          className={cn(
+                            "pl-2.5 pr-1.5 py-1 text-[11px] font-medium transition-colors flex items-center gap-1.5",
+                            isLinked
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "text-gray-600 hover:bg-gray-50 hover:text-emerald-700",
+                          )}
+                        >
+                          {isLinked && <Check className="w-3 h-3 shrink-0" />}
+                          {String(rc?.title || rcNodeId)}
+                        </button>
+                        {ringHas ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className={cn(
+                                  "px-1.5 py-1 text-[10px] font-bold border-l border-gray-200 flex items-center gap-0.5 shrink-0",
+                                  PRIORITY_STYLES[ringP],
+                                )}
+                              >
+                                {ringP}
+                                <ChevronDown className="w-3 h-3 opacity-70" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="min-w-[7rem]">
+                              {(["H", "M", "L"] as const).map((p) => (
+                                <DropdownMenuItem
+                                  key={p}
+                                  className="text-xs"
+                                  onClick={() => handleSetRingLeapPriority(label, rcNodeId, p)}
+                                >
+                                  {p === "H" ? "High" : p === "M" ? "Medium" : "Low"}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {!isOverall && deSubcomponents.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-[11px] font-semibold text-gray-600">
+                  Push to subcomponents{" "}
+                  <span className="text-gray-400 font-normal">
+                    — unlink only removes tracking here; sub data stays
+                  </span>
+                </Label>
+                <div className="flex flex-wrap gap-2">
+                  {deSubcomponents.map((sub: any) => {
+                    const sid = String(sub?.id || "");
+                    if (!sid) return null;
+                    const subLinked = isSubLinkedOrPresentLeap(label, sid);
+                    const subHas = subHasL2WholeLeap(sub, label);
+                    const subP = getSubLeapPriority(sub, label);
+                    return (
+                      <div
+                        key={sid}
+                        className="inline-flex items-stretch rounded-full border border-gray-200 overflow-hidden bg-white"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSubcomponentAssignmentLeap(label, sid)}
+                          className={cn(
+                            "pl-2.5 pr-1.5 py-1 text-[11px] font-medium transition-colors flex items-center gap-1.5 max-w-[200px]",
+                            subLinked
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "text-gray-600 hover:bg-gray-50 hover:text-emerald-700",
+                          )}
+                        >
+                          {subLinked && <Check className="w-3 h-3 shrink-0" />}
+                          <span className="truncate">
+                            {String(sub?.title || sub?.name || sid)}
+                          </span>
+                        </button>
+                        {subHas ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className={cn(
+                                  "px-1.5 py-1 text-[10px] font-bold border-l border-gray-200 flex items-center gap-0.5 shrink-0",
+                                  PRIORITY_STYLES[subP],
+                                )}
+                              >
+                                {subP}
+                                <ChevronDown className="w-3 h-3 opacity-70" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="min-w-[7rem]">
+                              {(["H", "M", "L"] as const).map((p) => (
+                                <DropdownMenuItem
+                                  key={p}
+                                  className="text-xs"
+                                  onClick={() => handleSetSubLeapPriority(label, sid, p)}
+                                >
+                                  {p === "H" ? "High" : p === "M" ? "Medium" : "Low"}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
@@ -476,9 +917,9 @@ export default function LeapSummaryView({ nodeId, title, onBack, focusLeapLabel,
         </div>
 
         {/* Selected summary chips */}
-        {deLeaps.length > 0 ? (
+        {activeLeapAims.length > 0 ? (
           <div className="px-5 py-3 flex flex-wrap gap-1.5">
-            {deLeaps.map((a: any) => {
+            {activeLeapAims.map((a: any) => {
               const p = getPriority(a.label);
               return (
                 <span

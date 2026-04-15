@@ -11,6 +11,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
+import { outcomeHealthBucketForLabel } from "@/lib/outcome-health-bucket";
 import { UNKNOWN_ACTOR_KEY, effectiveFromInstances, normActor } from "@shared/score-instances";
 import type { ScoreFilter, ScoreInstance, TargetedOutcome, OutcomeScoreData } from "@shared/schema";
 import ScoreFilterBar from "./score-filter-bar";
@@ -126,13 +127,17 @@ export default function OutcomeScoreOverallInstancesView({
   onBack,
   sourceFilter,
   onFilterChange,
+  variant = "learningAdvancement",
 }: {
   nodeId?: string;
   title?: string;
   onBack: () => void;
   sourceFilter?: ScoreFilter | null;
   onFilterChange?: (next: ScoreFilter) => void;
+  variant?: "learningAdvancement" | "wellbeingConduct";
 }) {
+  const healthKey =
+    variant === "wellbeingConduct" ? "wellbeingConductOutcomeScoreData" : "learningAdvancementOutcomeScoreData";
   const { actors: globalActors, addActor: addGlobalActor, mergeActors: mergeGlobalActors } = useGlobalActors();
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
@@ -162,6 +167,10 @@ export default function OutcomeScoreOverallInstancesView({
     return aims.filter((a: any) => a?.type === "outcome" && typeof a?.label === "string").map((a: any) => String(a.label));
   }, [comp]);
 
+  const scopedDeOutcomes = useMemo(() => {
+    return deOutcomes.filter((label) => outcomeHealthBucketForLabel(label) === healthKey);
+  }, [deOutcomes, healthKey]);
+
   const [outcomes, setOutcomes] = useState<TargetedOutcome[]>([]);
   const [overallInstances, setOverallInstances] = useState<ScoreInstance[]>([]);
   const [actors, setActors] = useState<string[]>([]);
@@ -169,7 +178,7 @@ export default function OutcomeScoreOverallInstancesView({
 
   useEffect(() => {
     if (!comp || initialized) return;
-    const osd: any = (comp as any)?.healthData?.outcomeScoreData || {};
+    const osd: any = (comp as any)?.healthData?.[healthKey] || {};
     const initialFilter: ScoreFilter =
       (sourceFilter as any) ||
       (osd?.filter as any) || {
@@ -185,14 +194,14 @@ export default function OutcomeScoreOverallInstancesView({
     setOverallInstances(Array.isArray(osd.overallInstances) ? osd.overallInstances : []);
 
     // Ensure DE outcomes exist in list
-    for (const label of deOutcomes) {
+    for (const label of scopedDeOutcomes) {
       const exists = normalized.some((o) => String(o.outcomeName).toLowerCase() === String(label).toLowerCase());
       if (!exists) normalized.push(normalizeOutcome({ outcomeName: label, priority: "M", instances: [] }));
     }
 
     setOutcomes(normalized);
     setInitialized(true);
-  }, [comp, deOutcomes, initialized, sourceFilter]);
+  }, [comp, healthKey, initialized, scopedDeOutcomes, sourceFilter]);
 
   useEffect(() => {
     if (!initialized) return;
@@ -269,7 +278,7 @@ export default function OutcomeScoreOverallInstancesView({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         const existing: any = (comp as any)?.healthData || {};
-        const osd: any = existing?.outcomeScoreData || {};
+        const osd: any = existing?.[healthKey] || {};
         const payload: Partial<OutcomeScoreData> = {
           ...osd,
           actors,
@@ -290,13 +299,13 @@ export default function OutcomeScoreOverallInstancesView({
           data: {
             healthData: {
               ...existing,
-              outcomeScoreData: payload,
+              [healthKey]: payload,
             },
           },
         });
       }, 400);
     },
-    [actors, comp, filter, nodeId, updateMutation],
+    [actors, comp, filter, healthKey, nodeId, updateMutation],
   );
 
   useEffect(() => {
