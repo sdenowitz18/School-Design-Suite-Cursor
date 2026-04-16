@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, BookOpen, Check, ChevronLeft, Minus, Star } from "lucide-react";
+import { ArrowRight, BookOpen, Check, Minus, Star } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { outcomeHealthBucketForLabel } from "@/lib/outcome-health-bucket";
 import { OUTCOME_SCHEMA } from "./designed-experience-schemas";
 import OutcomeDetailView from "./outcome-detail-view";
 import OutcomesLearnMoreView from "./outcomes-learn-more-view";
+import { DrilldownNavBar } from "./drilldown-nav-bar";
 import { PlainLanguageInput } from "./expert-view/PlainLanguageInput";
 import { normOutcomeKey } from "./outcomes-utils";
 
@@ -96,6 +97,8 @@ export interface OutcomeSummaryViewProps {
   onOpenOutcomeScore?: () => void;
   /** When opening Manage while focused on a sub-block, scope aims + saves to that sub only. */
   manageSubScope?: DesignedExperienceManageSubScope | null;
+  /** First breadcrumb — full exit to Designed Experience home (same as other DE drilldown surfaces). */
+  onNavigateDesignedExperienceRoot: () => void;
 }
 
 export default function OutcomeSummaryView({
@@ -104,6 +107,7 @@ export default function OutcomeSummaryView({
   onBack,
   onOpenOutcomeScore,
   manageSubScope = null,
+  onNavigateDesignedExperienceRoot,
 }: OutcomeSummaryViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const isOverall = String(nodeId || "") === "overall" || String((comp as any)?.nodeId || "") === "overall";
@@ -598,33 +602,42 @@ export default function OutcomeSummaryView({
 
   // ── Sub-views ──────────────────────────────────────────────
   if (showLearnMore) return <OutcomesLearnMoreView mode="schema" onBack={() => setShowLearnMore(false)} />;
-  if (selectedOutcome) {
-    return (
-      <OutcomeDetailView
-        nodeId={nodeId}
-        title={title}
-        outcomeLabel={selectedOutcome.l2}
-        l3OutcomeLabel={selectedOutcome.l3}
-        onBack={() => setSelectedOutcome(null)}
-        onOpenOutcomeScore={onOpenOutcomeScore}
-      />
-    );
-  }
 
   const componentName = title || (comp as any)?.title || "this component";
   const activeL1Schema = OUTCOME_SCHEMA[activeL1] ?? {};
 
-  return (
-    <div className="max-w-5xl mx-auto p-6 pb-16 space-y-5" data-testid="outcome-summary-view">
-      {/* Back */}
-      <button
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back
-      </button>
+  const outcomeDetailTitle = selectedOutcome
+    ? (selectedOutcome.l3 || "").trim()
+      ? String(selectedOutcome.l3).trim()
+      : selectedOutcome.l2
+    : null;
 
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col" data-testid="outcome-summary-view">
+      <DrilldownNavBar
+        sectionTitle="Designed Experience"
+        onNavigateSectionRoot={onNavigateDesignedExperienceRoot}
+        ancestors={
+          outcomeDetailTitle
+            ? [{ label: "Outcomes", onNavigate: () => setSelectedOutcome(null) }]
+            : []
+        }
+        currentTitle={outcomeDetailTitle ?? "Outcomes"}
+        onBack={outcomeDetailTitle ? () => setSelectedOutcome(null) : onBack}
+      />
+      <div className="flex-1 min-h-0 overflow-auto">
+        {selectedOutcome ? (
+          <OutcomeDetailView
+            nodeId={nodeId}
+            title={title}
+            outcomeLabel={selectedOutcome.l2}
+            l3OutcomeLabel={selectedOutcome.l3}
+            onBack={() => setSelectedOutcome(null)}
+            onOpenOutcomeScore={onOpenOutcomeScore}
+            hideTopBack
+          />
+        ) : (
+          <div className="max-w-5xl mx-auto p-6 pb-16 space-y-5">
       {/* Header card */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-4 flex-wrap">
@@ -1034,6 +1047,9 @@ export default function OutcomeSummaryView({
             </div>
           );
         })}
+      </div>
+          </div>
+        )}
       </div>
 
       {/* Primary-replaced modal */}

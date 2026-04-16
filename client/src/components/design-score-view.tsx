@@ -63,6 +63,7 @@ interface DesignScoreViewProps {
   onBack: () => void;
   sourceFilter?: ScoreFilter;
   onFilterChange?: (next: ScoreFilter) => void;
+  hideShellBackButton?: boolean;
 }
 
 export default function DesignScoreView({
@@ -71,6 +72,7 @@ export default function DesignScoreView({
   onBack,
   sourceFilter,
   onFilterChange,
+  hideShellBackButton = false,
 }: DesignScoreViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
@@ -282,10 +284,12 @@ export default function DesignScoreView({
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 pb-24">
-      <button type="button" onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group" data-testid="button-back-to-health">
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to Status & Health
-      </button>
+      {!hideShellBackButton ? (
+        <button type="button" onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group" data-testid="button-back-to-health">
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back to Status & Health
+        </button>
+      ) : null}
 
       <ScoreFilterBar filter={filter} onChange={setFilter as any} actors={actorOptions} testId="design-filter-bar" />
 

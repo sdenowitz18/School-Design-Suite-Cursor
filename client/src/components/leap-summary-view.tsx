@@ -64,6 +64,8 @@ export interface LeapSummaryViewProps {
   focusLeapLabel?: string | null;
   /** Optional: open dedicated leap detail (e.g. from “View details” on a selected leap). */
   onOpenLeapDetail?: (label: string) => void;
+  /** When parent renders DrilldownNavBar, hide the duplicate back row. */
+  hideTopBack?: boolean;
 }
 
 export default function LeapSummaryView({
@@ -73,6 +75,7 @@ export default function LeapSummaryView({
   manageSubScope = null,
   focusLeapLabel,
   onOpenLeapDetail,
+  hideTopBack = false,
 }: LeapSummaryViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const isOverall = String(nodeId || "") === "overall" || String((comp as any)?.nodeId || "") === "overall";
@@ -449,14 +452,15 @@ export default function LeapSummaryView({
 
   return (
     <div className="max-w-3xl mx-auto p-6 pb-16 space-y-5" data-testid="leap-summary-view">
-      {/* Back */}
-      <button
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back
-      </button>
+      {!hideTopBack ? (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back
+        </button>
+      ) : null}
 
       {/* Header card */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">

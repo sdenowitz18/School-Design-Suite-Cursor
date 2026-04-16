@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { 
   ChevronDown, 
   ChevronUp,
@@ -46,13 +46,15 @@ import type { OutcomeMeasure } from "@shared/schema";
 import {
   LEARNING_ADVANCEMENT_OUTCOME_TREE,
   WELLBEING_CONDUCT_OUTCOME_TREE,
+  getL1ByIdInTree,
   type OutcomeSubDimL1,
 } from "@shared/outcome-subdimension-tree";
 import { getSchoolYearKey, getSemesterKey, listSelectableSemesterKeys, listSelectableYearKeys, parseIsoDate } from "@shared/marking-period";
 import type { ScoreFilter, ScoreInstance } from "@shared/schema";
 import ScoreFilterBar from "./score-filter-bar";
 import ScoreFlags, { SignalFlags } from "./score-flags";
-const RING_NODE_IDS = ["algebra", "math", "college_exposure"] as const;
+import { DrilldownNavBar } from "./drilldown-nav-bar";
+/** Ring node = any component that isn't "overall". No hardcoded list. */
 
 function scorePillClass(score: number | null): string {
   if (score === null) return "bg-gray-100 text-gray-500 border-gray-200";
@@ -129,7 +131,7 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
   const { data: allComponents } = useQuery(componentQueries.all as any);
 
   const isOverall = String(nodeId || "") === "overall";
-  const isRingNode = !!nodeId && (RING_NODE_IDS as readonly string[]).includes(nodeId);
+  const isRingNode = !!nodeId && nodeId !== "overall";
   const canUseRingConditions = !!comp;
   const canUseRingDesign = !!comp;
   const canUseRingImplementation = !!comp;
@@ -142,6 +144,9 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
   const [showRingDesignScore, setShowRingDesignScore] = useState(false);
   const [showRingImplementationScore, setShowRingImplementationScore] = useState(false);
   const [showRingConditionsScore, setShowRingConditionsScore] = useState(false);
+  /** L1 outcome sub-dimension drill (STEM, etc.) — synced with OutcomeScoreView when shell breadcrumbs are used. */
+  const [learningOutcomeScoreL1Id, setLearningOutcomeScoreL1Id] = useState<string | null>(null);
+  const [wellbeingOutcomeScoreL1Id, setWellbeingOutcomeScoreL1Id] = useState<string | null>(null);
   const [conditionsSummaryMode, setConditionsSummaryMode] = useState<"stakeholder" | "type">("stakeholder");
   const [healthSummaryView, setHealthSummaryView] = useState<"overview" | "flags">("overview");
   const [globalFilter, setGlobalFilter] = useState<ScoreFilter>({
@@ -149,6 +154,17 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
     yearKey: listSelectableYearKeys(new Date(), 5)[0],
     aggregation: "singleLatest",
   } as any);
+
+  const exitHealthScoreDrill = useCallback(() => {
+    setShowExperienceScore(false);
+    setShowLearningOutcomeScore(false);
+    setShowWellbeingOutcomeScore(false);
+    setShowRingDesignScore(false);
+    setShowRingImplementationScore(false);
+    setShowRingConditionsScore(false);
+    setLearningOutcomeScoreL1Id(null);
+    setWellbeingOutcomeScoreL1Id(null);
+  }, []);
 
   const learningAdvancementOutcomeScoreData = useMemo(() => {
     if (!comp) return null;
@@ -541,75 +557,171 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
 
   if (showExperienceScore) {
     return (
-      <ExperienceScoreView
-        nodeId={nodeId}
-        title={title}
-        onBack={() => setShowExperienceScore(false)}
-        sourceFilter={globalFilter}
-        onFilterChange={setGlobalFilter}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Status and Health"
+          onNavigateSectionRoot={exitHealthScoreDrill}
+          ancestors={[]}
+          currentTitle="Experience score"
+          onBack={exitHealthScoreDrill}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <ExperienceScoreView
+            nodeId={nodeId}
+            title={title}
+            onBack={exitHealthScoreDrill}
+            sourceFilter={globalFilter}
+            onFilterChange={setGlobalFilter}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showLearningOutcomeScore) {
+    const learningL1Row = learningOutcomeScoreL1Id
+      ? getL1ByIdInTree(LEARNING_ADVANCEMENT_OUTCOME_TREE, learningOutcomeScoreL1Id)
+      : null;
+    const learningHubTitle = "Learning & advancement outcome score";
+    const learningAncestorLabel = "Learning & advancement outcomes";
+    const popLearningL1 = () => setLearningOutcomeScoreL1Id(null);
     return (
-      <OutcomeScoreView
-        nodeId={nodeId}
-        title={title}
-        variant="learningAdvancement"
-        onBack={() => setShowLearningOutcomeScore(false)}
-        sourceFilter={globalFilter}
-        onFilterChange={setGlobalFilter}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Status and Health"
+          onNavigateSectionRoot={exitHealthScoreDrill}
+          ancestors={
+            learningL1Row
+              ? [{ label: learningAncestorLabel, onNavigate: popLearningL1 }]
+              : []
+          }
+          currentTitle={learningL1Row ? learningL1Row.label : learningHubTitle}
+          onBack={learningL1Row ? popLearningL1 : exitHealthScoreDrill}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <OutcomeScoreView
+            nodeId={nodeId}
+            title={title}
+            variant="learningAdvancement"
+            onBack={exitHealthScoreDrill}
+            sourceFilter={globalFilter}
+            onFilterChange={setGlobalFilter}
+            hideShellBackButton
+            selectedL1Id={learningOutcomeScoreL1Id}
+            onSelectedL1IdChange={setLearningOutcomeScoreL1Id}
+          />
+        </div>
+      </div>
     );
   }
 
   if (showWellbeingOutcomeScore) {
+    const wellbeingL1Row = wellbeingOutcomeScoreL1Id
+      ? getL1ByIdInTree(WELLBEING_CONDUCT_OUTCOME_TREE, wellbeingOutcomeScoreL1Id)
+      : null;
+    const wellbeingHubTitle = "Wellbeing & conduct outcome score";
+    const wellbeingAncestorLabel = "Wellbeing & conduct outcomes";
+    const popWellbeingL1 = () => setWellbeingOutcomeScoreL1Id(null);
     return (
-      <OutcomeScoreView
-        nodeId={nodeId}
-        title={title}
-        variant="wellbeingConduct"
-        onBack={() => setShowWellbeingOutcomeScore(false)}
-        sourceFilter={globalFilter}
-        onFilterChange={setGlobalFilter}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Status and Health"
+          onNavigateSectionRoot={exitHealthScoreDrill}
+          ancestors={
+            wellbeingL1Row
+              ? [{ label: wellbeingAncestorLabel, onNavigate: popWellbeingL1 }]
+              : []
+          }
+          currentTitle={wellbeingL1Row ? wellbeingL1Row.label : wellbeingHubTitle}
+          onBack={wellbeingL1Row ? popWellbeingL1 : exitHealthScoreDrill}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <OutcomeScoreView
+            nodeId={nodeId}
+            title={title}
+            variant="wellbeingConduct"
+            onBack={exitHealthScoreDrill}
+            sourceFilter={globalFilter}
+            onFilterChange={setGlobalFilter}
+            hideShellBackButton
+            selectedL1Id={wellbeingOutcomeScoreL1Id}
+            onSelectedL1IdChange={setWellbeingOutcomeScoreL1Id}
+          />
+        </div>
+      </div>
     );
   }
 
   if (showRingDesignScore) {
     return (
-      <DesignScoreView
-        nodeId={nodeId}
-        title={title}
-        onBack={() => setShowRingDesignScore(false)}
-        sourceFilter={globalFilter}
-        onFilterChange={setGlobalFilter}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Status and Health"
+          onNavigateSectionRoot={exitHealthScoreDrill}
+          ancestors={[]}
+          currentTitle="Design score"
+          onBack={exitHealthScoreDrill}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <DesignScoreView
+            nodeId={nodeId}
+            title={title}
+            onBack={exitHealthScoreDrill}
+            sourceFilter={globalFilter}
+            onFilterChange={setGlobalFilter}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showRingImplementationScore) {
     return (
-      <ImplementationScoreView
-        nodeId={nodeId}
-        title={title}
-        onBack={() => setShowRingImplementationScore(false)}
-        sourceFilter={globalFilter}
-        onFilterChange={setGlobalFilter}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Status and Health"
+          onNavigateSectionRoot={exitHealthScoreDrill}
+          ancestors={[]}
+          currentTitle="Implementation score"
+          onBack={exitHealthScoreDrill}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <ImplementationScoreView
+            nodeId={nodeId}
+            title={title}
+            onBack={exitHealthScoreDrill}
+            sourceFilter={globalFilter}
+            onFilterChange={setGlobalFilter}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showRingConditionsScore) {
     return (
-      <RingConditionsScoreView
-        nodeId={nodeId}
-        title={title}
-        onBack={() => setShowRingConditionsScore(false)}
-        sourceFilter={globalFilter}
-        onFilterChange={setGlobalFilter}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Status and Health"
+          onNavigateSectionRoot={exitHealthScoreDrill}
+          ancestors={[]}
+          currentTitle="Conditions score"
+          onBack={exitHealthScoreDrill}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <RingConditionsScoreView
+            nodeId={nodeId}
+            title={title}
+            onBack={exitHealthScoreDrill}
+            sourceFilter={globalFilter}
+            onFilterChange={setGlobalFilter}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
@@ -683,7 +795,10 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                      <button
                         type="button"
                         className="flex flex-col items-center justify-center space-y-2 cursor-pointer group rounded-xl p-3 border border-transparent hover:border-gray-200 hover:bg-slate-50/80 transition-all"
-                        onClick={() => setShowLearningOutcomeScore(true)}
+                        onClick={() => {
+                          setLearningOutcomeScoreL1Id(null);
+                          setShowLearningOutcomeScore(true);
+                        }}
                         data-testid="button-learning-outcome-score"
                      >
                         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1 text-center leading-tight">
@@ -884,7 +999,10 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                      <button
                         type="button"
                         className="flex flex-col items-center justify-center space-y-2 cursor-pointer group rounded-xl p-3 border border-transparent hover:border-gray-200 hover:bg-slate-50/80 transition-all"
-                        onClick={() => setShowWellbeingOutcomeScore(true)}
+                        onClick={() => {
+                          setWellbeingOutcomeScoreL1Id(null);
+                          setShowWellbeingOutcomeScore(true);
+                        }}
                         data-testid="button-wellbeing-outcome-score"
                      >
                         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1 text-center leading-tight">
@@ -1610,7 +1728,10 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                </p>
                              )}
                            <button
-                              onClick={() => setShowLearningOutcomeScore(true)}
+                              onClick={() => {
+                                setLearningOutcomeScoreL1Id(null);
+                                setShowLearningOutcomeScore(true);
+                              }}
                               className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
                               data-testid="link-view-learning-outcome-details"
                            >
@@ -1694,7 +1815,10 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                </p>
                              )}
                            <button
-                              onClick={() => setShowWellbeingOutcomeScore(true)}
+                              onClick={() => {
+                                setWellbeingOutcomeScoreL1Id(null);
+                                setShowWellbeingOutcomeScore(true);
+                              }}
                               className="w-full text-center text-[10px] text-blue-500 hover:text-blue-700 font-medium py-1 transition-colors"
                               data-testid="link-view-wellbeing-outcome-details"
                            >

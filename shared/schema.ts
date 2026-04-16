@@ -104,12 +104,16 @@ export const snapshotDataSchema = z.object({
           policyConsiderationsText: z.string().default(""),
           historyOfChangeText: z.string().default(""),
           otherContextText: z.string().default(""),
+          verification: z
+            .record(z.string(), z.object({ verified: z.boolean().default(false) }))
+            .default({}),
         })
         .default({
           communityOverviewText: "",
           policyConsiderationsText: "",
           historyOfChangeText: "",
           otherContextText: "",
+          verification: {},
         }),
       studentDemographics: z
         .object({
@@ -339,8 +343,9 @@ export const snapshotDataSchema = z.object({
               populationSize: z.string().default(""),
               additionalContext: z.string().default(""),
               keyRepresentatives: z.string().default(""),
+              verified: z.boolean().default(false),
             })
-            .default({ populationSize: "", additionalContext: "", keyRepresentatives: "" }),
+            .default({ populationSize: "", additionalContext: "", keyRepresentatives: "", verified: false }),
           families: z
             .object({
               populationSize: z.string().default(""),
@@ -360,15 +365,17 @@ export const snapshotDataSchema = z.object({
               populationSize: z.string().default(""),
               additionalContext: z.string().default(""),
               keyRepresentatives: z.string().default(""),
+              verified: z.boolean().default(false),
             })
-            .default({ populationSize: "", additionalContext: "", keyRepresentatives: "" }),
+            .default({ populationSize: "", additionalContext: "", keyRepresentatives: "", verified: false }),
           administrationSchool: z
             .object({
               populationSize: z.string().default(""),
               additionalContext: z.string().default(""),
               keyRepresentatives: z.string().default(""),
+              verified: z.boolean().default(false),
             })
-            .default({ populationSize: "", additionalContext: "", keyRepresentatives: "" }),
+            .default({ populationSize: "", additionalContext: "", keyRepresentatives: "", verified: false }),
           otherCommunityLeaders: z
             .object({
               populationSize: z.string().default(""),
@@ -378,11 +385,11 @@ export const snapshotDataSchema = z.object({
             .default({ populationSize: "", additionalContext: "", keyRepresentatives: "" }),
         })
         .default({
-          students: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
+          students: { populationSize: "", additionalContext: "", keyRepresentatives: "", verified: false },
           families: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
           educatorsStaff: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
-          administrationDistrict: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
-          administrationSchool: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
+          administrationDistrict: { populationSize: "", additionalContext: "", keyRepresentatives: "", verified: false },
+          administrationSchool: { populationSize: "", additionalContext: "", keyRepresentatives: "", verified: false },
           otherCommunityLeaders: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
         }),
     })

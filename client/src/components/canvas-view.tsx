@@ -25,6 +25,17 @@ import ComponentWorkingSpaceOverlay from "./component-working-space-overlay";
 import OctagonCard from "./octagon-card";
 import { shouldIgnoreOutsideInteraction } from "@/lib/learner-module-library-dismiss-guard";
 
+type ContextOverviewL3Section =
+  | "contextOverview.communityOverview"
+  | "contextOverview.policyConsiderations"
+  | "contextOverview.historyOfChangeEfforts"
+  | "contextOverview.otherContext";
+
+type StakeholderVerifySection =
+  | "stakeholder.students"
+  | "stakeholder.administrationDistrict"
+  | "stakeholder.administrationSchool";
+
 interface CanvasNode {
   id: string;
   nodeId: string;
@@ -37,6 +48,12 @@ interface CanvasNode {
     schoolName?: string;
     studentCount?: string;
     mission?: string;
+    contextOverviewSectionStatus?: Partial<
+      Record<ContextOverviewL3Section, { hasText: boolean; verified: boolean }>
+    >;
+    stakeholderSectionStatus?: Partial<
+      Record<StakeholderVerifySection, { hasText: boolean; verified: boolean }>
+    >;
   };
   stats: {
     left: number;
@@ -46,11 +63,67 @@ interface CanvasNode {
   }
 }
 
+/** Center school node when the API is still loading, failed, or returned no rows yet (before seed+refetch). */
+const SHELL_OVERALL_CANVAS_NODE: CanvasNode = {
+  id: "shell-overall",
+  nodeId: "overall",
+  title: "Overall School",
+  subtitle: "",
+  x: 600,
+  y: 300,
+  color: "bg-white",
+  stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" },
+};
+
+function nonEmptyStr(v: unknown): boolean {
+  return String(v ?? "").trim().length > 0;
+}
+
 export function componentToCanvasNode(comp: any): CanvasNode {
   const snap = comp.snapshotData || {};
   const ocd: any = (snap as any).overviewContextData || {};
   const studentCount = ocd?.studentCount ?? ocd?.students ?? undefined;
   const mission = ocd?.mission ?? "";
+  const cov = ocd?.contextOverview || {};
+  const covVer = cov.verification || {};
+  const contextOverviewSectionStatus: Partial<
+    Record<ContextOverviewL3Section, { hasText: boolean; verified: boolean }>
+  > = {
+    "contextOverview.communityOverview": {
+      hasText: nonEmptyStr(cov.communityOverviewText),
+      verified: !!covVer.communityOverview?.verified,
+    },
+    "contextOverview.policyConsiderations": {
+      hasText: nonEmptyStr(cov.policyConsiderationsText),
+      verified: !!covVer.policyConsiderations?.verified,
+    },
+    "contextOverview.historyOfChangeEfforts": {
+      hasText: nonEmptyStr(cov.historyOfChangeText),
+      verified: !!covVer.historyOfChange?.verified,
+    },
+    "contextOverview.otherContext": {
+      hasText: nonEmptyStr(cov.otherContextText),
+      verified: !!covVer.otherContext?.verified,
+    },
+  };
+  const sm = ocd?.stakeholderMap || {};
+  function stakeholderRowStatus(key: "students" | "administrationDistrict" | "administrationSchool") {
+    const item = sm[key] || {};
+    return {
+      hasText:
+        nonEmptyStr(item.populationSize) ||
+        nonEmptyStr(item.keyRepresentatives) ||
+        nonEmptyStr(item.additionalContext),
+      verified: !!item.verified,
+    };
+  }
+  const stakeholderSectionStatus: Partial<
+    Record<StakeholderVerifySection, { hasText: boolean; verified: boolean }>
+  > = {
+    "stakeholder.students": stakeholderRowStatus("students"),
+    "stakeholder.administrationDistrict": stakeholderRowStatus("administrationDistrict"),
+    "stakeholder.administrationSchool": stakeholderRowStatus("administrationSchool"),
+  };
   return {
     id: comp.id,
     nodeId: comp.nodeId,
@@ -65,6 +138,8 @@ export function componentToCanvasNode(comp: any): CanvasNode {
             schoolName: String(ocd?.schoolName || comp.title || ""),
             studentCount: studentCount !== undefined && studentCount !== null ? String(studentCount) : "",
             mission: String(mission || ""),
+            contextOverviewSectionStatus,
+            stakeholderSectionStatus,
           }
         : undefined,
     stats: {
@@ -75,13 +150,6 @@ export function componentToCanvasNode(comp: any): CanvasNode {
     },
   };
 }
-
-const FALLBACK_NODES: CanvasNode[] = [
-  { id: "1", nodeId: "algebra", title: "Algebra", subtitle: "STEM Component", x: 600, y: 100, color: "bg-emerald-100", stats: { left: 3, right: 2, leftLabel: "Experiences", rightLabel: "Outcomes" } },
-  { id: "2", nodeId: "math", title: "Math", subtitle: "STEM Component", x: 300, y: 450, color: "bg-emerald-100", stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" } },
-  { id: "3", nodeId: "college_exposure", title: "College Exposure", subtitle: "Access & Opportunity", x: 900, y: 450, color: "bg-blue-100", stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" } },
-  { id: "4", nodeId: "overall", title: "Overall School", subtitle: "", x: 600, y: 300, color: "bg-white", stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" } },
-];
 
 type OverallCenterMode = "overview" | "designed" | "status";
 
@@ -510,33 +578,44 @@ const OctagonNode = ({
                             { key: "policy", label: "Policy considerations", section: "contextOverview.policyConsiderations" as const },
                             { key: "history", label: "History of change efforts", section: "contextOverview.historyOfChangeEfforts" as const },
                             { key: "other", label: "Other context", section: "contextOverview.otherContext" as const },
-                          ].map((row, idx) => (
-                            <ContextMenu key={row.key}>
-                              <ContextMenuTrigger asChild>
-                                <div
-                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    drillToL3(row.section);
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem
-                                  onSelect={(e) => {
-                                    e.preventDefault();
-                                    onNavigateOverall({ level: "L3", section: row.section } as any);
-                                  }}
-                                >
-                                  Navigate
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          ))}
+                          ].map((row, idx) => {
+                            const ctxSt = preview.contextOverviewSectionStatus?.[row.section];
+                            const showUnverified = !!(ctxSt?.hasText && !ctxSt?.verified);
+                            return (
+                              <ContextMenu key={row.key}>
+                                <ContextMenuTrigger asChild>
+                                  <div
+                                    className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      drillToL3(row.section);
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                  >
+                                    <div className="flex items-center justify-center gap-2 flex-wrap w-full px-1">
+                                      <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
+                                      {showUnverified ? (
+                                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
+                                          Not verified
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </ContextMenuTrigger>
+                                <ContextMenuContent>
+                                  <ContextMenuItem
+                                    onSelect={(e) => {
+                                      e.preventDefault();
+                                      onNavigateOverall({ level: "L3", section: row.section } as any);
+                                    }}
+                                  >
+                                    Navigate
+                                  </ContextMenuItem>
+                                </ContextMenuContent>
+                              </ContextMenu>
+                            );
+                          })}
                         </>
                       )}
 
@@ -640,33 +719,44 @@ const OctagonNode = ({
                             { key: "adminDistrict", label: "Administration (District)", section: "stakeholder.administrationDistrict" as const },
                             { key: "adminSchool", label: "Administration (School)", section: "stakeholder.administrationSchool" as const },
                             { key: "other", label: "Other Community Leaders", section: "stakeholder.otherCommunityLeaders" as const },
-                          ].map((row, idx) => (
-                            <ContextMenu key={row.key}>
-                              <ContextMenuTrigger asChild>
-                                <div
-                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    drillToL3(row.section);
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem
-                                  onSelect={(e) => {
-                                    e.preventDefault();
-                                    onNavigateOverall({ level: "L3", section: row.section } as any);
-                                  }}
-                                >
-                                  Navigate
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          ))}
+                          ].map((row, idx) => {
+                            const stSt = preview.stakeholderSectionStatus?.[row.section as StakeholderVerifySection];
+                            const showUnverified = !!(stSt?.hasText && !stSt?.verified);
+                            return (
+                              <ContextMenu key={row.key}>
+                                <ContextMenuTrigger asChild>
+                                  <div
+                                    className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      drillToL3(row.section);
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                  >
+                                    <div className="flex items-center justify-center gap-2 flex-wrap w-full px-1">
+                                      <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
+                                      {showUnverified ? (
+                                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
+                                          Not verified
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </ContextMenuTrigger>
+                                <ContextMenuContent>
+                                  <ContextMenuItem
+                                    onSelect={(e) => {
+                                      e.preventDefault();
+                                      onNavigateOverall({ level: "L3", section: row.section } as any);
+                                    }}
+                                  >
+                                    Navigate
+                                  </ContextMenuItem>
+                                </ContextMenuContent>
+                              </ContextMenu>
+                            );
+                          })}
                         </>
                       )}
                     </div>
@@ -800,11 +890,15 @@ function CanvasViewInner() {
   const deleteMutation = useDeleteComponent();
   const autoSeedAttempted = useRef(false);
 
-  const persistRingLayout = Boolean(isSuccess && Array.isArray(componentsRaw) && componentsRaw.length > 0);
+  /** Use last good list whenever present — don't require isSuccess (refetch errors would hide real nodes). */
+  const componentsList = Array.isArray(componentsRaw) ? componentsRaw : [];
+  const hasComponentRows = componentsList.length > 0;
 
-  const nodes: CanvasNode[] = componentsRaw && Array.isArray(componentsRaw) && componentsRaw.length > 0
-    ? componentsRaw.map(componentToCanvasNode)
-    : FALLBACK_NODES;
+  const persistRingLayout = hasComponentRows;
+
+  const nodes: CanvasNode[] = hasComponentRows
+    ? componentsList.map(componentToCanvasNode)
+    : [SHELL_OVERALL_CANVAS_NODE];
 
   const derivedNodes: CanvasNode[] = useMemo(() => {
     const list = [...nodes];
@@ -1096,6 +1190,7 @@ function CanvasViewInner() {
         }}
       >
         <SheetContent
+          overlayPointerEventsNone
           className={cn(
             "w-full sm:max-w-[800px] p-0 border-l border-gray-200 shadow-2xl flex flex-col bg-white !inset-y-auto !right-0 !bottom-0 !top-[var(--lml-strip-offset,0px)] !h-[calc(100vh-var(--lml-strip-offset,0px))] !max-h-[calc(100vh-var(--lml-strip-offset,0px))]",
           )}

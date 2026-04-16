@@ -37,9 +37,11 @@ function prototypeGeneratedDescription(comp: any): string {
 export default function SchoolAdultExperienceView({
   onBack,
   onOpenComponent,
+  hideShellBackButton = false,
 }: {
   onBack: () => void;
   onOpenComponent: (nodeId: string) => void;
+  hideShellBackButton?: boolean;
 }) {
   const { toggleLibrary, setModuleLibraryAudience } = useLearnerModuleLibrary();
   const { data: componentsRaw } = useQuery(componentQueries.all);
@@ -145,14 +147,16 @@ export default function SchoolAdultExperienceView({
   return (
     <div className="min-h-screen bg-gray-50" data-testid="school-adult-experience-view">
       <div className="max-w-4xl mx-auto px-6 py-6 pb-20 space-y-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-        >
-          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-          Back to Designed Experience
-        </button>
+        {!hideShellBackButton ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+          >
+            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            Back to Designed Experience
+          </button>
+        ) : null}
 
         <div>
           <h1 className="text-xl font-bold text-gray-900">Adult experience (whole school)</h1>

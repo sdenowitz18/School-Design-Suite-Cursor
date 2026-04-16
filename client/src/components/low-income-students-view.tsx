@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil } from "lucide-react";
 import {
   YearTabs,
   YearKey,
@@ -188,15 +188,11 @@ function TestScoresPanel({
   lowIncomeLabel,
   activeSubTab,
   onSubTabChange,
-  onAddSubject,
-  isHistorical,
 }: {
   d: LowIncomeStudentsData;
   lowIncomeLabel: string | null;
   activeSubTab: TestSubTab;
   onSubTabChange: (t: TestSubTab) => void;
-  onAddSubject: () => void;
-  isHistorical: boolean;
 }) {
   const ts = d.testScores;
   const subjectTabs = (ts?.subjects ?? []).map((s) => ({ key: s.label, label: s.label }));
@@ -204,12 +200,7 @@ function TestScoresPanel({
 
   return (
     <div>
-      <SubTabBar
-        tabs={allTabs}
-        active={activeSubTab}
-        onChange={onSubTabChange}
-        onAdd={!isHistorical ? onAddSubject : undefined}
-      />
+      <SubTabBar tabs={allTabs} active={activeSubTab} onChange={onSubTabChange} />
       <ChartDescription>
         <p>
           <BoldText
@@ -291,22 +282,19 @@ function EditForm({ draft, activeTopTab, activeSubTab, onUpdate, onSave, onCance
     return (
       <div className="space-y-3">
         <InfoRow label={liLabel} />
-        <div className="text-xs font-semibold text-gray-500 mb-2">Yearly growth score (out of 10)</div>
-        {(["allStudents", "lowIncome"] as const).map((key) => (
-          <div key={key} className="flex items-center gap-2">
-            <label className="text-xs text-gray-600 w-48 shrink-0">
-              {key === "allStudents" ? "All Students" : "Low-income Students"}
-            </label>
-            <input
-              type="number" min={0} max={10}
-              value={sp[key] != null ? String(sp[key]) : ""}
-              onChange={(e) => onUpdate({ ...draft, studentProgress: { ...sp, [key]: pn(e.target.value) } })}
-              placeholder="—"
-              className="w-20 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 tabular-nums"
-            />
-            <span className="text-xs text-gray-400">/10</span>
-          </div>
-        ))}
+        <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+          <strong className="font-semibold">Student Progress</strong> is read-only (GreatSchools). Switch to another tab
+          to edit school values where supported.
+        </p>
+        <div className="space-y-0.5 pointer-events-none opacity-95">
+          <RatingBar label="All Students" value={sp.allStudents ?? null} barColor="bg-blue-500" />
+          <RatingBar
+            label="Low-income Students"
+            subLabel={liLabel}
+            value={sp.lowIncome ?? null}
+            barColor="bg-amber-500"
+          />
+        </div>
         <div className="flex gap-2 pt-3 border-t border-gray-100">
           <Button size="sm" onClick={onSave}>Save</Button>
           <Button size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
@@ -366,22 +354,19 @@ function EditForm({ draft, activeTopTab, activeSubTab, onUpdate, onSave, onCance
     return (
       <div className="space-y-3">
         <InfoRow label={liLabel} />
-        <div className="text-xs font-semibold text-gray-500 mb-2">Overview score (out of 10)</div>
-        {(["allStudents", "lowIncome"] as const).map((key) => (
-          <div key={key} className="flex items-center gap-2">
-            <label className="text-xs text-gray-600 w-48 shrink-0">
-              {key === "allStudents" ? "All Students" : "Low-income Students"}
-            </label>
-            <input
-              type="number" min={0} max={10}
-              value={ov[key] != null ? String(ov[key]) : ""}
-              onChange={(e) => onUpdate({ ...draft, testScores: { ...ts, overview: { ...ov, [key]: pn(e.target.value) } } })}
-              placeholder="—"
-              className="w-20 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none tabular-nums"
-            />
-            <span className="text-xs text-gray-400">/10</span>
-          </div>
-        ))}
+        <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+          <strong className="font-semibold">Test Scores — Overview</strong> is read-only (GreatSchools). Switch to a
+          subject tab to edit school values.
+        </p>
+        <div className="space-y-0.5 pointer-events-none opacity-95">
+          <RatingBar label="All Students" value={ov.allStudents ?? null} barColor="bg-blue-500" />
+          <RatingBar
+            label="Low-income Students"
+            subLabel={liLabel}
+            value={ov.lowIncome ?? null}
+            barColor="bg-amber-500"
+          />
+        </div>
         <div className="flex gap-2 pt-3 border-t border-gray-100">
           <Button size="sm" onClick={onSave}>Save</Button>
           <Button size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
@@ -450,7 +435,7 @@ export interface LowIncomeStudentsViewProps {
 export function LowIncomeStudentsView({ data, onChange, lowIncomePct }: LowIncomeStudentsViewProps) {
   const isSaved = hasSaved(data);
 
-  const [activeYear, setActiveYear] = useState<YearKey>(() => (isSaved ? "current" : "2026"));
+  const [activeYear, setActiveYear] = useState<YearKey>("current");
   const [activeTopTab, setActiveTopTab] = useState<TopTab>("studentProgress");
   const [activeSubTab, setActiveSubTab] = useState<TestSubTab>("overview");
   const [isEditing, setIsEditing] = useState(false);
@@ -501,20 +486,6 @@ export function LowIncomeStudentsView({ data, onChange, lowIncomePct }: LowIncom
     setIsEditing(false);
   }
 
-  function handleAddSubject() {
-    const label = prompt("New subject name:");
-    if (!label?.trim()) return;
-    const base = isSaved ? saved : emptyData();
-    const ts = base.testScores ?? { overview: null, subjects: [] };
-    const newSub: LisTestSubject = {
-      label: label.trim(),
-      allStudents: { school: null, stateAvg: null },
-      lowIncome: { school: null, stateAvg: null },
-    };
-    onChange({ ...base, testScores: { ...ts, subjects: [...(ts.subjects ?? []), newSub] } });
-    setActiveSubTab(label.trim());
-  }
-
   function toggleVerified(year: string) {
     const prev = verificationForYear(year);
     onChange({ ...saved, verification: { ...saved.verification, [year]: { verified: !prev.verified } } });
@@ -532,13 +503,11 @@ export function LowIncomeStudentsView({ data, onChange, lowIncomePct }: LowIncom
           }}
         />
         <div className="flex items-center gap-2 flex-wrap">
-          {isHistorical && (
-            <VerificationBadge
-              verified={verificationForYear(activeYear).verified}
-              onToggle={() => toggleVerified(activeYear)}
-              asOf={`${activeYear} school year`}
-            />
-          )}
+          <VerificationBadge
+            verified={verificationForYear(isHistorical ? activeYear : "current").verified}
+            onToggle={() => toggleVerified(isHistorical ? activeYear : "current")}
+            asOf={isHistorical ? `${activeYear} school year` : undefined}
+          />
           {!isHistorical && isSaved && saved.currentAsOf && (
             <AsOfLabel asOf={saved.currentAsOf} />
           )}
@@ -557,10 +526,7 @@ export function LowIncomeStudentsView({ data, onChange, lowIncomePct }: LowIncom
       <SubTabBar
         tabs={topTabs}
         active={activeTopTab}
-        onChange={(t) => {
-          setActiveTopTab(t);
-          setIsEditing(false);
-        }}
+        onChange={setActiveTopTab}
       />
 
       {/* Description for tabs without sub-tabs */}
@@ -589,15 +555,38 @@ export function LowIncomeStudentsView({ data, onChange, lowIncomePct }: LowIncom
 
       {/* ── Content ────────────────────────────────────────────────── */}
       {isEditing ? (
-        <EditForm
-          draft={draft}
-          activeTopTab={activeTopTab}
-          activeSubTab={activeSubTab}
-          onUpdate={setDraft}
-          onSave={handleSave}
-          onCancel={handleCancel}
-          lowIncomePct={lowIncomePct ?? null}
-        />
+        <div className="space-y-3">
+          {activeTopTab === "testScores" && (() => {
+            const ts = draft.testScores;
+            const subjectTabs = (ts?.subjects ?? []).map((s) => ({ key: s.label, label: s.label }));
+            const allTabs = [{ key: "overview" as string, label: "Overview" }, ...subjectTabs];
+            return (
+              <>
+                <SubTabBar tabs={allTabs} active={activeSubTab} onChange={setActiveSubTab} />
+                <ChartDescription>
+                  <p>
+                    <BoldText
+                      text={
+                        activeSubTab === "overview"
+                          ? GS_COPY.lowIncomeTestScoresOverview
+                          : GS_COPY.lowIncomeTestScoresSubject(activeSubTab)
+                      }
+                    />
+                  </p>
+                </ChartDescription>
+              </>
+            );
+          })()}
+          <EditForm
+            draft={draft}
+            activeTopTab={activeTopTab}
+            activeSubTab={activeSubTab}
+            onUpdate={setDraft}
+            onSave={handleSave}
+            onCancel={handleCancel}
+            lowIncomePct={lowIncomePct ?? null}
+          />
+        </div>
       ) : activeTopTab === "studentProgress" ? (
         <StudentProgressPanel d={d} lowIncomeLabel={lowIncomeLabel} />
       ) : activeTopTab === "graduationRates" ? (
@@ -608,8 +597,6 @@ export function LowIncomeStudentsView({ data, onChange, lowIncomePct }: LowIncom
           lowIncomeLabel={lowIncomeLabel}
           activeSubTab={activeSubTab}
           onSubTabChange={setActiveSubTab}
-          onAddSubject={handleAddSubject}
-          isHistorical={isHistorical}
         />
       )}
     </div>

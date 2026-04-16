@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil } from "lucide-react";
 import {
   YearTabs,
   YearKey,
@@ -44,6 +44,19 @@ export const DUMMY_2026: TestScoresSubject[] = [
   { label: "Algebra I", schoolPct: 48, stateAvg: 44 },
 ];
 
+/** Fixed subject list from GreatSchools / state feed — labels are not user-editable. */
+const TEST_SCORES_CANONICAL = DUMMY_2026;
+
+function normalizeSubjectsToCanonical(subjects: TestScoresSubject[]): TestScoresSubject[] {
+  return TEST_SCORES_CANONICAL.map((template, i) => {
+    const match = subjects.find((r) => r.label === template.label) ?? subjects[i];
+    return {
+      ...template,
+      schoolPct: match?.schoolPct ?? null,
+    };
+  });
+}
+
 const DUMMY_VERIFIED = { "2025": { verified: true }, "2026": { verified: false } };
 
 function pn(s: string): number | null {
@@ -75,6 +88,7 @@ function TestScoresVisual({ subjects }: { subjects: TestScoresSubject[] }) {
 }
 
 // ─── Edit form ─────────────────────────────────────────────────────────────────
+// Subject names and row order are fixed (canonical). State avg is read-only.
 
 interface EditFormProps {
   draft: TestScoresSubject[];
@@ -84,52 +98,39 @@ interface EditFormProps {
 }
 
 function EditForm({ draft, onChange, onSave, onCancel }: EditFormProps) {
-  function update(i: number, partial: Partial<TestScoresSubject>) {
-    onChange(draft.map((r, idx) => (idx === i ? { ...r, ...partial } : r)));
+  function updateSchoolPct(i: number, schoolPct: number | null) {
+    onChange(draft.map((r, idx) => (idx === i ? { ...r, schoolPct } : r)));
   }
 
   return (
     <div className="space-y-1">
-      {/* Column headers */}
       <div className="flex items-center gap-2 mb-2 text-[11px] text-gray-400 font-medium">
         <div className="w-44 shrink-0">Subject</div>
         <div className="w-24 shrink-0">School %</div>
-        <div className="flex-1 text-gray-300">State avg (2026, read-only)</div>
+        <div className="flex-1 text-gray-300">State avg (read-only)</div>
       </div>
 
       {draft.map((s, i) => {
-        const d26 = DUMMY_2026.find((r) => r.label === s.label);
-        const displayAvg = d26?.stateAvg ?? s.stateAvg;
+        const displayAvg = s.stateAvg;
         return (
-          <div key={i} className="flex items-center gap-2 py-1 border-b border-gray-50">
-            <input
-              value={s.label}
-              onChange={(e) => update(i, { label: e.target.value })}
-              className="w-44 shrink-0 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-400"
-              placeholder="Subject name"
-            />
+          <div key={`${s.label}-${i}`} className="flex items-center gap-2 py-1 border-b border-gray-50">
+            <div className="w-44 shrink-0 text-xs text-gray-800 leading-tight pr-1">{s.label}</div>
             <div className="flex items-center gap-1 w-24 shrink-0">
               <input
                 type="number"
                 min={0}
                 max={100}
                 value={s.schoolPct != null ? String(s.schoolPct) : ""}
-                onChange={(e) => update(i, { schoolPct: pn(e.target.value), stateAvg: displayAvg })}
+                onChange={(e) => updateSchoolPct(i, pn(e.target.value))}
                 placeholder="—"
                 className="w-16 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-400 tabular-nums"
+                aria-label={`${s.label} school percent proficient`}
               />
               <span className="text-xs text-gray-400">%</span>
             </div>
             <span className="flex-1 text-[11px] text-gray-400 tabular-nums">
               {displayAvg != null ? `${displayAvg}%` : "—"}
             </span>
-            <button
-              onClick={() => onChange(draft.filter((_, idx) => idx !== i))}
-              className="text-gray-300 hover:text-red-400 transition-colors ml-1 shrink-0"
-              title="Remove"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
           </div>
         );
       })}
@@ -152,9 +153,7 @@ export interface TestScoresViewProps {
 export function TestScoresView({ data, onChange }: TestScoresViewProps) {
   const hasSavedCurrent = !!(data?.subjects && data.subjects.length > 0);
 
-  const [activeYear, setActiveYear] = useState<YearKey>(() =>
-    hasSavedCurrent ? "current" : "2026",
-  );
+  const [activeYear, setActiveYear] = useState<YearKey>("current");
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<TestScoresSubject[]>([]);
 
@@ -162,9 +161,13 @@ export function TestScoresView({ data, onChange }: TestScoresViewProps) {
   const isHistorical = activeYear !== "current";
 
   const displaySubjects =
-    activeYear === "2025" ? DUMMY_2025 :
-    activeYear === "2026" ? DUMMY_2026 :
-    hasSavedCurrent ? saved.subjects : DUMMY_2026;
+    activeYear === "2025"
+      ? DUMMY_2025
+      : activeYear === "2026"
+        ? DUMMY_2026
+        : hasSavedCurrent
+          ? normalizeSubjectsToCanonical(saved.subjects)
+          : DUMMY_2026;
 
   const showingBaseline = !isHistorical && !hasSavedCurrent;
 
@@ -172,15 +175,16 @@ export function TestScoresView({ data, onChange }: TestScoresViewProps) {
     saved.verification[year] ?? DUMMY_VERIFIED[year as keyof typeof DUMMY_VERIFIED] ?? { verified: false };
 
   function handleEdit() {
-    setDraft(displaySubjects.map((s) => ({ ...s })));
+    setDraft(normalizeSubjectsToCanonical(displaySubjects));
     setIsEditing(true);
   }
 
   function handleSave() {
     onChange({
       ...saved,
-      subjects: draft,
+      subjects: normalizeSubjectsToCanonical(draft),
       currentAsOf: preserveOrSetCurrentAsOf(saved.currentAsOf),
+      verification: { ...saved.verification, current: { verified: false } },
     });
     setIsEditing(false);
     setActiveYear("current");
@@ -207,13 +211,11 @@ export function TestScoresView({ data, onChange }: TestScoresViewProps) {
           }}
         />
         <div className="flex items-center gap-2 flex-wrap">
-          {isHistorical && (
-            <VerificationBadge
-              verified={verificationForYear(activeYear).verified}
-              onToggle={() => toggleVerified(activeYear)}
-              asOf={`${activeYear} school year`}
-            />
-          )}
+          <VerificationBadge
+            verified={verificationForYear(isHistorical ? activeYear : "current").verified}
+            onToggle={() => toggleVerified(isHistorical ? activeYear : "current")}
+            asOf={isHistorical ? `${activeYear} school year` : undefined}
+          />
           {!isHistorical && hasSavedCurrent && saved.currentAsOf && (
             <AsOfLabel asOf={saved.currentAsOf} />
           )}

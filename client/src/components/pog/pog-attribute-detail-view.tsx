@@ -28,11 +28,13 @@ export default function PogAttributeDetailView({
   attributeId,
   onChange,
   onBack,
+  hideShellBackButton = false,
 }: {
   portrait: PortraitOfGraduate;
   attributeId: string;
   onChange: (next: PortraitOfGraduate) => void;
   onBack: () => void;
+  hideShellBackButton?: boolean;
 }) {
   const showAdvanced = POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI;
   const { data: allComponents } = useQuery(componentQueries.all);
@@ -157,6 +159,24 @@ export default function PogAttributeDetailView({
   if (!attr) {
     return (
       <div className="max-w-2xl mx-auto px-6 py-8 pb-16 space-y-4" data-testid="pog-attribute-not-found">
+        {!hideShellBackButton ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+          >
+            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            Back
+          </button>
+        ) : null}
+        <div className="text-sm text-gray-500">Attribute not found.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-8 pb-16 space-y-8" data-testid="pog-attribute-detail-view">
+      {!hideShellBackButton ? (
         <button
           type="button"
           onClick={onBack}
@@ -165,21 +185,7 @@ export default function PogAttributeDetailView({
           <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
           Back
         </button>
-        <div className="text-sm text-gray-500">Attribute not found.</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="max-w-2xl mx-auto px-6 py-8 pb-16 space-y-8" data-testid="pog-attribute-detail-view">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back
-      </button>
+      ) : null}
 
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-3">

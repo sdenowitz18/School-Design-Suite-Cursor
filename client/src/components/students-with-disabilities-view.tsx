@@ -176,9 +176,7 @@ export interface StudentsWithDisabilitiesViewProps {
 export function StudentsWithDisabilitiesView({ data, onChange }: StudentsWithDisabilitiesViewProps) {
   const hasSavedCurrent = !!(data?.subjects && data.subjects.length > 0);
 
-  const [activeYear, setActiveYear] = useState<YearKey>(() =>
-    hasSavedCurrent ? "current" : "2026",
-  );
+  const [activeYear, setActiveYear] = useState<YearKey>("current");
   const [activeSubject, setActiveSubject] = useState("Biology");
   const [isEditing, setIsEditing] = useState(false);
   const [draftSubject, setDraftSubject] = useState<SwdSubject | null>(null);
@@ -261,13 +259,11 @@ export function StudentsWithDisabilitiesView({ data, onChange }: StudentsWithDis
           }}
         />
         <div className="flex items-center gap-2 flex-wrap">
-          {isHistorical && (
-            <VerificationBadge
-              verified={verificationForYear(activeYear).verified}
-              onToggle={() => toggleVerified(activeYear)}
-              asOf={`${activeYear} school year`}
-            />
-          )}
+          <VerificationBadge
+            verified={verificationForYear(isHistorical ? activeYear : "current").verified}
+            onToggle={() => toggleVerified(isHistorical ? activeYear : "current")}
+            asOf={isHistorical ? `${activeYear} school year` : undefined}
+          />
           {!isHistorical && hasSavedCurrent && saved.currentAsOf && (
             <AsOfLabel asOf={saved.currentAsOf} />
           )}
@@ -288,7 +284,12 @@ export function StudentsWithDisabilitiesView({ data, onChange }: StudentsWithDis
         active={activeSubject}
         onChange={(t) => {
           setActiveSubject(t);
-          setIsEditing(false);
+          if (isEditing) {
+            const sub = displaySubjects.find((s) => s.label === t) ?? displaySubjects[0];
+            if (sub) {
+              setDraftSubject({ ...sub, allStudents: { ...sub.allStudents }, swd: { ...sub.swd } });
+            }
+          }
         }}
         onAdd={!isHistorical ? handleAddSubject : undefined}
       />

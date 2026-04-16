@@ -91,9 +91,18 @@ interface ExperienceScoreViewProps {
   onBack: () => void;
   sourceFilter?: ScoreFilter;
   onFilterChange?: (next: ScoreFilter) => void;
+  /** When a parent renders DrilldownNavBar, hide the duplicate “Back to Status & Health” row. */
+  hideShellBackButton?: boolean;
 }
 
-export default function ExperienceScoreView({ nodeId, title, onBack, sourceFilter, onFilterChange }: ExperienceScoreViewProps) {
+export default function ExperienceScoreView({
+  nodeId,
+  title,
+  onBack,
+  sourceFilter,
+  onFilterChange,
+  hideShellBackButton = false,
+}: ExperienceScoreViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const { data: allComponents } = useQuery({ ...componentQueries.all, enabled: !!nodeId } as any);
   const updateMutation = useUpdateComponent();
@@ -342,15 +351,17 @@ export default function ExperienceScoreView({ nodeId, title, onBack, sourceFilte
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 pb-24">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-        data-testid="button-back-to-health"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to Status &amp; Health
-      </button>
+      {!hideShellBackButton ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+          data-testid="button-back-to-health"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back to Status &amp; Health
+        </button>
+      ) : null}
 
       <ScoreFilterBar filter={filter} onChange={setFilter as any} actors={actorOptions} testId="experience-filter-bar" />
 

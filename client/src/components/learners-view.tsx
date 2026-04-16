@@ -367,22 +367,26 @@ export default function LearnersView({
   title,
   onBack,
   subProfileContext,
+  hideShellBackButton = false,
 }: {
   nodeId?: string;
   title?: string;
   onBack: () => void;
   subProfileContext?: LearnersSubProfileContext | null;
+  hideShellBackButton?: boolean;
 }) {
   return (
     <div data-testid="learners-view">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group px-6 pt-6"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back
-      </button>
+      {!hideShellBackButton ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group px-6 pt-6"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back
+        </button>
+      ) : null}
       <LearnersEditor nodeId={nodeId} title={title} variant="standalone" subProfileContext={subProfileContext} />
     </div>
   );

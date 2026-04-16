@@ -281,9 +281,17 @@ interface RingConditionsScoreViewProps {
   onBack: () => void;
   sourceFilter?: ScoreFilter;
   onFilterChange?: (next: ScoreFilter) => void;
+  hideShellBackButton?: boolean;
 }
 
-export default function RingConditionsScoreView({ nodeId, title, onBack, sourceFilter, onFilterChange }: RingConditionsScoreViewProps) {
+export default function RingConditionsScoreView({
+  nodeId,
+  title,
+  onBack,
+  sourceFilter,
+  onFilterChange,
+  hideShellBackButton = false,
+}: RingConditionsScoreViewProps) {
   const { actors: globalActors, addActor: addGlobalActor, mergeActors: mergeGlobalActors } = useGlobalActors();
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const updateMutation = useUpdateComponent();
@@ -515,10 +523,12 @@ export default function RingConditionsScoreView({ nodeId, title, onBack, sourceF
 
   return (
     <div className="space-y-6 pb-12 max-w-5xl mx-auto p-6" data-testid="ring-conditions-score-view">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to Status &amp; Health
-      </button>
+      {!hideShellBackButton ? (
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back to Status &amp; Health
+        </button>
+      ) : null}
 
       <ScoreFilterBar filter={filter} onChange={setFilter as any} actors={actorOptions} />
 

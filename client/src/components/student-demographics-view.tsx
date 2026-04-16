@@ -3,7 +3,7 @@ import { Pencil, Plus, Trash2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { VerificationBadge, AsOfLabel, preserveOrSetCurrentAsOf } from "./academic-chart-shared";
+import { VerificationBadge, AsOfLabel } from "./academic-chart-shared";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,11 +60,12 @@ const DUMMY_2026: StudentDemographicsData = {
   femalePct: 51,
 };
 
-function emptyCurrentData(): StudentDemographicsData {
+/** Current starts as a copy of the most recent year (2026) so users edit from a baseline, not from scratch. */
+function defaultCurrentData(): StudentDemographicsData {
   return {
-    raceEthnicity: DEFAULT_RACE_LABELS.map((label) => ({ label, pct: null })),
-    lowIncomePct: null,
-    femalePct: null,
+    raceEthnicity: DUMMY_2026.raceEthnicity.map((e) => ({ ...e })),
+    lowIncomePct: DUMMY_2026.lowIncomePct,
+    femalePct: DUMMY_2026.femalePct,
   };
 }
 
@@ -427,7 +428,7 @@ export function StudentDemographicsView({
   const [activeTab, setActiveTab] = useState<"2025" | "2026" | "current">("current");
   const [isEditing, setIsEditing] = useState(false);
 
-  const currentData: StudentDemographicsData = data ?? emptyCurrentData();
+  const currentData: StudentDemographicsData = data ?? defaultCurrentData();
 
   const isCurrentUnset =
     currentData.raceEthnicity.every((e) => e.pct === null) &&
@@ -440,14 +441,22 @@ export function StudentDemographicsView({
     activeTab === "2025" ? DUMMY_2025 : activeTab === "2026" ? DUMMY_2026 : currentData;
 
   const handleEdit = () => {
-    setDraft(currentData);
+    const now = new Date().toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    setDraft({ ...currentData, currentAsOf: now });
     setIsEditing(true);
   };
 
   const handleSave = () => {
     onChange({
       ...draft,
-      currentAsOf: preserveOrSetCurrentAsOf(draft.currentAsOf ?? currentData.currentAsOf),
+      verification: {
+        ...(draft.verification ?? currentData.verification ?? {}),
+        current: { verified: false },
+      },
     });
     setIsEditing(false);
   };
@@ -490,15 +499,20 @@ export function StudentDemographicsView({
         </div>
 
         <div className="flex items-center gap-2">
-          {activeTab !== "current" && (
+          {activeTab !== "current" ? (
             <VerificationBadge
               verified={getVerification(activeTab).verified}
               onToggle={() => toggleVerified(activeTab)}
               asOf={`${activeTab} school year`}
             />
+          ) : (
+            <VerificationBadge
+              verified={getVerification("current").verified}
+              onToggle={() => toggleVerified("current")}
+            />
           )}
-          {activeTab === "current" && currentData.currentAsOf && (
-            <AsOfLabel asOf={currentData.currentAsOf} />
+          {activeTab === "current" && (isEditing ? draft.currentAsOf : currentData.currentAsOf) && (
+            <AsOfLabel asOf={(isEditing ? draft.currentAsOf : currentData.currentAsOf)!} />
           )}
           {activeTab === "current" && !isEditing && (
             <Button

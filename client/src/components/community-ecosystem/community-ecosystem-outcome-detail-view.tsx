@@ -25,10 +25,12 @@ export default function CommunityEcosystemOutcomeDetailView({
   outcome,
   onBack,
   onSave,
+  hideShellBackButton = false,
 }: {
   outcome: CommunityEcosystemOutcome;
   onBack: () => void;
   onSave: (patch: Partial<CommunityEcosystemOutcome>) => void;
+  hideShellBackButton?: boolean;
 }) {
   const [description, setDescription] = useState(outcome.description ?? "");
   const [metricUnit, setMetricUnit] = useState<CommunityEcosystemMetricUnit>(outcome.metricUnit);
@@ -78,14 +80,16 @@ export default function CommunityEcosystemOutcomeDetailView({
   return (
     <div className="min-h-screen bg-gray-50" data-testid="community-ecosystem-outcome-detail">
       <div className="max-w-2xl mx-auto px-6 py-6 pb-20 space-y-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-        >
-          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-          Back
-        </button>
+        {!hideShellBackButton ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+          >
+            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            Back
+          </button>
+        ) : null}
 
         <div>
           <h1 className="text-xl font-bold text-gray-900">{outcome.label}</h1>

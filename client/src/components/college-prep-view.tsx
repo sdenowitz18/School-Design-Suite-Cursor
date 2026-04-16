@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil } from "lucide-react";
 import {
   YearTabs,
   YearKey,
@@ -13,7 +13,6 @@ import {
   BenchmarkBar,
   BenchmarkLegend,
 } from "./academic-chart-shared";
-import { cn } from "@/lib/utils";
 import { GS_COPY } from "@/lib/greatschools-chart-narrative";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,6 +50,19 @@ export const DUMMY_2026: CollegePrepRow[] = [
   { label: "Enrolled in IB (9–12)", value: 9, stateAvg: 5, type: "pct" },
 ];
 
+/** Fixed metric set for College Prep — labels, types, and row order are not user-editable. */
+const COLLEGE_PREP_CANONICAL = DUMMY_2026;
+
+function normalizeRowsToCanonical(rows: CollegePrepRow[]): CollegePrepRow[] {
+  return COLLEGE_PREP_CANONICAL.map((template, i) => {
+    const match = rows.find((r) => r.label === template.label) ?? rows[i];
+    return {
+      ...template,
+      value: match?.value ?? null,
+    };
+  });
+}
+
 const DUMMY_VERIFIED = { "2025": { verified: true }, "2026": { verified: false } };
 
 function barConfig(type: CollegePrepRow["type"]): { maxValue: number; unit: string } {
@@ -87,7 +99,8 @@ function CollegePrepVisual({ rows }: { rows: CollegePrepRow[] }) {
 }
 
 // ─── Edit form ─────────────────────────────────────────────────────────────────
-// State avg is read-only (pulled from DUMMY_2026). Users edit only school values.
+// Metric names, types, and row order are fixed (canonical). State avg is read-only.
+// Users edit only school values on Current.
 
 interface EditFormProps {
   draft: CollegePrepRow[];
@@ -101,80 +114,49 @@ function pn(s: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-const TYPE_OPTIONS: { value: CollegePrepRow["type"]; label: string }[] = [
-  { value: "pct", label: "%" },
-  { value: "sat", label: "SAT (0–1600)" },
-  { value: "act", label: "ACT (0–36)" },
-];
-
-/** Standard metrics shipped with the chart — type stays fixed so bars/scales stay correct. */
-const CANONICAL_LABELS = new Set(DUMMY_2026.map((r) => r.label));
+function typeHint(t: CollegePrepRow["type"]): string {
+  if (t === "sat") return "SAT";
+  if (t === "act") return "ACT";
+  return "%";
+}
 
 function EditForm({ draft, onChange, onSave, onCancel }: EditFormProps) {
-  function update(i: number, partial: Partial<CollegePrepRow>) {
-    onChange(draft.map((r, idx) => (idx === i ? { ...r, ...partial } : r)));
+  function updateValue(i: number, value: number | null) {
+    onChange(draft.map((r, idx) => (idx === i ? { ...r, value } : r)));
   }
 
   return (
     <div className="space-y-1">
-      {/* Column headers */}
       <div className="flex items-center gap-2 mb-2 text-[11px] text-gray-400 font-medium">
         <div className="w-48 shrink-0">Metric</div>
-        <div className="w-24 shrink-0">School value</div>
-        <div className="w-24 shrink-0">Type</div>
-        <div className="flex-1 text-gray-300">State avg (2026, read-only)</div>
+        <div className="w-28 shrink-0">School value</div>
+        <div className="flex-1 text-gray-300">State avg (read-only)</div>
       </div>
 
       {draft.map((row, i) => {
         const { maxValue, unit } = barConfig(row.type);
-        // Find matching row in DUMMY_2026 for the state avg display
-        const d26 = DUMMY_2026.find((r) => r.label === row.label);
-        const displayAvg = d26?.stateAvg ?? row.stateAvg;
-        const typeLocked = CANONICAL_LABELS.has(row.label);
+        const displayAvg = row.stateAvg;
         return (
-          <div key={i} className="flex items-center gap-2 py-1 border-b border-gray-50">
-            <input
-              value={row.label}
-              onChange={(e) => update(i, { label: e.target.value })}
-              className="w-48 shrink-0 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-              placeholder="Metric name"
-            />
-            <div className="flex items-center gap-1 w-24 shrink-0">
+          <div key={`${row.label}-${i}`} className="flex items-center gap-2 py-1 border-b border-gray-50">
+            <div className="w-48 shrink-0 text-xs text-gray-800 leading-tight pr-1">{row.label}</div>
+            <div className="flex items-center gap-1 w-28 shrink-0">
               <input
                 type="number"
                 min={0}
                 max={maxValue}
                 value={row.value != null ? String(row.value) : ""}
-                onChange={(e) => update(i, { value: pn(e.target.value), stateAvg: displayAvg })}
+                onChange={(e) => updateValue(i, pn(e.target.value))}
                 placeholder="—"
                 className="w-16 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 tabular-nums"
+                aria-label={`${row.label} school value`}
               />
-              <span className="text-xs text-gray-400">{unit}</span>
+              <span className="text-[10px] text-gray-400 w-8 shrink-0" title="Scale">
+                {unit || typeHint(row.type)}
+              </span>
             </div>
-            <select
-              value={row.type}
-              disabled={typeLocked}
-              title={typeLocked ? "Type is fixed for standard College Prep metrics" : undefined}
-              onChange={(e) => update(i, { type: e.target.value as CollegePrepRow["type"] })}
-              className={cn(
-                "w-24 shrink-0 rounded border border-gray-200 px-1 py-1 text-xs focus:outline-none",
-                typeLocked && "bg-gray-50 text-gray-600 cursor-not-allowed",
-              )}
-            >
-              {TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
             <span className="flex-1 text-[11px] text-gray-400 tabular-nums">
               {displayAvg != null ? `${displayAvg}${unit}` : "—"}
             </span>
-            <button
-              onClick={() => onChange(draft.filter((_, idx) => idx !== i))}
-              className="text-gray-300 hover:text-red-400 transition-colors ml-1 shrink-0"
-              title="Remove row"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
           </div>
         );
       })}
@@ -197,20 +179,22 @@ export interface CollegePrepViewProps {
 export function CollegePrepView({ data, onChange }: CollegePrepViewProps) {
   const hasSavedCurrent = !!(data?.rows && data.rows.length > 0);
 
-  const [activeYear, setActiveYear] = useState<YearKey>(() =>
-    hasSavedCurrent ? "current" : "2026",
-  );
+  const [activeYear, setActiveYear] = useState<YearKey>("current");
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<CollegePrepRow[]>([]);
 
   const saved = data ?? { rows: [], currentAsOf: null, verification: {} };
   const isHistorical = activeYear !== "current";
 
-  // What rows to display
+  // What rows to display (Current always uses canonical metric set)
   const displayRows =
-    activeYear === "2025" ? DUMMY_2025 :
-    activeYear === "2026" ? DUMMY_2026 :
-    hasSavedCurrent ? saved.rows : DUMMY_2026;
+    activeYear === "2025"
+      ? DUMMY_2025
+      : activeYear === "2026"
+        ? DUMMY_2026
+        : hasSavedCurrent
+          ? normalizeRowsToCanonical(saved.rows)
+          : DUMMY_2026;
 
   const showingBaseline = !isHistorical && !hasSavedCurrent;
 
@@ -219,16 +203,16 @@ export function CollegePrepView({ data, onChange }: CollegePrepViewProps) {
     saved.verification[year] ?? DUMMY_VERIFIED[year as keyof typeof DUMMY_VERIFIED] ?? { verified: false };
 
   function handleEdit() {
-    // Pre-fill from current display data (saved if exists, else 2026 baseline)
-    setDraft(displayRows.map((r) => ({ ...r })));
+    setDraft(normalizeRowsToCanonical(displayRows));
     setIsEditing(true);
   }
 
   function handleSave() {
     onChange({
       ...saved,
-      rows: draft,
+      rows: normalizeRowsToCanonical(draft),
       currentAsOf: preserveOrSetCurrentAsOf(saved.currentAsOf),
+      verification: { ...saved.verification, current: { verified: false } },
     });
     setIsEditing(false);
     setActiveYear("current");
@@ -255,13 +239,11 @@ export function CollegePrepView({ data, onChange }: CollegePrepViewProps) {
           }}
         />
         <div className="flex items-center gap-2 flex-wrap">
-          {isHistorical && (
-            <VerificationBadge
-              verified={verificationForYear(activeYear).verified}
-              onToggle={() => toggleVerified(activeYear)}
-              asOf={`${activeYear} school year`}
-            />
-          )}
+          <VerificationBadge
+            verified={verificationForYear(isHistorical ? activeYear : "current").verified}
+            onToggle={() => toggleVerified(isHistorical ? activeYear : "current")}
+            asOf={isHistorical ? `${activeYear} school year` : undefined}
+          />
           {!isHistorical && hasSavedCurrent && saved.currentAsOf && (
             <AsOfLabel asOf={saved.currentAsOf} />
           )}

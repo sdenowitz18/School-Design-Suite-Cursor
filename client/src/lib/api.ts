@@ -9,15 +9,20 @@ async function fetchJson(url: string, options?: RequestInit) {
 }
 
 export const componentQueries = {
+  /** Fresh list on each visit — avoids stale empty [] hiding real DB rows (global staleTime is Infinity). */
   all: queryOptions({
     queryKey: ["components"],
     queryFn: () => fetchJson("/api/components"),
+    staleTime: 0,
+    refetchOnMount: "always",
   }),
   byNodeId: (nodeId: string) =>
     queryOptions({
       queryKey: ["components", nodeId],
       queryFn: () => fetchJson(`/api/components/${nodeId}`),
       enabled: !!nodeId,
+      staleTime: 0,
+      refetchOnMount: "always",
     }),
 };
 
@@ -55,6 +60,7 @@ export function useSeedComponents() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["components"] });
+      queryClient.refetchQueries({ queryKey: ["components"] });
     },
   });
 }
@@ -71,6 +77,7 @@ export function useCreateComponent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["components"] });
+      queryClient.refetchQueries({ queryKey: ["components"] });
     },
   });
 }
@@ -87,6 +94,7 @@ export function useDeleteComponent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["components"] });
+      queryClient.refetchQueries({ queryKey: ["components"] });
     },
   });
 }

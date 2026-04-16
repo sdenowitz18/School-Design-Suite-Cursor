@@ -784,37 +784,40 @@ export default function AdultsView({
   title,
   onBack,
   subProfileContext,
-  initialSliceKey = null,
+  focusedSliceKey,
+  onFocusedSliceKeyChange,
+  hideShellBackButton = false,
 }: {
   nodeId?: string;
   title?: string;
   onBack: () => void;
   subProfileContext?: AdultsSubProfileContext | null;
-  /** Deep-link from Designed Experience chips — opens that role's detail page first. */
-  initialSliceKey?: string | null;
+  focusedSliceKey: string | null;
+  onFocusedSliceKeyChange: (key: string | null) => void;
+  hideShellBackButton?: boolean;
 }) {
-  const [focusedSliceKey, setFocusedSliceKey] = useState<string | null>(() => initialSliceKey ?? null);
-
   return (
     <div data-testid="adults-view">
-      <button
-        type="button"
-        onClick={() => {
-          if (focusedSliceKey) setFocusedSliceKey(null);
-          else onBack();
-        }}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group px-6 pt-6"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        {focusedSliceKey ? "Back to roles" : "Back to Designed Experience"}
-      </button>
+      {!hideShellBackButton ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (focusedSliceKey) onFocusedSliceKeyChange(null);
+            else onBack();
+          }}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group px-6 pt-6"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          {focusedSliceKey ? "Back to roles" : "Back to Designed Experience"}
+        </button>
+      ) : null}
       <AdultsEditor
         nodeId={nodeId}
         title={title}
         variant="standalone"
         subProfileContext={subProfileContext ?? null}
         focusedSliceKey={focusedSliceKey}
-        onFocusedSliceKeyChange={setFocusedSliceKey}
+        onFocusedSliceKeyChange={onFocusedSliceKeyChange}
       />
     </div>
   );

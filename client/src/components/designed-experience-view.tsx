@@ -60,16 +60,17 @@ import {
   type CommunityEcosystemOutcome,
 } from "./community-ecosystem/community-ecosystem-types";
 import OutcomeScoreView from "./outcome-score-view";
+import { DrilldownNavBar } from "./drilldown-nav-bar";
 import { SchemaPickerSheet } from "./de-schema-picker-sheet";
 import { ExpertViewShell } from "./expert-view/ExpertViewShell";
 import type { ElementsExpertData } from "./expert-view/expert-view-types";
 import { LEAP_SCHEMA, OUTCOME_SCHEMA, PRACTICE_SCHEMA, SUPPORT_SCHEMA } from "./designed-experience-schemas";
 import { formatLearnerSelectionPreview, learnerSelectionIsKey } from "./learner-design-schema";
-import { adultLeafChipsFromSelections } from "./adult-design-schema";
+import { adultLeafChipsFromSelections, formatAdultSliceTitle } from "./adult-design-schema";
 import SupportGroupsHubView from "./support-groups-hub-view";
 import SupportGroupDetailView from "./support-group-detail-view";
 import SupportDetailView from "./support-detail-view";
-import type { SupportGroupKey } from "./support-groups-config";
+import { SUPPORT_GROUPS, type SupportGroupKey } from "./support-groups-config";
 import PogHubView from "./pog/pog-hub-view";
 import PogAttributeDetailView from "./pog/pog-attribute-detail-view";
 import PogOutcomesFirstView from "./pog/pog-outcomes-first-view";
@@ -872,8 +873,8 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   const [showLeapSummary, setShowLeapSummary] = useState(false);
   const [showLearnersView, setShowLearnersView] = useState(false);
   const [showAdultsView, setShowAdultsView] = useState(false);
-  /** When opening Adults from a role chip, land on that slice's detail page. */
-  const [adultsInitialSliceKey, setAdultsInitialSliceKey] = useState<string | null>(null);
+  /** When opening Adults from a role chip, land on that slice's detail page (controlled with DrilldownNavBar). */
+  const [adultsFocusedSliceKey, setAdultsFocusedSliceKey] = useState<string | null>(null);
   const [showSchoolLearnerExperienceView, setShowSchoolLearnerExperienceView] = useState(false);
   const [showSchoolAdultExperienceView, setShowSchoolAdultExperienceView] = useState(false);
   const [showComponentLearnerManage, setShowComponentLearnerManage] = useState(false);
@@ -978,6 +979,88 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   useEffect(() => {
     deRef.current = (componentData as any)?.designedExperienceData || {};
   }, [componentData]);
+
+  const syncDeRefFromServer = useCallback(() => {
+    deRef.current = (componentData as any)?.designedExperienceData || {};
+  }, [componentData]);
+
+  const refreshKeyDesignElementsFromServer = useCallback(() => {
+    const latestDe: any = (componentData as any)?.designedExperienceData || {};
+    let latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
+    if (!isOverall && activeSubId) {
+      const sub = (latestDe.subcomponents || []).find((s: any) => s.id === activeSubId);
+      latestKde =
+        sub?.keyDesignElements || { aims: sub?.aims || [], practices: sub?.practices || [], supports: sub?.supports || [] };
+    }
+    setKeyDesignElements({
+      aims: Array.isArray(latestKde?.aims) ? latestKde.aims : [],
+      practices: Array.isArray(latestKde?.practices) ? latestKde.practices : [],
+      supports: Array.isArray(latestKde?.supports) ? latestKde.supports : [],
+    });
+  }, [componentData, isOverall, activeSubId]);
+
+  const navigateToDesignedExperienceRoot = useCallback(() => {
+    syncDeRefFromServer();
+    refreshKeyDesignElementsFromServer();
+    setShowOutcomeScore(false);
+    setShowOutcomeSummary(false);
+    setShowLeapSummary(false);
+    setSelectedOutcomeNav(null);
+    setSelectedLeapLabel(null);
+    setLeapSummaryFocusLabel(null);
+    setCommunityEcosystemDetailId(null);
+    setShowCommunityEcosystemManage(false);
+    setShowSchoolLearnerExperienceView(false);
+    setShowComponentLearnerManage(false);
+    setShowSchoolAdultExperienceView(false);
+    setShowComponentAdultManage(false);
+    setComponentAdultFocusSubId(null);
+    setShowPortraitOfGraduateManage(false);
+    setShowPogManageLearnMore(false);
+    setShowLearnersView(false);
+    setShowAdultsView(false);
+    setAdultsFocusedSliceKey(null);
+    setSupportNav({ mode: "none" });
+    setExpertViewOpen(false);
+    setPogNav({ mode: "hub" });
+    setPogReturnToDetailAttrId(null);
+    setPogOutcomesFirstDraft({ selectedKeys: [], step: 1 });
+  }, [refreshKeyDesignElementsFromServer, syncDeRefFromServer]);
+
+  const exitLearnersView = useCallback(() => {
+    syncDeRefFromServer();
+    setShowLearnersView(false);
+  }, [syncDeRefFromServer]);
+
+  const exitAdultsView = useCallback(() => {
+    syncDeRefFromServer();
+    setAdultsFocusedSliceKey(null);
+    setShowAdultsView(false);
+  }, [syncDeRefFromServer]);
+
+  const adultsShellBack = useCallback(() => {
+    if (adultsFocusedSliceKey) setAdultsFocusedSliceKey(null);
+    else exitAdultsView();
+  }, [adultsFocusedSliceKey, exitAdultsView]);
+
+  const supportGroupTitle = useCallback((key: SupportGroupKey) => SUPPORT_GROUPS.find((g) => g.key === key)?.title ?? key, []);
+
+  const exitLeapSummary = useCallback(() => {
+    refreshKeyDesignElementsFromServer();
+    setLeapSummaryFocusLabel(null);
+    setShowLeapSummary(false);
+  }, [refreshKeyDesignElementsFromServer]);
+
+  const exitOutcomeSummary = useCallback(() => {
+    refreshKeyDesignElementsFromServer();
+    setShowOutcomeSummary(false);
+  }, [refreshKeyDesignElementsFromServer]);
+
+  const goToOutcomesHub = useCallback(() => {
+    setShowOutcomeScore(false);
+    setSelectedOutcomeNav(null);
+    setShowOutcomeSummary(true);
+  }, []);
 
   useEffect(() => {
     if (!nodeId || !componentData) return;
@@ -1501,37 +1584,102 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
   }, [portraitOfGraduate]);
 
   if (showOutcomeScore) {
+    const fromDetail = !!selectedOutcomeNav;
+    const outcomeCrumbLabel = selectedOutcomeNav
+      ? (selectedOutcomeNav.l3?.trim() ? `${selectedOutcomeNav.l2} · ${selectedOutcomeNav.l3}` : selectedOutcomeNav.l2)
+      : "";
+    const scoreAncestors = fromDetail
+      ? [
+          { label: "Outcomes", onNavigate: goToOutcomesHub },
+          { label: outcomeCrumbLabel, onNavigate: () => setShowOutcomeScore(false) },
+        ]
+      : [{ label: "Outcomes", onNavigate: goToOutcomesHub }];
+    const scoreShellBack = () => {
+      if (fromDetail) setShowOutcomeScore(false);
+      else goToOutcomesHub();
+    };
     return (
-      <OutcomeScoreView
-        nodeId={nodeId}
-        title={title}
-        variant="learningAdvancement"
-        onBack={() => setShowOutcomeScore(false)}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={scoreAncestors}
+          currentTitle="Learning & advancement outcome score"
+          onBack={scoreShellBack}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <OutcomeScoreView
+            nodeId={nodeId}
+            title={title}
+            variant="learningAdvancement"
+            onBack={scoreShellBack}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (selectedOutcomeNav) {
+    const standaloneOutcomeTitle = (selectedOutcomeNav.l3 || "").trim()
+      ? String(selectedOutcomeNav.l3).trim()
+      : selectedOutcomeNav.l2;
     return (
-      <OutcomeDetailView
-        nodeId={nodeId}
-        title={title}
-        outcomeLabel={selectedOutcomeNav.l2}
-        l3OutcomeLabel={selectedOutcomeNav.l3 ?? undefined}
-        onBack={() => setSelectedOutcomeNav(null)}
-        onOpenOutcomeScore={() => setShowOutcomeScore(true)}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[
+            {
+              label: "Outcomes",
+              onNavigate: () => {
+                setSelectedOutcomeNav(null);
+                setShowOutcomeSummary(true);
+              },
+            },
+          ]}
+          currentTitle={standaloneOutcomeTitle}
+          onBack={() => setSelectedOutcomeNav(null)}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <OutcomeDetailView
+            nodeId={nodeId}
+            title={title}
+            outcomeLabel={selectedOutcomeNav.l2}
+            l3OutcomeLabel={selectedOutcomeNav.l3 ?? undefined}
+            onBack={() => setSelectedOutcomeNav(null)}
+            onOpenOutcomeScore={() => setShowOutcomeScore(true)}
+            hideTopBack
+          />
+        </div>
+      </div>
     );
   }
 
   if (selectedLeapLabel) {
+    const backToLeapHub = () => {
+      setSelectedLeapLabel(null);
+      setShowLeapSummary(true);
+    };
     return (
-      <LeapDetailView
-        nodeId={nodeId}
-        title={title}
-        leapLabel={selectedLeapLabel}
-        onBack={() => setSelectedLeapLabel(null)}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[{ label: "Leaps", onNavigate: backToLeapHub }]}
+          currentTitle={selectedLeapLabel}
+          onBack={backToLeapHub}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <LeapDetailView
+            nodeId={nodeId}
+            title={title}
+            leapLabel={selectedLeapLabel}
+            onBack={backToLeapHub}
+            hideTopBack
+          />
+        </div>
+      </div>
     );
   }
 
@@ -1539,120 +1687,219 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     ? communityEcosystemOutcomes.find((o) => o.id === communityEcosystemDetailId)
     : undefined;
   if (communityEcosystemDetailId && isOverall && selectedCommunityEcosystem) {
+    const backToCommunityHub = () => {
+      setCommunityEcosystemDetailId(null);
+      setShowCommunityEcosystemManage(true);
+    };
     return (
-      <CommunityEcosystemOutcomeDetailView
-        outcome={selectedCommunityEcosystem}
-        onBack={() => setCommunityEcosystemDetailId(null)}
-        onSave={(patch) => patchCommunityEcosystemOutcome(selectedCommunityEcosystem.id, patch)}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[
+            {
+              label: "Community & ecosystem",
+              onNavigate: backToCommunityHub,
+            },
+          ]}
+          currentTitle={selectedCommunityEcosystem.label}
+          onBack={() => setCommunityEcosystemDetailId(null)}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <CommunityEcosystemOutcomeDetailView
+            outcome={selectedCommunityEcosystem}
+            onBack={() => setCommunityEcosystemDetailId(null)}
+            onSave={(patch) => patchCommunityEcosystemOutcome(selectedCommunityEcosystem.id, patch)}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showCommunityEcosystemManage && isOverall) {
+    const exitCommunityManage = () => {
+      syncDeRefFromServer();
+      setShowCommunityEcosystemManage(false);
+    };
     return (
-      <CommunityEcosystemManageView
-        plainText={communityEcosystemPlainText}
-        onPlainTextChange={setCommunityEcosystemPlainText}
-        outcomes={communityEcosystemOutcomes}
-        onChange={setCommunityEcosystemOutcomes}
-        onPatchOutcome={patchCommunityEcosystemOutcome}
-        onManageDetails={(id) => {
-          setShowCommunityEcosystemManage(false);
-          setCommunityEcosystemDetailId(id);
-        }}
-        onBack={() => {
-          const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          deRef.current = latestDe;
-          setShowCommunityEcosystemManage(false);
-        }}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Community & ecosystem"
+          onBack={exitCommunityManage}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <CommunityEcosystemManageView
+            plainText={communityEcosystemPlainText}
+            onPlainTextChange={setCommunityEcosystemPlainText}
+            outcomes={communityEcosystemOutcomes}
+            onChange={setCommunityEcosystemOutcomes}
+            onPatchOutcome={patchCommunityEcosystemOutcome}
+            onManageDetails={(id) => {
+              setShowCommunityEcosystemManage(false);
+              setCommunityEcosystemDetailId(id);
+            }}
+            onBack={exitCommunityManage}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showSchoolLearnerExperienceView && isOverall) {
+    const exitSchoolLearner = () => setShowSchoolLearnerExperienceView(false);
     return (
-      <SchoolLearnerExperienceView
-        onBack={() => setShowSchoolLearnerExperienceView(false)}
-        onOpenComponent={(targetNodeId) => {
-          setShowSchoolLearnerExperienceView(false);
-          onRequestOpenComponent?.(targetNodeId);
-        }}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Learner experience (whole school)"
+          onBack={exitSchoolLearner}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <SchoolLearnerExperienceView
+            onBack={exitSchoolLearner}
+            onOpenComponent={(targetNodeId) => {
+              setShowSchoolLearnerExperienceView(false);
+              onRequestOpenComponent?.(targetNodeId);
+            }}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showComponentLearnerManage && !isOverall && nodeId) {
+    const exitComponentLearner = () => {
+      syncDeRefFromServer();
+      setShowComponentLearnerManage(false);
+    };
     return (
-      <ComponentLearnerExperienceView
-        nodeId={nodeId}
-        componentTitle={title || "Component"}
-        initialSubcomponents={subcomponents}
-        onBack={() => {
-          const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          deRef.current = latestDe;
-          setShowComponentLearnerManage(false);
-        }}
-        onOpenSubcomponent={(subId) => {
-          setShowComponentLearnerManage(false);
-          setActiveSubId(subId);
-        }}
-        onSubcomponentsUpdated={(subs) => setSubcomponents(subs)}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle={`Learner experience — ${title || "Component"}`}
+          onBack={exitComponentLearner}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <ComponentLearnerExperienceView
+            nodeId={nodeId}
+            componentTitle={title || "Component"}
+            initialSubcomponents={subcomponents}
+            onBack={exitComponentLearner}
+            onOpenSubcomponent={(subId) => {
+              setShowComponentLearnerManage(false);
+              setActiveSubId(subId);
+            }}
+            onSubcomponentsUpdated={(subs) => setSubcomponents(subs)}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showSchoolAdultExperienceView && isOverall) {
+    const exitSchoolAdult = () => setShowSchoolAdultExperienceView(false);
     return (
-      <SchoolAdultExperienceView
-        onBack={() => setShowSchoolAdultExperienceView(false)}
-        onOpenComponent={(targetNodeId) => {
-          setShowSchoolAdultExperienceView(false);
-          onRequestOpenComponent?.(targetNodeId);
-        }}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Adult experience (whole school)"
+          onBack={exitSchoolAdult}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <SchoolAdultExperienceView
+            onBack={exitSchoolAdult}
+            onOpenComponent={(targetNodeId) => {
+              setShowSchoolAdultExperienceView(false);
+              onRequestOpenComponent?.(targetNodeId);
+            }}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showComponentAdultManage && !isOverall && nodeId) {
+    const exitComponentAdult = () => {
+      syncDeRefFromServer();
+      setComponentAdultFocusSubId(null);
+      setShowComponentAdultManage(false);
+    };
     return (
-      <ComponentAdultExperienceView
-        nodeId={nodeId}
-        componentTitle={title || "Component"}
-        initialAdultSubcomponents={adultSubcomponents}
-        focusSubId={componentAdultFocusSubId}
-        onBack={() => {
-          const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          deRef.current = latestDe;
-          setComponentAdultFocusSubId(null);
-          setShowComponentAdultManage(false);
-        }}
-        onAdultSubcomponentsUpdated={(subs) => setAdultSubcomponents(subs)}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle={`Adult experience — ${title || "Component"}`}
+          onBack={exitComponentAdult}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <ComponentAdultExperienceView
+            nodeId={nodeId}
+            componentTitle={title || "Component"}
+            initialAdultSubcomponents={adultSubcomponents}
+            focusSubId={componentAdultFocusSubId}
+            onBack={exitComponentAdult}
+            onAdultSubcomponentsUpdated={(subs) => setAdultSubcomponents(subs)}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showPortraitOfGraduateManage && isOverall) {
+    const exitPortraitManage = () => {
+      syncDeRefFromServer();
+      setShowPogManageLearnMore(false);
+      setShowPortraitOfGraduateManage(false);
+    };
     if (showPogManageLearnMore) {
       return (
-        <div className="min-h-screen bg-gray-50" data-testid="pog-learn-more-from-manage">
-          <PogLearnMoreView onBack={() => setShowPogManageLearnMore(false)} />
+        <div className="min-h-screen bg-gray-50 flex flex-col" data-testid="pog-learn-more-from-manage">
+          <DrilldownNavBar
+            sectionTitle="Designed Experience"
+            onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+            ancestors={[
+              {
+                label: "Portrait of a Graduate",
+                onNavigate: () => setShowPogManageLearnMore(false),
+              },
+            ]}
+            currentTitle="Learn more"
+            onBack={() => setShowPogManageLearnMore(false)}
+          />
+          <div className="flex-1 min-h-0 overflow-auto">
+            <PogLearnMoreView onBack={() => setShowPogManageLearnMore(false)} hideShellBackButton />
+          </div>
         </div>
       );
     }
     return (
-      <div className="min-h-screen bg-gray-50" data-testid="portrait-of-graduate-manage-page">
-        <div className="max-w-4xl mx-auto px-6 py-6 pb-20 space-y-6">
-          <button
-            type="button"
-            onClick={() => {
-              setShowPogManageLearnMore(false);
-              setShowPortraitOfGraduateManage(false);
-            }}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-          >
-            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-            Back to Designed Experience
-          </button>
+      <div className="min-h-screen bg-gray-50 flex flex-col" data-testid="portrait-of-graduate-manage-page">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Portrait of a Graduate"
+          onBack={exitPortraitManage}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <div className="max-w-4xl mx-auto px-6 py-6 pb-20 space-y-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-xl font-bold text-gray-900">Portrait of a Graduate</h1>
@@ -1696,71 +1943,90 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
             }
           />
         </div>
+        </div>
       </div>
     );
   }
 
   if (showAdultsView) {
+    const adultsTitle = adultsFocusedSliceKey ? formatAdultSliceTitle(adultsFocusedSliceKey) : "Adults";
     return (
-      <AdultsView
-        nodeId={nodeId}
-        title={title}
-        subProfileContext={subProfileContext}
-        initialSliceKey={adultsInitialSliceKey}
-        onBack={() => {
-          const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          deRef.current = latestDe;
-          setAdultsInitialSliceKey(null);
-          setShowAdultsView(false);
-        }}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={
+            adultsFocusedSliceKey
+              ? [{ label: "Adults", onNavigate: () => setAdultsFocusedSliceKey(null) }]
+              : []
+          }
+          currentTitle={adultsTitle}
+          onBack={adultsShellBack}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <AdultsView
+            nodeId={nodeId}
+            title={title}
+            subProfileContext={subProfileContext}
+            focusedSliceKey={adultsFocusedSliceKey}
+            onFocusedSliceKeyChange={setAdultsFocusedSliceKey}
+            onBack={exitAdultsView}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showLearnersView) {
     return (
-      <LearnersView
-        nodeId={nodeId}
-        title={title}
-        subProfileContext={subProfileContext}
-        onBack={() => {
-          const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          deRef.current = latestDe;
-          setShowLearnersView(false);
-        }}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Learners"
+          onBack={exitLearnersView}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <LearnersView
+            nodeId={nodeId}
+            title={title}
+            subProfileContext={subProfileContext}
+            onBack={exitLearnersView}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (showLeapSummary) {
     return (
-      <LeapSummaryView
-        nodeId={nodeId}
-        title={title}
-        manageSubScope={!isOverall && activeSubId ? { flavor: "learner", subId: activeSubId } : null}
-        focusLeapLabel={leapSummaryFocusLabel}
-        onOpenLeapDetail={(label) => {
-          setShowLeapSummary(false);
-          setLeapSummaryFocusLabel(null);
-          setSelectedLeapLabel(label);
-        }}
-        onBack={() => {
-          const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          let latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
-          if (!isOverall && activeSubId) {
-            const sub = (latestDe.subcomponents || []).find((s: any) => s.id === activeSubId);
-            latestKde =
-              sub?.keyDesignElements || { aims: sub?.aims || [], practices: sub?.practices || [], supports: sub?.supports || [] };
-          }
-          setKeyDesignElements({
-            aims: Array.isArray(latestKde?.aims) ? latestKde.aims : [],
-            practices: Array.isArray(latestKde?.practices) ? latestKde.practices : [],
-            supports: Array.isArray(latestKde?.supports) ? latestKde.supports : [],
-          });
-          setLeapSummaryFocusLabel(null);
-          setShowLeapSummary(false);
-        }}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Leaps"
+          onBack={exitLeapSummary}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <LeapSummaryView
+            nodeId={nodeId}
+            title={title}
+            manageSubScope={!isOverall && activeSubId ? { flavor: "learner", subId: activeSubId } : null}
+            focusLeapLabel={leapSummaryFocusLabel}
+            hideTopBack
+            onOpenLeapDetail={(label) => {
+              setShowLeapSummary(false);
+              setLeapSummaryFocusLabel(null);
+              setSelectedLeapLabel(label);
+            }}
+            onBack={exitLeapSummary}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -1770,118 +2036,197 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         nodeId={nodeId}
         title={title}
         manageSubScope={!isOverall && activeSubId ? { flavor: "learner", subId: activeSubId } : null}
-        onBack={() => {
-          const latestDe: any = (componentData as any)?.designedExperienceData || {};
-          let latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
-          if (!isOverall && activeSubId) {
-            const sub = (latestDe.subcomponents || []).find((s: any) => s.id === activeSubId);
-            latestKde =
-              sub?.keyDesignElements || { aims: sub?.aims || [], practices: sub?.practices || [], supports: sub?.supports || [] };
-          }
-          setKeyDesignElements({
-            aims: Array.isArray(latestKde?.aims) ? latestKde.aims : [],
-            practices: Array.isArray(latestKde?.practices) ? latestKde.practices : [],
-            supports: Array.isArray(latestKde?.supports) ? latestKde.supports : [],
-          });
-          setShowOutcomeSummary(false);
-        }}
+        onNavigateDesignedExperienceRoot={navigateToDesignedExperienceRoot}
+        onBack={exitOutcomeSummary}
         onOpenOutcomeScore={() => setShowOutcomeScore(true)}
       />
     );
   }
 
   if (isOverall && pogNav.mode === "detail") {
+    const pogAttr = (portraitOfGraduate.attributes || []).find((a) => a.id === pogNav.attributeId);
+    const pogAttrTitle = pogAttr?.name?.trim() || "Attribute";
+    const backFromPogAttr = () => setPogNav({ mode: "hub" });
     return (
-      <div className="min-h-screen bg-gray-50" data-testid="pog-attribute-detail-page">
-        <PogAttributeDetailView
-          portrait={portraitOfGraduate}
-          attributeId={pogNav.attributeId}
-          onChange={setPortraitOfGraduate}
-          onBack={() => setPogNav({ mode: "hub" })}
+      <div className="min-h-screen bg-gray-50 flex flex-col" data-testid="pog-attribute-detail-page">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[
+            {
+              label: "Portrait of a Graduate",
+              onNavigate: backFromPogAttr,
+            },
+          ]}
+          currentTitle={pogAttrTitle}
+          onBack={backFromPogAttr}
         />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <PogAttributeDetailView
+            portrait={portraitOfGraduate}
+            attributeId={pogNav.attributeId}
+            onChange={setPortraitOfGraduate}
+            onBack={backFromPogAttr}
+            hideShellBackButton
+          />
+        </div>
       </div>
     );
   }
 
   if (isOverall && pogNav.mode === "outcomesFirst") {
+    const pogOutcomesShellBack = () => {
+      if (pogReturnToDetailAttrId) {
+        const attrId = pogReturnToDetailAttrId;
+        setPogReturnToDetailAttrId(null);
+        setPogNav({ mode: "detail", attributeId: attrId });
+        return;
+      }
+      setPogNav({ mode: "hub" });
+    };
     return (
-      <div className="p-6">
-        <PogOutcomesFirstView
-          portrait={portraitOfGraduate}
-          onChange={setPortraitOfGraduate}
-          outcomeSchema={OUTCOME_SCHEMA as any}
-          selectedKeys={pogOutcomesFirstDraft.selectedKeys}
-          onSelectedKeysChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, selectedKeys: next }))}
-          step={pogOutcomesFirstDraft.step}
-          onStepChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, step: next }))}
-          onOpenOutcome={(label) => setSelectedOutcomeNav({ l2: label })}
-          onBack={() => {
-            if (pogReturnToDetailAttrId) {
-              const attrId = pogReturnToDetailAttrId;
-              setPogReturnToDetailAttrId(null);
-              setPogNav({ mode: "detail", attributeId: attrId });
-              return;
-            }
-            setPogNav({ mode: "hub" });
-          }}
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[
+            {
+              label: "Portrait of a Graduate",
+              onNavigate: () => {
+                setPogReturnToDetailAttrId(null);
+                setPogNav({ mode: "hub" });
+              },
+            },
+          ]}
+          currentTitle="Link outcomes"
+          onBack={pogOutcomesShellBack}
         />
+        <div className="flex-1 min-h-0 overflow-auto p-6">
+          <PogOutcomesFirstView
+            portrait={portraitOfGraduate}
+            onChange={setPortraitOfGraduate}
+            outcomeSchema={OUTCOME_SCHEMA as any}
+            selectedKeys={pogOutcomesFirstDraft.selectedKeys}
+            onSelectedKeysChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, selectedKeys: next }))}
+            step={pogOutcomesFirstDraft.step}
+            onStepChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, step: next }))}
+            onOpenOutcome={(label) => setSelectedOutcomeNav({ l2: label })}
+            onBack={pogOutcomesShellBack}
+          />
+        </div>
       </div>
     );
   }
 
   if (supportNav.mode === "hub") {
+    const exitSupports = () => setSupportNav({ mode: "none" });
     return (
-      <SupportGroupsHubView
-        nodeId={nodeId}
-        title={title}
-        onBack={() => setSupportNav({ mode: "none" })}
-        onOpenGroup={(groupKey) => setSupportNav({ mode: "group", groupKey })}
-        onOpenSupport={(groupKey, label) => setSupportNav({ mode: "detail", groupKey, label, backTo: "hub" })}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Supports"
+          onBack={exitSupports}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <SupportGroupsHubView
+            nodeId={nodeId}
+            title={title}
+            onBack={exitSupports}
+            onOpenGroup={(groupKey) => setSupportNav({ mode: "group", groupKey })}
+            onOpenSupport={(groupKey, label) => setSupportNav({ mode: "detail", groupKey, label, backTo: "hub" })}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (supportNav.mode === "group") {
+    const gk = supportNav.groupKey;
+    const gTitle = supportGroupTitle(gk);
+    const backToSupportHub = () => setSupportNav({ mode: "hub" });
     return (
-      <SupportGroupDetailView
-        nodeId={nodeId}
-        title={title}
-        groupKey={supportNav.groupKey}
-        onBack={() => setSupportNav({ mode: "hub" })}
-        onOpenSupport={(label) => setSupportNav({ mode: "detail", groupKey: supportNav.groupKey, label, backTo: "group" })}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[{ label: "Supports", onNavigate: backToSupportHub }]}
+          currentTitle={gTitle}
+          onBack={backToSupportHub}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <SupportGroupDetailView
+            nodeId={nodeId}
+            title={title}
+            groupKey={gk}
+            onBack={backToSupportHub}
+            onOpenSupport={(label) => setSupportNav({ mode: "detail", groupKey: gk, label, backTo: "group" })}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (supportNav.mode === "detail") {
+    const gk = supportNav.groupKey;
+    const gTitle = supportGroupTitle(gk);
+    const backFromSupportDetail = () =>
+      setSupportNav(
+        supportNav.backTo === "hub" ? { mode: "hub" } : { mode: "group", groupKey: gk },
+      );
     return (
-      <SupportDetailView
-        nodeId={nodeId}
-        title={title}
-        supportLabel={supportNav.label}
-        onBack={() =>
-          setSupportNav(
-            supportNav.backTo === "hub"
-              ? { mode: "hub" }
-              : { mode: "group", groupKey: supportNav.groupKey },
-          )
-        }
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[
+            { label: "Supports", onNavigate: () => setSupportNav({ mode: "hub" }) },
+            { label: gTitle, onNavigate: () => setSupportNav({ mode: "group", groupKey: gk }) },
+          ]}
+          currentTitle={supportNav.label}
+          onBack={backFromSupportDetail}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <SupportDetailView
+            nodeId={nodeId}
+            title={title}
+            supportLabel={supportNav.label}
+            onBack={backFromSupportDetail}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
   if (expertViewOpen) {
+    const exitExpert = () => setExpertViewOpen(false);
     return (
-      <ExpertViewShell
-        key={`${expertViewNonce}-${nodeId ?? ""}`}
-        componentTitle={isEditingSub && focusSub?.name ? focusSub.name : title || "Component"}
-        componentType={isOverall ? "center" : "ring"}
-        initialActiveElement={expertViewInitialElement}
-        data={elementsExpertData}
-        onChange={setElementsExpertData}
-        onBack={() => setExpertViewOpen(false)}
-        schoolWideElementsExpertData={schoolWideElementsExpertData}
-      />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <DrilldownNavBar
+          sectionTitle="Designed Experience"
+          onNavigateSectionRoot={navigateToDesignedExperienceRoot}
+          ancestors={[]}
+          currentTitle="Key design elements"
+          onBack={exitExpert}
+        />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <ExpertViewShell
+            key={`${expertViewNonce}-${nodeId ?? ""}`}
+            componentTitle={isEditingSub && focusSub?.name ? focusSub.name : title || "Component"}
+            componentType={isOverall ? "center" : "ring"}
+            initialActiveElement={expertViewInitialElement}
+            data={elementsExpertData}
+            onChange={setElementsExpertData}
+            onBack={exitExpert}
+            schoolWideElementsExpertData={schoolWideElementsExpertData}
+            hideShellBackButton
+          />
+        </div>
+      </div>
     );
   }
 
@@ -2279,7 +2624,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
               size="sm"
               className="text-xs text-gray-500 h-auto p-0"
               onClick={() => {
-                setAdultsInitialSliceKey(null);
+                setAdultsFocusedSliceKey(null);
                 setShowAdultsView(true);
               }}
             >
@@ -2300,7 +2645,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                     key={c.key}
                     type="button"
                     onClick={() => {
-                      setAdultsInitialSliceKey(c.key);
+                      setAdultsFocusedSliceKey(c.key);
                       setShowAdultsView(true);
                     }}
                     className={cn(

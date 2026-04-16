@@ -1878,6 +1878,7 @@ function L2SubDimensionPage({
   onAddMeasure,
   onWeightChange,
   onBack,
+  hideShellBackButton = false,
 }: {
   l1: OutcomeSubDimL1;
   subdimensionTree: OutcomeSubDimL1[];
@@ -1893,6 +1894,7 @@ function L2SubDimensionPage({
   onAddMeasure: (m: OutcomeMeasure) => void;
   onWeightChange: (id: string, w: "H" | "M" | "L") => void;
   onBack: () => void;
+  hideShellBackButton?: boolean;
 }) {
   const [filterL2Id, setFilterL2Id] = useState<string | null>(null);
   const [addPanelType, setAddPanelType] = useState<"measure" | "perception" | null>(null);
@@ -1930,10 +1932,12 @@ function L2SubDimensionPage({
 
   return (
     <div className="space-y-4">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to {parentScoreTitle}
-      </button>
+      {!hideShellBackButton ? (
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back to {parentScoreTitle}
+        </button>
+      ) : null}
 
       {/* Score dashboard – matches L1 page layout */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -2067,6 +2071,11 @@ interface OutcomeScoreViewProps {
   onFilterChange?: (next: ScoreFilter) => void;
   /** Which healthData outcome bucket and subdimension tree to use. */
   variant?: OutcomeScoreVariant;
+  /** When a parent renders DrilldownNavBar, hide the duplicate back row on the L1 dashboard. */
+  hideShellBackButton?: boolean;
+  /** With `onSelectedL1IdChange`, L1 sub-dimension drill is controlled by the parent (shell breadcrumbs). */
+  selectedL1Id?: string | null;
+  onSelectedL1IdChange?: (id: string | null) => void;
 }
 
 export default function OutcomeScoreView({
@@ -2076,6 +2085,9 @@ export default function OutcomeScoreView({
   sourceFilter,
   onFilterChange,
   variant = "learningAdvancement",
+  hideShellBackButton = false,
+  selectedL1Id: selectedL1IdControlled,
+  onSelectedL1IdChange,
 }: OutcomeScoreViewProps) {
   const outCfg = OUTCOME_VARIANT_CONFIG[variant];
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
@@ -2106,7 +2118,16 @@ export default function OutcomeScoreView({
   const [overallMeasures, setOverallMeasures] = useState<OutcomeMeasure[]>([]);
   const [subDimensionWeights, setSubDimensionWeights] = useState<Record<string, "H" | "M" | "L">>({});
   const [initialized, setInitialized] = useState(false);
-  const [selectedL1Id, setSelectedL1Id] = useState<string | null>(null);
+  const [internalSelectedL1Id, setInternalSelectedL1Id] = useState<string | null>(null);
+  const isL1DrillControlled = onSelectedL1IdChange != null;
+  const selectedL1Id = isL1DrillControlled ? (selectedL1IdControlled ?? null) : internalSelectedL1Id;
+  const setSelectedL1Id = useCallback(
+    (id: string | null) => {
+      if (isL1DrillControlled) onSelectedL1IdChange(id);
+      else setInternalSelectedL1Id(id);
+    },
+    [isL1DrillControlled, onSelectedL1IdChange],
+  );
   const [addOverallType, setAddOverallType] = useState<"measure" | "perception" | null>(null);
   const [addSubdimType, setAddSubdimType] = useState<"measure" | "perception" | null>(null);
   const [filterL1Id, setFilterL1Id] = useState<string | null>(null);
@@ -2296,6 +2317,7 @@ export default function OutcomeScoreView({
           onAddMeasure={addMeasure}
           onWeightChange={handleWeightChange}
           onBack={() => setSelectedL1Id(null)}
+          hideShellBackButton={hideShellBackButton}
         />
       </div>
     );
@@ -2322,10 +2344,12 @@ export default function OutcomeScoreView({
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 pb-24">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group" data-testid="button-back-to-health">
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to Status & Health
-      </button>
+      {!hideShellBackButton ? (
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group" data-testid="button-back-to-health">
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back to Status & Health
+        </button>
+      ) : null}
 
       <ScoreFilterBar filter={filter} onChange={setFilter as any} actors={actorOptions} testId="outcome-filter-bar" />
 

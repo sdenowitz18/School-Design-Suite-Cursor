@@ -38,6 +38,7 @@ export default function ComponentLearnerExperienceView({
   onBack,
   onOpenSubcomponent,
   onSubcomponentsUpdated,
+  hideShellBackButton = false,
 }: {
   nodeId: string;
   componentTitle: string;
@@ -45,6 +46,7 @@ export default function ComponentLearnerExperienceView({
   onBack: () => void;
   onOpenSubcomponent: (subId: string) => void;
   onSubcomponentsUpdated?: (subs: DESubcomponent[]) => void;
+  hideShellBackButton?: boolean;
 }) {
   const comp = useMergedComponent(nodeId);
   const updateMutation = useUpdateComponent();
@@ -109,14 +111,16 @@ export default function ComponentLearnerExperienceView({
   return (
     <div className="min-h-screen bg-gray-50" data-testid="component-learner-experience-view">
       <div className="max-w-4xl mx-auto px-6 py-6 pb-20 space-y-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-        >
-          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-          Back to Designed Experience
-        </button>
+        {!hideShellBackButton ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+          >
+            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            Back to Designed Experience
+          </button>
+        ) : null}
 
         <div>
           <h1 className="text-xl font-bold text-gray-900">Learner experience — {componentTitle}</h1>

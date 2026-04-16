@@ -65,12 +65,14 @@ export default function SupportGroupDetailView({
   groupKey,
   onBack,
   onOpenSupport,
+  hideShellBackButton = false,
 }: {
   nodeId?: string;
   title?: string;
   groupKey: SupportGroupKey;
   onBack: () => void;
   onOpenSupport: (label: string) => void;
+  hideShellBackButton?: boolean;
 }) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const { data: allComponents } = useQuery(componentQueries.all);
@@ -164,10 +166,12 @@ export default function SupportGroupDetailView({
 
   return (
     <div className="space-y-6 pb-12 max-w-5xl mx-auto p-6" data-testid="support-group-detail">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to supports
-      </button>
+      {!hideShellBackButton ? (
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back to supports
+        </button>
+      ) : null}
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-4">

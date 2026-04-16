@@ -12,13 +12,21 @@ const PLACEHOLDER_LINKS = [
   "Examples applied in other blueprints",
 ];
 
-export default function PogLearnMoreView({ onBack }: { onBack: () => void }) {
+export default function PogLearnMoreView({
+  onBack,
+  hideShellBackButton = false,
+}: {
+  onBack: () => void;
+  hideShellBackButton?: boolean;
+}) {
   return (
     <div className="space-y-6 pb-12 max-w-5xl mx-auto p-6" data-testid="pog-learn-more-view">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back
-      </button>
+      {!hideShellBackButton ? (
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group">
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back
+        </button>
+      ) : null}
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100">

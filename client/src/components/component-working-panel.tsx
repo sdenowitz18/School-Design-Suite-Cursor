@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -109,7 +109,7 @@ export default function ComponentWorkingPanel({
                 <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[280px] bg-white z-50">
+            <DropdownMenuContent align="start" className="w-[280px] bg-white">
               <DropdownMenuItem
                 className="font-medium cursor-pointer py-2"
                 onClick={() => {

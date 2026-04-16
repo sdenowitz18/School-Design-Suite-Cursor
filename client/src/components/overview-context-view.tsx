@@ -36,6 +36,8 @@ import { TestScoresView, type TestScoresData } from "./test-scores-view";
 import { StudentsWithDisabilitiesView, type StudentsWithDisabilitiesData } from "./students-with-disabilities-view";
 import { LowIncomeStudentsView, type LowIncomeStudentsData } from "./low-income-students-view";
 import { RaceEthnicityView, type RaceEthnicityData } from "./race-ethnicity-view";
+import { CommunityReviewsView } from "./community-reviews-view";
+import { VerificationBadge } from "./academic-chart-shared";
 
 const MONTHS: { value: string; label: string }[] = [
   { value: "01", label: "Jan" },
@@ -265,6 +267,31 @@ function getDeepTextKey(route: Route): "communityOverviewText" | "policyConsider
   return null;
 }
 
+function verificationBucketForDeepKey(
+  deepKey: "communityOverviewText" | "policyConsiderationsText" | "historyOfChangeText" | "otherContextText",
+): "communityOverview" | "policyConsiderations" | "historyOfChange" | "otherContext" {
+  if (deepKey === "communityOverviewText") return "communityOverview";
+  if (deepKey === "policyConsiderationsText") return "policyConsiderations";
+  if (deepKey === "historyOfChangeText") return "historyOfChange";
+  return "otherContext";
+}
+
+function normalizeContextOverviewVerification(raw: unknown): Record<string, { verified: boolean }> {
+  const keys = ["communityOverview", "policyConsiderations", "historyOfChange", "otherContext"] as const;
+  const src = raw && typeof raw === "object" ? (raw as Record<string, { verified?: boolean }>) : {};
+  const out: Record<string, { verified: boolean }> = {};
+  for (const k of keys) {
+    out[k] = { verified: !!src[k]?.verified };
+  }
+  return out;
+}
+
+const STAKEHOLDER_KEYS_WITH_VERIFICATION = new Set([
+  "students",
+  "administrationDistrict",
+  "administrationSchool",
+]);
+
 function normalizeOcd(raw: any) {
   const ocd = raw && typeof raw === "object" ? raw : {};
   const studentCount = ocd.studentCount ?? ocd.students ?? "";
@@ -301,6 +328,7 @@ function normalizeOcd(raw: any) {
       policyConsiderationsText: String(ocd?.contextOverview?.policyConsiderationsText || ""),
       historyOfChangeText: String(ocd?.contextOverview?.historyOfChangeText || ""),
       otherContextText: String(ocd?.contextOverview?.otherContextText || ""),
+      verification: normalizeContextOverviewVerification(ocd?.contextOverview?.verification),
     },
     studentDemographics: (() => {
       const sd = ocd?.studentDemographics;
@@ -321,6 +349,7 @@ function normalizeOcd(raw: any) {
         populationSize: String(ocd?.stakeholderMap?.students?.populationSize || ""),
         additionalContext: String(ocd?.stakeholderMap?.students?.additionalContext || ""),
         keyRepresentatives: String(ocd?.stakeholderMap?.students?.keyRepresentatives || ""),
+        verified: !!ocd?.stakeholderMap?.students?.verified,
       },
       families: {
         populationSize: String(ocd?.stakeholderMap?.families?.populationSize || ""),
@@ -336,11 +365,13 @@ function normalizeOcd(raw: any) {
         populationSize: String(ocd?.stakeholderMap?.administrationDistrict?.populationSize || ""),
         additionalContext: String(ocd?.stakeholderMap?.administrationDistrict?.additionalContext || ""),
         keyRepresentatives: String(ocd?.stakeholderMap?.administrationDistrict?.keyRepresentatives || ""),
+        verified: !!ocd?.stakeholderMap?.administrationDistrict?.verified,
       },
       administrationSchool: {
         populationSize: String(ocd?.stakeholderMap?.administrationSchool?.populationSize || ""),
         additionalContext: String(ocd?.stakeholderMap?.administrationSchool?.additionalContext || ""),
         keyRepresentatives: String(ocd?.stakeholderMap?.administrationSchool?.keyRepresentatives || ""),
+        verified: !!ocd?.stakeholderMap?.administrationSchool?.verified,
       },
       otherCommunityLeaders: {
         populationSize: String(ocd?.stakeholderMap?.otherCommunityLeaders?.populationSize || ""),
@@ -485,7 +516,7 @@ export default function OverviewContextView({
     <DropdownMenuContent
       align="start"
       className={cn(
-        "z-[100] min-w-[16rem] max-w-[min(100vw-2rem,24rem)] w-max max-h-[min(32rem,80vh)] overflow-y-auto",
+        "min-w-[16rem] max-w-[min(100vw-2rem,24rem)] w-max max-h-[min(32rem,80vh)] overflow-y-auto",
         "bg-white text-gray-900 border border-gray-200 shadow-lg",
       )}
     >
@@ -1216,7 +1247,11 @@ export default function OverviewContextView({
       }
 
       if (currentRoute.section === "communityReviews") {
-        return <div className="p-6">{placeholder("Community Reviews")}</div>;
+        return (
+          <div className="p-6">
+            <CommunityReviewsView />
+          </div>
+        );
       }
 
       if (currentRoute.section === "stakeholderMap") {
@@ -1288,10 +1323,28 @@ export default function OverviewContextView({
       const deepKey = getDeepTextKey(currentRoute);
       if (deepKey) {
         const value = ocd.contextOverview[deepKey];
+        const vBucket = verificationBucketForDeepKey(deepKey);
+        const verified = !!(ocd.contextOverview as any).verification?.[vBucket]?.verified;
         return (
           <div className="p-6 space-y-4">
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3">
-              <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Notes</div>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Notes</div>
+                <VerificationBadge
+                  verified={verified}
+                  onToggle={() =>
+                    setOcd((prev) => {
+                      const ver = { ...(prev.contextOverview as any).verification };
+                      const b = verificationBucketForDeepKey(deepKey);
+                      ver[b] = { verified: !ver[b]?.verified };
+                      return {
+                        ...prev,
+                        contextOverview: { ...prev.contextOverview, verification: ver },
+                      };
+                    })
+                  }
+                />
+              </div>
               <Textarea
                 value={value}
                 onChange={(e) => {
@@ -1314,9 +1367,30 @@ export default function OverviewContextView({
         const key = stakeholderKeyFromL3(currentRoute.section);
         const item = key ? (ocd.stakeholderMap as any)[key] : null;
         if (!key || !item) return null;
+        const showStakeholderVerify = STAKEHOLDER_KEYS_WITH_VERIFICATION.has(String(key));
+        const stakeholderVerified = !!(item as any).verified;
         return (
           <div className="p-6 space-y-4">
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
+              {showStakeholderVerify ? (
+                <div className="flex justify-end">
+                  <VerificationBadge
+                    verified={stakeholderVerified}
+                    onToggle={() =>
+                      setOcd((prev) => ({
+                        ...prev,
+                        stakeholderMap: {
+                          ...prev.stakeholderMap,
+                          [key]: {
+                            ...(prev.stakeholderMap as any)[key],
+                            verified: !stakeholderVerified,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                </div>
+              ) : null}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Population size</div>

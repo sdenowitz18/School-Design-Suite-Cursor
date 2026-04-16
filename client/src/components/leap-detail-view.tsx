@@ -31,11 +31,13 @@ export default function LeapDetailView({
   title,
   leapLabel,
   onBack,
+  hideTopBack = false,
 }: {
   nodeId?: string;
   title?: string;
   leapLabel: string;
   onBack: () => void;
+  hideTopBack?: boolean;
 }) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const { data: allComponents } = useQuery(componentQueries.all);
@@ -182,14 +184,16 @@ export default function LeapDetailView({
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-8 pb-16 space-y-8" data-testid="leap-detail-view">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back
-      </button>
+      {!hideTopBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back
+        </button>
+      ) : null}
 
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-3">

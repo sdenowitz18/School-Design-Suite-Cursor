@@ -114,6 +114,8 @@ export interface OutcomeDetailViewProps {
   sourceFilter?: ScoreFilter;
   /** @deprecated No longer used on this page. */
   onFilterChange?: (next: ScoreFilter) => void;
+  /** When parent renders DrilldownNavBar, hide the duplicate back row. */
+  hideTopBack?: boolean;
 }
 
 export default function OutcomeDetailView({
@@ -123,6 +125,7 @@ export default function OutcomeDetailView({
   l3OutcomeLabel,
   onBack,
   onOpenOutcomeScore,
+  hideTopBack = false,
 }: OutcomeDetailViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const { data: allComponents } = useQuery(componentQueries.all);
@@ -328,14 +331,16 @@ export default function OutcomeDetailView({
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-8 pb-16 space-y-8" data-testid="outcome-detail-view">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back
-      </button>
+      {!hideTopBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors group"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          Back
+        </button>
+      ) : null}
 
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-3">

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil } from "lucide-react";
 import {
   YearTabs,
   YearKey,
@@ -464,15 +464,11 @@ function TestScoresPanel({
   d,
   activeSubTab,
   onSubTabChange,
-  onAddSubject,
-  isHistorical,
   raceRowPct,
 }: {
   d: RaceEthnicityData;
   activeSubTab: TestSubTab;
   onSubTabChange: (t: TestSubTab) => void;
-  onAddSubject: () => void;
-  isHistorical: boolean;
   raceRowPct: (label: string, rowPct: number | null) => number | null;
 }) {
   const ts = d.testScores;
@@ -481,12 +477,7 @@ function TestScoresPanel({
 
   return (
     <div className="space-y-3">
-      <SubTabBar
-        tabs={allTabs}
-        active={activeSubTab}
-        onChange={onSubTabChange}
-        onAdd={!isHistorical ? onAddSubject : undefined}
-      />
+      <SubTabBar tabs={allTabs} active={activeSubTab} onChange={onSubTabChange} />
       <ChartDescription>
         {activeSubTab === "overview" ? (
           <p>{GS_COPY.raceTestOverview}</p>
@@ -643,32 +634,27 @@ function EditForm({ draft, activeTopTab, activeTestSubTab, raceRowPct, onUpdate,
     const sp = draft.studentProgress ?? { allStudents: null, byRace: [] };
     return (
       <div className="space-y-2">
-        <div className="text-xs font-semibold text-gray-500 mb-2">Yearly growth score (out of 10)</div>
-        <div className="flex items-center gap-2 border-b border-gray-50 pb-1.5">
-          <label className="text-xs text-gray-600 w-48 shrink-0 font-medium">All Students</label>
-          <input type="number" min={0} max={10} value={sp.allStudents ?? ""} placeholder="—"
-            onChange={(e) => onUpdate({ ...draft, studentProgress: { ...sp, allStudents: pn(e.target.value) } })}
-            className="w-20 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none tabular-nums" />
-          <span className="text-xs text-gray-400">/10</span>
-        </div>
-        {sp.byRace.map((r, i) => (
-          <div key={i} className="flex items-center gap-2 py-0.5">
-            <div className="w-48 shrink-0">
-              <div className="text-xs text-gray-700">{r.label}</div>
-              {(() => {
-                const p = raceRowPct(r.label, r.pctOfStudents);
-                return p != null ? <div className="text-[10px] text-gray-400">{p}% of students</div> : null;
-              })()}
+        <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+          <strong className="font-semibold">Student Progress</strong> is read-only (GreatSchools). Switch to another tab
+          to edit school values where supported.
+        </p>
+        <div className="space-y-0.5 pointer-events-none opacity-95">
+          <RatingBar label="All Students" value={sp.allStudents ?? null} barColor="bg-purple-500" labelWidth="w-48" />
+          {sp.byRace.map((r, i) => (
+            <div key={i} className="flex items-center gap-3 py-1.5">
+              <RaceLabel label={r.label} pct={raceRowPct(r.label, r.pctOfStudents)} />
+              <div className="w-14 text-right text-sm font-semibold text-gray-800 tabular-nums shrink-0">
+                {r.value != null ? `${r.value}/10` : "—"}
+              </div>
+              <div className="flex-1 relative h-4 bg-gray-100 rounded overflow-hidden">
+                {r.value != null && (
+                  <div className="absolute inset-y-0 left-0 bg-purple-400 rounded" style={{ width: `${(r.value / 10) * 100}%` }} />
+                )}
+              </div>
+              <div className="w-16 shrink-0" />
             </div>
-            <input type="number" min={0} max={10} value={(r as RaceProgressRow).value ?? ""} placeholder="—"
-              onChange={(e) => {
-                const next = sp.byRace.map((row, idx) => idx === i ? { ...row, value: pn(e.target.value) } : row) as RaceProgressRow[];
-                onUpdate({ ...draft, studentProgress: { ...sp, byRace: next } });
-              }}
-              className="w-20 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none tabular-nums" />
-            <span className="text-xs text-gray-400">/10</span>
-          </div>
-        ))}
+          ))}
+        </div>
         <SaveCancel />
       </div>
     );
@@ -718,32 +704,27 @@ function EditForm({ draft, activeTopTab, activeTestSubTab, raceRowPct, onUpdate,
       const ov = ts.overview ?? { allStudents: null, byRace: [] };
       return (
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-gray-500 mb-2">Overview score (out of 10)</div>
-          <div className="flex items-center gap-2 border-b border-gray-50 pb-1.5">
-            <label className="text-xs text-gray-600 w-48 shrink-0 font-medium">All Students</label>
-            <input type="number" min={0} max={10} value={ov.allStudents ?? ""} placeholder="—"
-              onChange={(e) => onUpdate({ ...draft, testScores: { ...ts, overview: { ...ov, allStudents: pn(e.target.value) } } })}
-              className="w-20 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none tabular-nums" />
-            <span className="text-xs text-gray-400">/10</span>
-          </div>
-          {ov.byRace.map((r, i) => (
-            <div key={i} className="flex items-center gap-2 py-0.5">
-              <div className="w-48 shrink-0">
-                <div className="text-xs text-gray-700">{r.label}</div>
-                {(() => {
-                  const p = raceRowPct(r.label, r.pctOfStudents);
-                  return p != null ? <div className="text-[10px] text-gray-400">{p}% of students</div> : null;
-                })()}
+          <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+            <strong className="font-semibold">Test Scores — Overview</strong> is read-only (GreatSchools). Switch to a
+            subject tab to edit school values.
+          </p>
+          <div className="space-y-0.5 pointer-events-none opacity-95">
+            <RatingBar label="All Students" value={ov.allStudents ?? null} barColor="bg-purple-500" labelWidth="w-48" />
+            {ov.byRace.map((r, i) => (
+              <div key={i} className="flex items-center gap-3 py-1.5">
+                <RaceLabel label={r.label} pct={raceRowPct(r.label, r.pctOfStudents)} />
+                <div className="w-14 text-right text-sm font-semibold text-gray-800 tabular-nums shrink-0">
+                  {r.value != null ? `${r.value}/10` : "—"}
+                </div>
+                <div className="flex-1 relative h-4 bg-gray-100 rounded overflow-hidden">
+                  {r.value != null && (
+                    <div className="absolute inset-y-0 left-0 bg-purple-400 rounded" style={{ width: `${(r.value / 10) * 100}%` }} />
+                  )}
+                </div>
+                <div className="w-16 shrink-0" />
               </div>
-              <input type="number" min={0} max={10} value={(r as RaceTestRow).value ?? ""} placeholder="—"
-                onChange={(e) => {
-                  const next = ov.byRace.map((row, idx) => idx === i ? { ...row, value: pn(e.target.value) } : row) as RaceTestRow[];
-                  onUpdate({ ...draft, testScores: { ...ts, overview: { ...ov, byRace: next } } });
-                }}
-                className="w-20 rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none tabular-nums" />
-              <span className="text-xs text-gray-400">/10</span>
-            </div>
-          ))}
+            ))}
+          </div>
           <SaveCancel />
         </div>
       );
@@ -855,7 +836,7 @@ export interface RaceEthnicityViewProps {
 export function RaceEthnicityView({ data, onChange, studentDemographics }: RaceEthnicityViewProps) {
   const isSaved = hasSaved(data);
 
-  const [activeYear, setActiveYear] = useState<YearKey>(() => (isSaved ? "current" : "2026"));
+  const [activeYear, setActiveYear] = useState<YearKey>("current");
   const [activeTopTab, setActiveTopTab] = useState<TopTab>("studentProgress");
   const [activeTestSubTab, setActiveTestSubTab] = useState<TestSubTab>("overview");
   const [activeDisciplineSubTab, setActiveDisciplineSubTab] = useState<DiscoTab>("suspended");
@@ -892,6 +873,7 @@ export function RaceEthnicityView({ data, onChange, studentDemographics }: RaceE
     onChange({
       ...draft,
       currentAsOf: preserveOrSetCurrentAsOf(draft.currentAsOf ?? (isSaved ? data!.currentAsOf : null)),
+      verification: { ...draft.verification, current: { verified: false } },
     });
     setIsEditing(false);
     setActiveYear("current");
@@ -901,28 +883,10 @@ export function RaceEthnicityView({ data, onChange, studentDemographics }: RaceE
     setIsEditing(false);
   }
 
-  function handleAddTestSubject() {
-    const label = prompt("New subject name:");
-    if (!label?.trim()) return;
-    const base = cloneRaceEthnicityData(d);
-    const ts = base.testScores ?? { overview: null, subjects: [] };
-    const raceRows: RaceTestSubjectRow[] = (raceEntries ?? DUMMY_2026.testScores!.subjects[0].byRace).map((r) => {
-      const label = "label" in r ? r.label : (r as { label: string }).label;
-      const rowPct = "pct" in r ? (r as { pct: number | null }).pct : (r as RaceTestSubjectRow).pctOfStudents;
-      return {
-        label,
-        pctOfStudents: raceRowPct(label, rowPct),
-        school: null,
-        stateAvg: null,
-      };
-    });
-    const newSub: RaceTestSubject = { label: label.trim(), allStudents: { school: null, stateAvg: null }, byRace: raceRows };
-    onChange({ ...base, testScores: { ...ts, subjects: [...(ts.subjects ?? []), newSub] } });
-    setActiveTestSubTab(label.trim());
-  }
-
   function toggleVerified(year: string) {
-    const base = isSaved ? cloneRaceEthnicityData(data!) : cloneRaceEthnicityData(d);
+    const base = isSaved
+      ? cloneRaceEthnicityData(data!)
+      : emptyData(studentDemographics?.raceEthnicity);
     const prev = verificationForYear(year);
     onChange({ ...base, verification: { ...base.verification, [year]: { verified: !prev.verified } } });
   }
@@ -946,13 +910,11 @@ export function RaceEthnicityView({ data, onChange, studentDemographics }: RaceE
           }}
         />
         <div className="flex items-center gap-2 flex-wrap">
-          {isHistorical && (
-            <VerificationBadge
-              verified={verificationForYear(activeYear).verified}
-              onToggle={() => toggleVerified(activeYear)}
-              asOf={`${activeYear} school year`}
-            />
-          )}
+          <VerificationBadge
+            verified={verificationForYear(isHistorical ? activeYear : "current").verified}
+            onToggle={() => toggleVerified(isHistorical ? activeYear : "current")}
+            asOf={isHistorical ? `${activeYear} school year` : undefined}
+          />
           {!isHistorical && isSaved && (data as RaceEthnicityData).currentAsOf && (
             <AsOfLabel asOf={(data as RaceEthnicityData).currentAsOf} />
           )}
@@ -971,10 +933,7 @@ export function RaceEthnicityView({ data, onChange, studentDemographics }: RaceE
       <SubTabBar
         tabs={topTabs}
         active={activeTopTab}
-        onChange={(t) => {
-          setActiveTopTab(t);
-          setIsEditing(false);
-        }}
+        onChange={setActiveTopTab}
       />
 
       {/* Description for tabs without sub-tabs (shown below top tab bar) */}
@@ -991,15 +950,36 @@ export function RaceEthnicityView({ data, onChange, studentDemographics }: RaceE
 
       {/* ── Content ────────────────────────────────────────────────── */}
       {isEditing ? (
-        <EditForm
-          draft={draft}
-          activeTopTab={activeTopTab}
-          activeTestSubTab={activeTestSubTab}
-          raceRowPct={raceRowPct}
-          onUpdate={setDraft}
-          onSave={handleSave}
-          onCancel={handleCancel}
-        />
+        <div className="space-y-3">
+          {activeTopTab === "testScores" && (() => {
+            const ts = draft.testScores;
+            const subjectTabs = (ts?.subjects ?? []).map((s) => ({ key: s.label, label: s.label }));
+            const allTabs = [{ key: "overview" as string, label: "Overview" }, ...subjectTabs];
+            return (
+              <>
+                <SubTabBar tabs={allTabs} active={activeTestSubTab} onChange={setActiveTestSubTab} />
+                <ChartDescription>
+                  {activeTestSubTab === "overview" ? (
+                    <p>{GS_COPY.raceTestOverview}</p>
+                  ) : (
+                    <p>
+                      <BoldText text={GS_COPY.raceTestSubject(activeTestSubTab)} />
+                    </p>
+                  )}
+                </ChartDescription>
+              </>
+            );
+          })()}
+          <EditForm
+            draft={draft}
+            activeTopTab={activeTopTab}
+            activeTestSubTab={activeTestSubTab}
+            raceRowPct={raceRowPct}
+            onUpdate={setDraft}
+            onSave={handleSave}
+            onCancel={handleCancel}
+          />
+        </div>
       ) : activeTopTab === "studentProgress" ? (
         <StudentProgressPanel d={d} raceRowPct={raceRowPct} />
       ) : activeTopTab === "graduationRates" ? (
@@ -1009,8 +989,6 @@ export function RaceEthnicityView({ data, onChange, studentDemographics }: RaceE
           d={d}
           activeSubTab={activeTestSubTab}
           onSubTabChange={setActiveTestSubTab}
-          onAddSubject={handleAddTestSubject}
-          isHistorical={isHistorical}
           raceRowPct={raceRowPct}
         />
       ) : (
