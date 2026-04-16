@@ -92,7 +92,7 @@ import {
 } from "./targeting-rollup-utils";
 import { isAdultRingComponent, isLearnerRingComponent } from "@/lib/ring-experience-audience";
 import { scheduleMigrateLegacyOverallAdultSubcomponents } from "@/lib/legacy-overall-adult-subs-migration";
-import { isTargetingAimActive, leapAimUsesSoftDeselect } from "@shared/aim-selection";
+import { isLeapAimActive, isTargetingAimActive, leapAimUsesSoftDeselect } from "@shared/aim-selection";
 
 import artifactDoc from "@/assets/images/artifact-doc.png";
 import artifactSlide from "@/assets/images/artifact-slide.png";
@@ -166,6 +166,49 @@ const FEATURED_ARTIFACTS: Artifact[] = [
 
 let deIdCounter = 0;
 const generateId = () => `de_${Date.now()}_${++deIdCounter}`;
+
+/** Priority (H/M/L) for DE chips — aligned with Manage views: overrideLevel / computedLevel, then level text. */
+function aimPriorityAbbrev(aim: any): "H" | "M" | "L" | null {
+  const ov = aim?.overrideLevel ?? aim?.computedLevel;
+  if (ov === "H" || ov === "M" || ov === "L") return ov;
+  const lv = aim?.level;
+  if (lv === "High") return "H";
+  if (lv === "Low") return "L";
+  if (lv === "Medium") return "M";
+  return null;
+}
+
+/** One DE chip per L3 when narrowed; one chip for L2-whole (`subSelections` empty). */
+function deExpandedOutcomeChips(aims: Tag[]): { aim: Tag; l3?: string; chipLabel: string; reactKey: string }[] {
+  const rows: { aim: Tag; l3?: string; chipLabel: string; reactKey: string }[] = [];
+  for (const a of aims) {
+    if (a.type !== "outcome" || !isTargetingAimActive(a as any)) continue;
+    const subs = Array.isArray((a as any).subSelections) ? (a as any).subSelections.filter(Boolean) : [];
+    if (subs.length === 0) {
+      rows.push({ aim: a, chipLabel: a.label, reactKey: `${a.id}:l2` });
+    } else {
+      for (const l3 of subs) {
+        const k = (l3 || "").trim().toLowerCase();
+        rows.push({ aim: a, l3, chipLabel: l3, reactKey: `${a.id}:${k}` });
+      }
+    }
+  }
+  return rows;
+}
+
+function deOutcomeChipPriorityLetter(aim: any, l3?: string): "H" | "M" | "L" | null {
+  if (!l3) return aimPriorityAbbrev(aim);
+  const sp = aim?.subPriorities ?? {};
+  const v = sp[l3];
+  if (v === "H" || v === "M" || v === "L") return v;
+  return "M";
+}
+
+const DE_CHIP_PRIORITY_STYLES: Record<string, string> = {
+  H: "bg-red-50 border-red-200 text-red-700",
+  M: "bg-amber-50 border-amber-200 text-amber-700",
+  L: "bg-green-50 border-green-200 text-green-700",
+};
 
 const Chip = ({ 
   type, 
@@ -854,7 +897,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     learnerModuleLibrary?.toggleLibrary();
   }, [learnerModuleLibrary]);
   const [showOutcomeScore, setShowOutcomeScore] = useState(false);
-  const [selectedOutcomeLabel, setSelectedOutcomeLabel] = useState<string | null>(null);
+  const [selectedOutcomeNav, setSelectedOutcomeNav] = useState<{ l2: string; l3?: string | null } | null>(null);
   const [selectedLeapLabel, setSelectedLeapLabel] = useState<string | null>(null);
   const [supportNav, setSupportNav] = useState<
     | { mode: "none" }
@@ -907,6 +950,8 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     parentElementsExpertData: ElementsExpertData;
   } | null>(null);
   const prevActiveSubIdRef = useRef<string | null>(null);
+  /** Last aims blob synced from server — refetches after detail saves must refresh local chips. */
+  const aimsServerSyncSigRef = useRef<string>("");
   descRef.current = description;
   kdeRef.current = keyDesignElements;
   elementsExpertRef.current = elementsExpertData;
@@ -979,6 +1024,64 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     setPogNav({ mode: "hub" });
     setLoadedNodeId(nodeId);
   }, [componentData, loadedNodeId, nodeId]);
+
+  useEffect(() => {
+    aimsServerSyncSigRef.current = "";
+  }, [nodeId, activeSubId]);
+
+  useEffect(() => {
+    if (!nodeId || !componentData || loadedNodeId !== nodeId) return;
+
+    const de: any = (componentData as any)?.designedExperienceData || {};
+    let stripBaseKde: any;
+    let rawAims: any[] | undefined;
+
+    if (!isOverall && activeSubId) {
+      const serverSub = Array.isArray(de.subcomponents)
+        ? de.subcomponents.find((s: any) => s.id === activeSubId)
+        : undefined;
+      if (!serverSub) return;
+      stripBaseKde =
+        serverSub.keyDesignElements ||
+        ({
+          aims: serverSub.aims || [],
+          practices: serverSub.practices || [],
+          supports: serverSub.supports || [],
+        } as any);
+      rawAims = stripBaseKde.aims;
+    } else {
+      stripBaseKde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+      rawAims = stripBaseKde.aims;
+    }
+
+    if (!Array.isArray(rawAims)) return;
+
+    let nextAims = rawAims;
+    if (!POG_SHOW_OUTCOME_LINKING_AND_ADVANCED_UI) {
+      nextAims = stripPogSourcedOutcomesFromKeyDesignElements(stripBaseKde).aims;
+    }
+
+    const sig = `${activeSubId ?? "parent"}:${JSON.stringify(
+      nextAims.map((a: any) => [
+        a?.id,
+        a?.type,
+        a?.label,
+        a?.overrideLevel,
+        a?.computedLevel,
+        a?.level,
+        a?.levelMode,
+        a?.selected,
+        a?.subSelections,
+        a?.subPriorities,
+        a?.notes,
+      ]),
+    )}`;
+
+    if (aimsServerSyncSigRef.current === sig) return;
+    aimsServerSyncSigRef.current = sig;
+
+    setKeyDesignElements((prev) => ({ ...prev, aims: nextAims as any }));
+  }, [activeSubId, componentData, isOverall, loadedNodeId, nodeId]);
 
   useEffect(() => {
     if (loadedNodeId !== nodeId || !componentData) return;
@@ -1380,6 +1483,11 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     };
   }, [isEditingSub, serverDeForProfiles, serverSubForProfiles]);
 
+  const deOutcomeTargetedChipRows = useMemo(
+    () => deExpandedOutcomeChips((keyDesignElements?.aims || []) as Tag[]),
+    [keyDesignElements.aims],
+  );
+
   const linkedPogOutcomeKeys = useMemo(() => {
     const keys = new Set<string>();
     const linksByAttr = (portraitOfGraduate as any)?.linksByAttributeId || {};
@@ -1403,13 +1511,14 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     );
   }
 
-  if (selectedOutcomeLabel) {
+  if (selectedOutcomeNav) {
     return (
       <OutcomeDetailView
         nodeId={nodeId}
         title={title}
-        outcomeLabel={selectedOutcomeLabel}
-        onBack={() => setSelectedOutcomeLabel(null)}
+        outcomeLabel={selectedOutcomeNav.l2}
+        l3OutcomeLabel={selectedOutcomeNav.l3 ?? undefined}
+        onBack={() => setSelectedOutcomeNav(null)}
         onOpenOutcomeScore={() => setShowOutcomeScore(true)}
       />
     );
@@ -1628,6 +1737,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       <LeapSummaryView
         nodeId={nodeId}
         title={title}
+        manageSubScope={!isOverall && activeSubId ? { flavor: "learner", subId: activeSubId } : null}
         focusLeapLabel={leapSummaryFocusLabel}
         onOpenLeapDetail={(label) => {
           setShowLeapSummary(false);
@@ -1659,6 +1769,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       <OutcomeSummaryView
         nodeId={nodeId}
         title={title}
+        manageSubScope={!isOverall && activeSubId ? { flavor: "learner", subId: activeSubId } : null}
         onBack={() => {
           const latestDe: any = (componentData as any)?.designedExperienceData || {};
           let latestKde = latestDe?.keyDesignElements || { aims: [], practices: [], supports: [] };
@@ -1703,7 +1814,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           onSelectedKeysChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, selectedKeys: next }))}
           step={pogOutcomesFirstDraft.step}
           onStepChange={(next) => setPogOutcomesFirstDraft((prev) => ({ ...prev, step: next }))}
-          onOpenOutcome={(label) => setSelectedOutcomeLabel(label)}
+          onOpenOutcome={(label) => setSelectedOutcomeNav({ l2: label })}
           onBack={() => {
             if (pogReturnToDetailAttrId) {
               const attrId = pogReturnToDetailAttrId;
@@ -1843,18 +1954,33 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                   Manage
                 </Button>
               </div>
-              {keyDesignElements.aims.filter(a => a.type === "leap").length > 0 ? (
+              {keyDesignElements.aims.filter((a) => a.type === "leap" && isLeapAimActive(a as any)).length > 0 ? (
                 <div className="flex flex-wrap gap-1">
-                  {keyDesignElements.aims.filter(a => a.type === "leap").map(tag => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors"
-                      onClick={() => setSelectedLeapLabel(tag.label)}
-                    >
-                      {tag.label}
-                    </button>
-                  ))}
+                  {keyDesignElements.aims
+                    .filter((a) => a.type === "leap" && isLeapAimActive(a as any))
+                    .map((tag) => {
+                      const pri = aimPriorityAbbrev(tag);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors inline-flex items-center gap-1 max-w-full min-w-0"
+                          onClick={() => setSelectedLeapLabel(tag.label)}
+                        >
+                          <span className="truncate min-w-0">{tag.label}</span>
+                          {pri ? (
+                            <span
+                              className={cn(
+                                "text-[9px] font-bold px-1 rounded border shrink-0",
+                                DE_CHIP_PRIORITY_STYLES[pri] ?? "bg-gray-100 border-gray-200 text-gray-600",
+                              )}
+                            >
+                              {pri}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 italic">No leaps selected yet</p>
@@ -1868,18 +1994,36 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                   Manage
                 </Button>
               </div>
-              {keyDesignElements.aims.filter(a => a.type === "outcome").length > 0 ? (
+              {deOutcomeTargetedChipRows.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
-                  {keyDesignElements.aims.filter(a => a.type === "outcome").map(tag => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
-                      onClick={() => setSelectedOutcomeLabel(tag.label)}
-                    >
-                      {tag.label}
-                    </button>
-                  ))}
+                  {deOutcomeTargetedChipRows.map((row) => {
+                    const priLetter = deOutcomeChipPriorityLetter(row.aim as any, row.l3);
+                    return (
+                      <button
+                        key={row.reactKey}
+                        type="button"
+                        className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors inline-flex items-center gap-1 max-w-full min-w-0"
+                        onClick={() =>
+                          setSelectedOutcomeNav({
+                            l2: row.aim.label,
+                            l3: row.l3 ?? undefined,
+                          })
+                        }
+                      >
+                        <span className="truncate min-w-0">{row.chipLabel}</span>
+                        {priLetter ? (
+                          <span
+                            className={cn(
+                              "text-[9px] font-bold px-1 rounded border shrink-0",
+                              DE_CHIP_PRIORITY_STYLES[priLetter] ?? "bg-gray-100 border-gray-200 text-gray-600",
+                            )}
+                          >
+                            {priLetter}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 italic">No outcomes selected yet</p>

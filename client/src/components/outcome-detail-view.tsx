@@ -24,6 +24,12 @@ function clipSentences(text: string, maxSentences: number): string {
   return parts.slice(0, maxSentences).join(" ");
 }
 
+function aimPriorityFromAim(aim: any): "H" | "M" | "L" {
+  const ov = aim?.overrideLevel ?? aim?.computedLevel;
+  if (ov === "H" || ov === "M" || ov === "L") return ov;
+  return levelToPriority(aim?.level);
+}
+
 function levelToPriority(level: unknown): "H" | "M" | "L" {
   if (level === "High") return "H";
   if (level === "Low") return "L";
@@ -40,6 +46,20 @@ function levelToAbbrev(level: unknown): string {
   if (level === "High") return "H";
   if (level === "Low") return "L";
   return "M";
+}
+
+function subAimPriorityAbbrev(aim: any): string {
+  const ov = aim?.overrideLevel ?? aim?.computedLevel;
+  if (ov === "H" || ov === "M" || ov === "L") return ov;
+  return levelToAbbrev(aim?.level);
+}
+
+/** L2 detail: L2-whole rows only; L3 detail: rows that include that L3 in `subSelections`. */
+function aimMatchesOutcomeDetailScope(a: any, l2Norm: string, l3Label: string | null | undefined): boolean {
+  if (a?.type !== "outcome" || norm(a?.label) !== l2Norm) return false;
+  const subs: string[] = Array.isArray(a.subSelections) ? a.subSelections.filter(Boolean) : [];
+  if (!l3Label) return subs.length === 0;
+  return subs.some((s) => norm(s) === norm(l3Label));
 }
 
 function genericOutcomeDescription(label: string): string {
@@ -84,7 +104,10 @@ function genericOutcomeDescription(label: string): string {
 export interface OutcomeDetailViewProps {
   nodeId?: string;
   title?: string;
+  /** L2 outcome row key in `keyDesignElements.aims` (e.g. "Mathematics"). */
   outcomeLabel: string;
+  /** When set, this page is scoped to that L3 under `outcomeLabel` (mutually exclusive with L2-whole). */
+  l3OutcomeLabel?: string | null;
   onBack: () => void;
   onOpenOutcomeScore?: () => void;
   /** @deprecated No longer used on this page; kept for call-site compatibility. */
@@ -97,6 +120,7 @@ export default function OutcomeDetailView({
   nodeId,
   title,
   outcomeLabel,
+  l3OutcomeLabel,
   onBack,
   onOpenOutcomeScore,
 }: OutcomeDetailViewProps) {
@@ -109,30 +133,48 @@ export default function OutcomeDetailView({
 
   const [showLearnMore, setShowLearnMore] = useState(false);
 
-  const outcomeHdKey = useMemo(() => outcomeHealthBucketForLabel(outcomeLabel), [outcomeLabel]);
+  const displayLabel = (l3OutcomeLabel || "").trim() ? String(l3OutcomeLabel).trim() : outcomeLabel;
+
+  const outcomeHdKey = useMemo(() => outcomeHealthBucketForLabel(displayLabel), [displayLabel]);
 
   const outcomeAim = useMemo(() => {
     const aims: any[] = (comp as any)?.designedExperienceData?.keyDesignElements?.aims || [];
     return aims.find((a: any) => a?.type === "outcome" && norm(a?.label) === norm(outcomeLabel)) || null;
   }, [comp, outcomeLabel]);
 
-  const priority = useMemo(() => levelToPriority(outcomeAim?.level), [outcomeAim?.level]);
+  const priority = useMemo(() => {
+    if (!outcomeAim) return "M" as const;
+    if (l3OutcomeLabel) {
+      const sp = outcomeAim.subPriorities ?? {};
+      const v = sp[l3OutcomeLabel];
+      return v === "H" || v === "M" || v === "L" ? v : ("M" as const);
+    }
+    return aimPriorityFromAim(outcomeAim);
+  }, [outcomeAim, l3OutcomeLabel]);
 
   const taggedSubRows = useMemo(() => {
     const subs: any[] = (comp as any)?.designedExperienceData?.subcomponents || [];
+    const l2k = norm(outcomeLabel);
     return subs
       .map((s: any) => {
-        const aim = (s?.aims || []).find((a: any) => a?.type === "outcome" && norm(a?.label) === norm(outcomeLabel));
+        const aim = (s?.aims || []).find((a: any) => aimMatchesOutcomeDetailScope(a, l2k, l3OutcomeLabel));
         if (!aim) return null;
-        return { name: String(s?.name || "Untitled"), abbrev: levelToAbbrev(aim.level) };
+        let abbrev: string;
+        if (l3OutcomeLabel) {
+          const v = aim.subPriorities?.[l3OutcomeLabel];
+          abbrev = v === "H" || v === "M" || v === "L" ? v : "M";
+        } else {
+          abbrev = subAimPriorityAbbrev(aim);
+        }
+        return { name: String(s?.name || "Untitled"), abbrev };
       })
       .filter(Boolean) as { name: string; abbrev: string }[];
-  }, [comp, outcomeLabel]);
+  }, [comp, l3OutcomeLabel, outcomeLabel]);
 
   const taggedComponents = useMemo(() => {
     if (!isOverall) return [];
     const list: any[] = Array.isArray(allComponents) ? allComponents : [];
-    const key = norm(outcomeLabel);
+    const l2k = norm(outcomeLabel);
     const out: { nodeId: string; title: string }[] = [];
 
     for (const c of list) {
@@ -141,17 +183,19 @@ export default function OutcomeDetailView({
 
       const de: any = c?.designedExperienceData || {};
       const aims: any[] = de?.keyDesignElements?.aims || [];
-      const hasAtComponent = aims.some((a: any) => a?.type === "outcome" && norm(a?.label) === key);
+      const hasAtComponent = aims.some((a: any) => aimMatchesOutcomeDetailScope(a, l2k, l3OutcomeLabel));
 
       const subs: any[] = Array.isArray(de?.subcomponents) ? de.subcomponents : [];
-      const hasAtSub = subs.some((s: any) => (s?.aims || []).some((a: any) => a?.type === "outcome" && norm(a?.label) === key));
+      const hasAtSub = subs.some((s: any) =>
+        (s?.aims || []).some((a: any) => aimMatchesOutcomeDetailScope(a, l2k, l3OutcomeLabel)),
+      );
 
       if (hasAtComponent || hasAtSub) out.push({ nodeId: cNodeId, title: String(c?.title || cNodeId) });
     }
 
     out.sort((a, b) => a.title.localeCompare(b.title));
     return out;
-  }, [allComponents, isOverall, outcomeLabel]);
+  }, [allComponents, isOverall, l3OutcomeLabel, outcomeLabel]);
 
   const [appliesDescription, setAppliesDescription] = useState("");
   const [initialized, setInitialized] = useState(false);
@@ -159,7 +203,7 @@ export default function OutcomeDetailView({
 
   useEffect(() => {
     setInitialized(false);
-  }, [outcomeLabel, outcomeHdKey]);
+  }, [outcomeLabel, outcomeHdKey, l3OutcomeLabel]);
 
   const setPriority = useCallback(
     (p: "H" | "M" | "L") => {
@@ -168,15 +212,24 @@ export default function OutcomeDetailView({
       const de: any = (comp as any).designedExperienceData || {};
       const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
       const aims: any[] = kde.aims || [];
-      const nextAims = aims.map((a: any) =>
-        a?.type === "outcome" && norm(a?.label) === norm(outcomeLabel) ? { ...a, level: priorityToLevel(p) } : a,
-      );
+      const levelMap = { H: "High", M: "Medium", L: "Low" } as const;
+      const nextAims = aims.map((a: any) => {
+        if (a?.type !== "outcome" || norm(a?.label) !== norm(outcomeLabel)) return a;
+        if (l3OutcomeLabel) {
+          return {
+            ...a,
+            subPriorities: { ...(a.subPriorities ?? {}), [l3OutcomeLabel]: p },
+          };
+        }
+        return { ...a, overrideLevel: p, level: levelMap[p], levelMode: "override" };
+      });
 
       const existingHd: any = (comp as any).healthData || {};
       const osd: any = existingHd[outcomeHdKey] || {};
       const targeted: any[] = osd.targetedOutcomes || [];
+      const nameKey = norm(displayLabel);
       const nextTargeted = targeted.map((o: any) =>
-        norm(o?.outcomeName) === norm(outcomeLabel) ? { ...o, priority: p } : o,
+        norm(o?.outcomeName) === nameKey ? { ...o, priority: p } : o,
       );
 
       updateMutation.mutate({
@@ -196,23 +249,51 @@ export default function OutcomeDetailView({
         },
       });
     },
-    [comp, nodeId, outcomeHdKey, outcomeLabel, updateMutation],
+    [comp, displayLabel, l3OutcomeLabel, nodeId, outcomeHdKey, outcomeLabel, updateMutation],
   );
 
   useEffect(() => {
     if (!comp || initialized) return;
-    const hd: any = (comp as any)?.healthData || {};
-    const osd: any = hd[outcomeHdKey] || {};
-    const notes: any = osd.outcomeNotes || {};
-    setAppliesDescription(String(notes[norm(outcomeLabel)]?.appliesDescription || ""));
+    if (l3OutcomeLabel) {
+      const aims: any[] = (comp as any)?.designedExperienceData?.keyDesignElements?.aims || [];
+      const aim = aims.find((x: any) => x?.type === "outcome" && norm(x?.label) === norm(outcomeLabel));
+      setAppliesDescription(String(aim?.subNotes?.[l3OutcomeLabel] ?? ""));
+    } else {
+      const hd: any = (comp as any)?.healthData || {};
+      const osd: any = hd[outcomeHdKey] || {};
+      const notes: any = osd.outcomeNotes || {};
+      setAppliesDescription(String(notes[norm(outcomeLabel)]?.appliesDescription || ""));
+    }
     setInitialized(true);
-  }, [comp, initialized, outcomeHdKey, outcomeLabel]);
+  }, [comp, initialized, l3OutcomeLabel, outcomeHdKey, outcomeLabel]);
 
   const doSaveNotes = useCallback(
     (desc: string) => {
       if (!nodeId) return;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
+        if (l3OutcomeLabel && comp) {
+          const de: any = (comp as any).designedExperienceData || {};
+          const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
+          const aims: any[] = kde.aims || [];
+          updateMutation.mutate({
+            nodeId,
+            data: {
+              designedExperienceData: {
+                ...de,
+                keyDesignElements: {
+                  ...kde,
+                  aims: aims.map((a: any) =>
+                    a?.type === "outcome" && norm(a?.label) === norm(outcomeLabel)
+                      ? { ...a, subNotes: { ...(a.subNotes ?? {}), [l3OutcomeLabel]: desc } }
+                      : a,
+                  ),
+                },
+              },
+            },
+          });
+          return;
+        }
         const existing: any = comp?.healthData || {};
         const osd: any = existing[outcomeHdKey] || {};
         const outcomeNotes: any = osd.outcomeNotes || {};
@@ -233,7 +314,7 @@ export default function OutcomeDetailView({
         });
       }, 500);
     },
-    [comp, nodeId, outcomeHdKey, outcomeLabel, updateMutation],
+    [comp, l3OutcomeLabel, nodeId, outcomeHdKey, outcomeLabel, updateMutation],
   );
 
   useEffect(() => {
@@ -242,7 +323,7 @@ export default function OutcomeDetailView({
   }, [appliesDescription, doSaveNotes, initialized]);
 
   if (showLearnMore) {
-    return <OutcomesLearnMoreView mode="outcome" outcomeLabel={outcomeLabel} onBack={() => setShowLearnMore(false)} />;
+    return <OutcomesLearnMoreView mode="outcome" outcomeLabel={displayLabel} onBack={() => setShowLearnMore(false)} />;
   }
 
   return (
@@ -258,7 +339,7 @@ export default function OutcomeDetailView({
 
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{outcomeLabel}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{displayLabel}</h1>
           <Button
             type="button"
             size="sm"
@@ -272,7 +353,7 @@ export default function OutcomeDetailView({
           </Button>
         </div>
         {(title || (comp as any)?.title) && <p className="text-sm text-gray-500">{title || (comp as any)?.title}</p>}
-        <p className="text-sm text-gray-700 leading-relaxed">{genericOutcomeDescription(outcomeLabel)}</p>
+        <p className="text-sm text-gray-700 leading-relaxed">{genericOutcomeDescription(displayLabel)}</p>
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -316,7 +397,7 @@ export default function OutcomeDetailView({
             <Textarea
               value={appliesDescription}
               onChange={(e) => setAppliesDescription(e.currentTarget.value)}
-              placeholder={`Describe how “${outcomeLabel}” shows up in this design…`}
+              placeholder={`Describe how “${displayLabel}” shows up in this design…`}
               className="text-sm min-h-[88px] mt-2"
               data-testid="outcome-applies-description"
             />

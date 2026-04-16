@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,28 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { StudentDemographicsView, type StudentDemographicsData } from "./student-demographics-view";
+import { CollegePrepView, type CollegePrepData } from "./college-prep-view";
+import { TestScoresView, type TestScoresData } from "./test-scores-view";
+import { StudentsWithDisabilitiesView, type StudentsWithDisabilitiesData } from "./students-with-disabilities-view";
+import { LowIncomeStudentsView, type LowIncomeStudentsData } from "./low-income-students-view";
+import { RaceEthnicityView, type RaceEthnicityData } from "./race-ethnicity-view";
 
 const MONTHS: { value: string; label: string }[] = [
   { value: "01", label: "Jan" },
@@ -136,10 +158,7 @@ type L3Section =
   | "contextOverview.historyOfChangeEfforts"
   | "contextOverview.otherContext"
   | "enrollment.studentDemographics"
-  | "enrollment.enrollmentComposition"
   | "publicAcademic.collegePrep"
-  | "publicAcademic.collegeSuccess"
-  | "publicAcademic.advancedCourses"
   | "publicAcademic.testScores"
   | "publicAcademic.raceEthnicity"
   | "publicAcademic.lowIncomeStudents"
@@ -147,7 +166,8 @@ type L3Section =
   | "stakeholder.students"
   | "stakeholder.families"
   | "stakeholder.educatorsStaff"
-  | "stakeholder.administration"
+  | "stakeholder.administrationDistrict"
+  | "stakeholder.administrationSchool"
   | "stakeholder.otherCommunityLeaders";
 
 export type OverallNavTarget =
@@ -160,44 +180,75 @@ type Route =
   | { level: "L2"; section: L2Section }
   | { level: "L3"; section: L3Section };
 
+const L3_SECTION_META: Record<L3Section, { parent: L2Section; label: string }> = {
+  "contextOverview.communityOverview": { parent: "contextOverview", label: "Community overview" },
+  "contextOverview.policyConsiderations": { parent: "contextOverview", label: "Policy considerations" },
+  "contextOverview.historyOfChangeEfforts": { parent: "contextOverview", label: "History of change efforts" },
+  "contextOverview.otherContext": { parent: "contextOverview", label: "Other context" },
+  "enrollment.studentDemographics": { parent: "enrollment", label: "Student Demographics" },
+  "publicAcademic.collegePrep": { parent: "publicAcademic", label: "College Prep" },
+  "publicAcademic.testScores": { parent: "publicAcademic", label: "Test Scores" },
+  "publicAcademic.raceEthnicity": { parent: "publicAcademic", label: "Race & Ethnicity" },
+  "publicAcademic.lowIncomeStudents": { parent: "publicAcademic", label: "Low Income Students" },
+  "publicAcademic.studentsWithDisabilities": { parent: "publicAcademic", label: "Students with Disabilities" },
+  "stakeholder.students": { parent: "stakeholderMap", label: "Students" },
+  "stakeholder.families": { parent: "stakeholderMap", label: "Families" },
+  "stakeholder.educatorsStaff": { parent: "stakeholderMap", label: "Educators / Staff" },
+  "stakeholder.administrationDistrict": { parent: "stakeholderMap", label: "Administration (District)" },
+  "stakeholder.administrationSchool": { parent: "stakeholderMap", label: "Administration (School)" },
+  "stakeholder.otherCommunityLeaders": { parent: "stakeholderMap", label: "Other Community Leaders" },
+};
+
+const L2_SECTION_LABEL: Record<L2Section, string> = {
+  mission: "Mission",
+  contextOverview: "Context & Overview",
+  enrollment: "Enrollment & Composition",
+  publicAcademic: "Public Academic Profile",
+  communityReviews: "Community Reviews",
+  stakeholderMap: "Stakeholder Map",
+  greatSchools: "GreatSchools",
+};
+
 function getBreadcrumb(route: Route): string[] {
   if (route.level === "L1") return ["Overview & Context"];
   if (route.level === "L2") {
-    const map: Record<L2Section, string> = {
-      mission: "Mission",
-      contextOverview: "Context & Overview",
-      enrollment: "Enrollment & Composition",
-      publicAcademic: "Public Academic Profile",
-      communityReviews: "Community Reviews",
-      stakeholderMap: "Stakeholder Map",
-      greatSchools: "GreatSchools",
-    };
-    return ["Overview & Context", map[route.section]];
+    return ["Overview & Context", L2_SECTION_LABEL[route.section]];
   }
-
-  const labelMap: Record<L3Section, { parent: L2Section; label: string }> = {
-    "contextOverview.communityOverview": { parent: "contextOverview", label: "Community overview" },
-    "contextOverview.policyConsiderations": { parent: "contextOverview", label: "Policy considerations" },
-    "contextOverview.historyOfChangeEfforts": { parent: "contextOverview", label: "History of change efforts" },
-    "contextOverview.otherContext": { parent: "contextOverview", label: "Other context" },
-    "enrollment.studentDemographics": { parent: "enrollment", label: "Student demographics" },
-    "enrollment.enrollmentComposition": { parent: "enrollment", label: "Enrollment & composition" },
-    "publicAcademic.collegePrep": { parent: "publicAcademic", label: "College Prep" },
-    "publicAcademic.collegeSuccess": { parent: "publicAcademic", label: "College Success" },
-    "publicAcademic.advancedCourses": { parent: "publicAcademic", label: "Advanced Courses" },
-    "publicAcademic.testScores": { parent: "publicAcademic", label: "Test Scores" },
-    "publicAcademic.raceEthnicity": { parent: "publicAcademic", label: "Race & Ethnicity" },
-    "publicAcademic.lowIncomeStudents": { parent: "publicAcademic", label: "Low Income Students" },
-    "publicAcademic.studentsWithDisabilities": { parent: "publicAcademic", label: "Students with Disabilities" },
-    "stakeholder.students": { parent: "stakeholderMap", label: "Students" },
-    "stakeholder.families": { parent: "stakeholderMap", label: "Families" },
-    "stakeholder.educatorsStaff": { parent: "stakeholderMap", label: "Educators & Staff" },
-    "stakeholder.administration": { parent: "stakeholderMap", label: "Administration" },
-    "stakeholder.otherCommunityLeaders": { parent: "stakeholderMap", label: "Other Community Leaders" },
-  };
-  const l3 = labelMap[route.section];
+  const l3 = L3_SECTION_META[route.section];
   const l2Crumb = getBreadcrumb({ level: "L2", section: l3.parent });
   return [...l2Crumb, l3.label];
+}
+
+/** GreatSchools chart pages — switch directly from the page title dropdown. */
+const CHART_NAV_GROUPS: {
+  groupLabel: string;
+  items: { section: L3Section; label: string }[];
+}[] = [
+  {
+    groupLabel: "Enrollment & Composition",
+    items: [{ section: "enrollment.studentDemographics", label: "Student Demographics" }],
+  },
+  {
+    groupLabel: "Public Academic Profile",
+    items: [
+      { section: "publicAcademic.collegePrep", label: "College Prep" },
+      { section: "publicAcademic.testScores", label: "Test Scores" },
+      { section: "publicAcademic.raceEthnicity", label: "Race & Ethnicity" },
+      { section: "publicAcademic.lowIncomeStudents", label: "Low Income Students" },
+      { section: "publicAcademic.studentsWithDisabilities", label: "Students with Disabilities" },
+    ],
+  },
+];
+
+function isChartSwitcherRoute(route: Route): boolean {
+  if (route.level !== "L3") return false;
+  return CHART_NAV_GROUPS.some((g) => g.items.some((i) => i.section === route.section));
+}
+
+function chartNavParent(section: L3Section): L2Section {
+  if (section.startsWith("enrollment.")) return "enrollment";
+  if (section.startsWith("publicAcademic.")) return "publicAcademic";
+  return "enrollment";
 }
 
 function titleFromRoute(route: Route): string {
@@ -251,6 +302,20 @@ function normalizeOcd(raw: any) {
       historyOfChangeText: String(ocd?.contextOverview?.historyOfChangeText || ""),
       otherContextText: String(ocd?.contextOverview?.otherContextText || ""),
     },
+    studentDemographics: (() => {
+      const sd = ocd?.studentDemographics;
+      if (!sd || typeof sd !== "object") return null;
+      return {
+        raceEthnicity: Array.isArray(sd.raceEthnicity)
+          ? (sd.raceEthnicity as any[]).map((e) => ({
+              label: typeof e.label === "string" ? e.label : "",
+              pct: typeof e.pct === "number" ? e.pct : null,
+            }))
+          : [],
+        lowIncomePct: typeof sd.lowIncomePct === "number" ? sd.lowIncomePct : null,
+        femalePct: typeof sd.femalePct === "number" ? sd.femalePct : null,
+      } as StudentDemographicsData;
+    })(),
     stakeholderMap: {
       students: {
         populationSize: String(ocd?.stakeholderMap?.students?.populationSize || ""),
@@ -267,10 +332,15 @@ function normalizeOcd(raw: any) {
         additionalContext: String(ocd?.stakeholderMap?.educatorsStaff?.additionalContext || ""),
         keyRepresentatives: String(ocd?.stakeholderMap?.educatorsStaff?.keyRepresentatives || ""),
       },
-      administration: {
-        populationSize: String(ocd?.stakeholderMap?.administration?.populationSize || ""),
-        additionalContext: String(ocd?.stakeholderMap?.administration?.additionalContext || ""),
-        keyRepresentatives: String(ocd?.stakeholderMap?.administration?.keyRepresentatives || ""),
+      administrationDistrict: {
+        populationSize: String(ocd?.stakeholderMap?.administrationDistrict?.populationSize || ""),
+        additionalContext: String(ocd?.stakeholderMap?.administrationDistrict?.additionalContext || ""),
+        keyRepresentatives: String(ocd?.stakeholderMap?.administrationDistrict?.keyRepresentatives || ""),
+      },
+      administrationSchool: {
+        populationSize: String(ocd?.stakeholderMap?.administrationSchool?.populationSize || ""),
+        additionalContext: String(ocd?.stakeholderMap?.administrationSchool?.additionalContext || ""),
+        keyRepresentatives: String(ocd?.stakeholderMap?.administrationSchool?.keyRepresentatives || ""),
       },
       otherCommunityLeaders: {
         populationSize: String(ocd?.stakeholderMap?.otherCommunityLeaders?.populationSize || ""),
@@ -338,6 +408,34 @@ export default function OverviewContextView({
   const goHome = () => setRouteStack([{ level: "L1" }]);
   const goBack = () => setRouteStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
 
+  const jumpToCrumb = useCallback(
+    (index: number) => {
+      if (index >= crumbs.length - 1) return;
+      if (index === 0) {
+        goHome();
+        return;
+      }
+      if (currentRoute.level === "L3") {
+        const meta = L3_SECTION_META[currentRoute.section];
+        setRouteStack([{ level: "L1" }, { level: "L2", section: meta.parent }]);
+        return;
+      }
+      if (currentRoute.level === "L2") {
+        goHome();
+      }
+    },
+    [crumbs.length, currentRoute, goHome],
+  );
+
+  const jumpToChart = useCallback((section: L3Section) => {
+    const parent = chartNavParent(section);
+    setRouteStack([
+      { level: "L1" },
+      { level: "L2", section: parent },
+      { level: "L3", section },
+    ]);
+  }, []);
+
   const commitSnapshot = useCallback(
     (next: any) => {
       const c = compRef.current;
@@ -383,10 +481,54 @@ export default function OverviewContextView({
     };
   }, [commitSnapshot]);
 
+  const chartSwitcherMenuContent = (
+    <DropdownMenuContent
+      align="start"
+      className={cn(
+        "z-[100] min-w-[16rem] max-w-[min(100vw-2rem,24rem)] w-max max-h-[min(32rem,80vh)] overflow-y-auto",
+        "bg-white text-gray-900 border border-gray-200 shadow-lg",
+      )}
+    >
+      <DropdownMenuItem
+        className="cursor-pointer focus:bg-gray-100 focus:text-gray-900"
+        onClick={() => goHome()}
+      >
+        Overview & Context
+      </DropdownMenuItem>
+      <DropdownMenuSeparator className="bg-gray-200" />
+      {CHART_NAV_GROUPS.map((group, gi) => (
+        <React.Fragment key={group.groupLabel}>
+          {gi > 0 ? <DropdownMenuSeparator className="bg-gray-200" /> : null}
+          <DropdownMenuLabel className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">
+            {group.groupLabel}
+          </DropdownMenuLabel>
+          {group.items.map((item) => {
+            const isActive = currentRoute.level === "L3" && currentRoute.section === item.section;
+            return (
+              <DropdownMenuItem
+                key={item.section}
+                className={cn(
+                  "cursor-pointer whitespace-normal focus:bg-gray-100 focus:text-gray-900",
+                  isActive && "bg-gray-50 font-semibold",
+                )}
+                onClick={() => jumpToChart(item.section)}
+              >
+                <span className="flex-1">{item.label}</span>
+                {isActive ? <Check className="h-4 w-4 shrink-0 text-blue-600" /> : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </React.Fragment>
+      ))}
+    </DropdownMenuContent>
+  );
+
+  const showBreadcrumb = crumbs.length >= 2;
+
   const header = (
     <div className="px-6 py-4 border-b border-gray-100 bg-white sticky top-0 z-10">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1 min-w-0 pr-2">
           <button
             className={cn(
               "flex items-center gap-1.5 text-xs text-gray-500 font-semibold hover:text-gray-800",
@@ -400,16 +542,84 @@ export default function OverviewContextView({
             Back
           </button>
 
-          <button
-            type="button"
-            className="text-lg font-bold text-gray-900 truncate mt-1 hover:underline text-left"
-            onClick={goHome}
-            data-testid="oc-title-home"
-          >
-            {titleFromRoute(currentRoute)}
-          </button>
+          {showBreadcrumb ? (
+            <Breadcrumb className="mt-2">
+              <BreadcrumbList className="flex-nowrap gap-0.5 sm:gap-1 text-xs text-gray-500">
+                {crumbs.map((crumbLabel, i) => (
+                  <React.Fragment key={`${i}-${crumbLabel}`}>
+                    {i > 0 ? (
+                      <BreadcrumbSeparator className="px-0.5 [&>svg]:size-3.5 text-gray-300" />
+                    ) : null}
+                    <BreadcrumbItem className="min-w-0">
+                      {i < crumbs.length - 1 ? (
+                        <BreadcrumbLink asChild>
+                          <button
+                            type="button"
+                            className="font-medium text-gray-500 hover:text-gray-900 max-w-[12rem] sm:max-w-none truncate"
+                            onClick={() => jumpToCrumb(i)}
+                            data-testid={i === 0 ? "oc-crumb-root" : `oc-crumb-${i}`}
+                          >
+                            {crumbLabel}
+                          </button>
+                        </BreadcrumbLink>
+                      ) : isChartSwitcherRoute(currentRoute) ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 max-w-full rounded-md font-semibold text-gray-900 -mx-1 px-1 py-0.5 text-left hover:bg-gray-50"
+                              data-testid="oc-chart-title-dropdown"
+                            >
+                              <span className="whitespace-normal break-words leading-snug min-w-0">
+                                {crumbLabel}
+                              </span>
+                              <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+                            </button>
+                          </DropdownMenuTrigger>
+                          {chartSwitcherMenuContent}
+                        </DropdownMenu>
+                      ) : (
+                        <BreadcrumbPage className="font-semibold text-gray-900 whitespace-normal break-words leading-snug">
+                          {crumbLabel}
+                        </BreadcrumbPage>
+                      )}
+                    </BreadcrumbItem>
+                  </React.Fragment>
+                ))}
+              </BreadcrumbList>
+            </Breadcrumb>
+          ) : (
+            <>
+              {isChartSwitcherRoute(currentRoute) ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-lg font-bold text-gray-900 mt-1 text-left inline-flex items-start gap-1.5 rounded-md hover:bg-gray-50 -mx-1 px-1 py-0.5 w-full"
+                      data-testid="oc-chart-title-dropdown"
+                    >
+                      <span className="whitespace-normal break-words leading-snug flex-1 min-w-0">
+                        {titleFromRoute(currentRoute)}
+                      </span>
+                      <ChevronDown className="h-5 w-5 shrink-0 text-gray-500 mt-0.5" aria-hidden />
+                    </button>
+                  </DropdownMenuTrigger>
+                  {chartSwitcherMenuContent}
+                </DropdownMenu>
+              ) : (
+                <button
+                  type="button"
+                  className="text-lg font-bold text-gray-900 mt-1 hover:underline text-left whitespace-normal break-words leading-snug w-full"
+                  onClick={goHome}
+                  data-testid="oc-title-home"
+                >
+                  {titleFromRoute(currentRoute)}
+                </button>
+              )}
+            </>
+          )}
         </div>
-        <div className="shrink-0 flex items-center gap-2">
+        <div className="shrink-0 flex items-center gap-2 self-center">
           <div className="text-[10px] px-2 py-1 rounded-md border bg-gray-50 text-gray-500 font-bold">Overall</div>
         </div>
       </div>
@@ -527,36 +737,13 @@ export default function OverviewContextView({
         };
       })();
 
-      const who = ocd.whoWeServe || { compFRL: 45, compIEP: 12, compELL: 8, compFemale: 50 };
-      const setWho = (patch: Partial<typeof who>) =>
-        setOcd((prev) => ({ ...prev, whoWeServe: { ...(prev as any).whoWeServe, ...patch } }));
-
-      const stakeholderLinks: { key: L3Section; label: string; preview: string }[] = [
-        {
-          key: "stakeholder.students",
-          label: "Students",
-          preview: `${ocd.stakeholderMap.students.populationSize || "—"} • ${ocd.stakeholderMap.students.keyRepresentatives || "—"}`,
-        },
-        {
-          key: "stakeholder.families",
-          label: "Families",
-          preview: `${ocd.stakeholderMap.families.populationSize || "—"} • ${ocd.stakeholderMap.families.keyRepresentatives || "—"}`,
-        },
-        {
-          key: "stakeholder.educatorsStaff",
-          label: "Educators & Staff",
-          preview: `${ocd.stakeholderMap.educatorsStaff.populationSize || "—"} • ${ocd.stakeholderMap.educatorsStaff.keyRepresentatives || "—"}`,
-        },
-        {
-          key: "stakeholder.administration",
-          label: "Administration",
-          preview: `${ocd.stakeholderMap.administration.populationSize || "—"} • ${ocd.stakeholderMap.administration.keyRepresentatives || "—"}`,
-        },
-        {
-          key: "stakeholder.otherCommunityLeaders",
-          label: "Other Community Leaders",
-          preview: `${ocd.stakeholderMap.otherCommunityLeaders.populationSize || "—"} • ${ocd.stakeholderMap.otherCommunityLeaders.keyRepresentatives || "—"}`,
-        },
+      const stakeholderLinks: { key: L3Section; label: string }[] = [
+        { key: "stakeholder.students", label: "Students" },
+        { key: "stakeholder.families", label: "Families" },
+        { key: "stakeholder.educatorsStaff", label: "Educators / Staff" },
+        { key: "stakeholder.administrationDistrict", label: "Administration (District)" },
+        { key: "stakeholder.administrationSchool", label: "Administration (School)" },
+        { key: "stakeholder.otherCommunityLeaders", label: "Other Community Leaders" },
       ];
 
       return (
@@ -842,104 +1029,28 @@ export default function OverviewContextView({
             </div>
           </div>
 
-          {/* 3) Who we serve / reach */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4" data-testid="oc-section-who">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Who we serve / reach</div>
-
-            <div className="space-y-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
-                <div className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">School population composition</div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-gray-600 font-medium">Gender (Female / Male)</span>
-                    <span className="text-gray-900">{who.compFemale}% / {100 - who.compFemale}%</span>
-                  </div>
-                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden flex relative">
-                    <div className="h-full bg-pink-400 transition-all duration-200" style={{ width: `${who.compFemale}%` }} />
-                    <div className="h-full bg-blue-400 transition-all duration-200 flex-1" />
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={who.compFemale}
-                      onChange={(e) => setWho({ compFemale: Number(e.target.value) })}
-                      className="absolute inset-0 opacity-0 cursor-ew-resize"
-                      data-testid="oc-who-female"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {[
-                    { key: "compFRL" as const, label: "FRL", color: "bg-amber-500" },
-                    { key: "compIEP" as const, label: "IEP", color: "bg-purple-500" },
-                    { key: "compELL" as const, label: "ELL", color: "bg-emerald-500" },
-                  ].map((row) => {
-                    const value = who[row.key];
-                    return (
-                      <div key={row.key} className="space-y-1.5">
-                        <div className="flex justify-between text-[10px]">
-                          <span className="text-gray-600 font-medium">{row.label}</span>
-                          <span className="text-gray-900">{value}%</span>
-                        </div>
-                        <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden relative">
-                          <div className={cn("h-full transition-all duration-200", row.color)} style={{ width: `${value}%` }} />
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={value}
-                            onChange={(e) => setWho({ [row.key]: Number(e.target.value) } as any)}
-                            className="absolute inset-0 opacity-0 cursor-ew-resize"
-                            data-testid={`oc-who-${row.key}`}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="text-[10px] text-gray-400">Drag bars to adjust percentages.</div>
-              </div>
-
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2">
-                <div className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">Key stakeholders</div>
-                <div className="space-y-2">
-                  {stakeholderLinks.map((s) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      onClick={() => pushRoute({ level: "L3", section: s.key })}
-                      className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
-                      data-testid={`oc-stakeholder-link-${s.key}`}
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-gray-900">{s.label}</div>
-                        <div className="text-[11px] text-gray-500 truncate">{s.preview}</div>
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
-                    </button>
-                  ))}
-                </div>
-                <div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => pushRoute({ level: "L2", section: "stakeholderMap" })}
-                    data-testid="oc-open-stakeholder-map"
-                  >
-                    Open stakeholder map
-                  </Button>
-                </div>
-              </div>
+          {/* 3) Key Stakeholders */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-who">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Key Stakeholders</div>
+            <div className="space-y-2">
+              {stakeholderLinks.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => pushRoute({ level: "L3", section: s.key })}
+                  className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
+                  data-testid={`oc-stakeholder-link-${s.key}`}
+                >
+                  <div className="text-xs font-semibold text-gray-900">{s.label}</div>
+                  <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Links to other context */}
+          {/* Context and Overview */}
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-context-links">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Links to other context</div>
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Context and Overview</div>
             <div className="space-y-2">
               {(
                 [
@@ -961,26 +1072,65 @@ export default function OverviewContextView({
                 </button>
               ))}
             </div>
-            <div className="text-[11px] text-gray-500">
-              These link to the same pages available from the center card (and right-click → Navigate).
+          </div>
+
+          {/* Enrollment & Composition */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-enrollment">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Enrollment & Composition</div>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => pushRoute({ level: "L3", section: "enrollment.studentDemographics" })}
+                className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
+                data-testid="oc-enroll-student-demographics"
+              >
+                <div className="text-xs font-semibold text-gray-900">Student Demographics</div>
+                <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+              </button>
             </div>
           </div>
 
-          {/* 4) Link to GreatSchool Data */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-greatschools">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Link to GreatSchool Data</div>
-            <button
-              type="button"
-              onClick={() => pushRoute({ level: "L2", section: "greatSchools" as const })}
-              className="w-full flex items-center justify-between text-left px-4 py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
-              data-testid="oc-link-greatschools"
-            >
-              <div className="min-w-0">
-                <div className="text-sm font-bold text-gray-900">GreatSchools data</div>
-                <div className="text-xs text-gray-500 mt-0.5 truncate">Enrollment, academics, and community reviews</div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-300 ml-auto shrink-0" />
-            </button>
+          {/* Public Academic Profile */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-public-academic">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Public Academic Profile</div>
+            <div className="space-y-2">
+              {(
+                [
+                  { key: "publicAcademic.collegePrep" as const, label: "College Prep" },
+                  { key: "publicAcademic.testScores" as const, label: "Test Scores" },
+                  { key: "publicAcademic.raceEthnicity" as const, label: "Race & Ethnicity" },
+                  { key: "publicAcademic.studentsWithDisabilities" as const, label: "Students with Disabilities" },
+                  { key: "publicAcademic.lowIncomeStudents" as const, label: "Low Income Students" },
+                ] as const
+              ).map((it) => (
+                <button
+                  key={it.key}
+                  type="button"
+                  onClick={() => pushRoute({ level: "L3", section: it.key })}
+                  className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
+                  data-testid={`oc-public-${it.key}`}
+                >
+                  <div className="text-xs font-semibold text-gray-900">{it.label}</div>
+                  <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Community Reviews */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-community-reviews">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Community Reviews</div>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => pushRoute({ level: "L2", section: "communityReviews" as const })}
+                className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
+                data-testid="oc-community-reviews"
+              >
+                <div className="text-xs font-semibold text-gray-900">Community Reviews</div>
+                <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+              </button>
+            </div>
           </div>
         </div>
       );
@@ -1033,16 +1183,10 @@ export default function OverviewContextView({
         return (
           <div className="p-6 space-y-3">
             <L1Item
-              label="Student demographics"
+              label="Student Demographics"
               preview="Summary of GreatSchools data"
               onNavigate={() => pushRoute({ level: "L3", section: "enrollment.studentDemographics" })}
               testId="oc-l2-enrollment-demographics"
-            />
-            <L1Item
-              label="Enrollment & composition"
-              preview="Summary of GreatSchools data"
-              onNavigate={() => pushRoute({ level: "L3", section: "enrollment.enrollmentComposition" })}
-              testId="oc-l2-enrollment-composition"
             />
           </div>
         );
@@ -1051,12 +1195,10 @@ export default function OverviewContextView({
       if (currentRoute.section === "publicAcademic") {
         const items: { key: L3Section; label: string }[] = [
           { key: "publicAcademic.collegePrep", label: "College Prep" },
-          { key: "publicAcademic.collegeSuccess", label: "College Success" },
-          { key: "publicAcademic.advancedCourses", label: "Advanced Courses" },
           { key: "publicAcademic.testScores", label: "Test Scores" },
           { key: "publicAcademic.raceEthnicity", label: "Race & Ethnicity" },
-          { key: "publicAcademic.lowIncomeStudents", label: "Low Income Students" },
           { key: "publicAcademic.studentsWithDisabilities", label: "Students with Disabilities" },
+          { key: "publicAcademic.lowIncomeStudents", label: "Low Income Students" },
         ];
         return (
           <div className="p-6 space-y-3">
@@ -1081,8 +1223,9 @@ export default function OverviewContextView({
         const items: { key: L3Section; label: string }[] = [
           { key: "stakeholder.students", label: "Students" },
           { key: "stakeholder.families", label: "Families" },
-          { key: "stakeholder.educatorsStaff", label: "Educators & Staff" },
-          { key: "stakeholder.administration", label: "Administration" },
+          { key: "stakeholder.educatorsStaff", label: "Educators / Staff" },
+          { key: "stakeholder.administrationDistrict", label: "Administration (District)" },
+          { key: "stakeholder.administrationSchool", label: "Administration (School)" },
           { key: "stakeholder.otherCommunityLeaders", label: "Other Community Leaders" },
         ];
         return (
@@ -1236,8 +1379,74 @@ export default function OverviewContextView({
         );
       }
 
-      // Placeholders (GreatSchools-driven)
+      // Enrollment pages
+      if (currentRoute.section === "enrollment.studentDemographics") {
+        return (
+          <div className="p-6">
+            <StudentDemographicsView
+              data={ocd.studentDemographics}
+              onChange={(next) =>
+                setOcd((prev) => ({ ...prev, studentDemographics: next }))
+              }
+            />
+          </div>
+        );
+      }
       if (currentRoute.section.startsWith("enrollment.")) return <div className="p-6">{placeholder("Enrollment & Composition")}</div>;
+
+      // Public Academic Profile pages
+      if (currentRoute.section === "publicAcademic.collegePrep") {
+        return (
+          <div className="p-6">
+            <CollegePrepView
+              data={(ocd as any).collegePrep as CollegePrepData | null | undefined}
+              onChange={(next) => setOcd((prev: any) => ({ ...prev, collegePrep: next }))}
+            />
+          </div>
+        );
+      }
+      if (currentRoute.section === "publicAcademic.testScores") {
+        return (
+          <div className="p-6">
+            <TestScoresView
+              data={(ocd as any).testScores as TestScoresData | null | undefined}
+              onChange={(next) => setOcd((prev: any) => ({ ...prev, testScores: next }))}
+            />
+          </div>
+        );
+      }
+      if (currentRoute.section === "publicAcademic.raceEthnicity") {
+        return (
+          <div className="p-6">
+            <RaceEthnicityView
+              data={(ocd as any).raceEthnicity as RaceEthnicityData | null | undefined}
+              onChange={(next) => setOcd((prev: any) => ({ ...prev, raceEthnicity: next }))}
+              studentDemographics={(ocd as any).studentDemographics}
+            />
+          </div>
+        );
+      }
+      if (currentRoute.section === "publicAcademic.lowIncomeStudents") {
+        return (
+          <div className="p-6">
+            <LowIncomeStudentsView
+              data={(ocd as any).lowIncomeStudents as LowIncomeStudentsData | null | undefined}
+              onChange={(next) => setOcd((prev: any) => ({ ...prev, lowIncomeStudents: next }))}
+              lowIncomePct={(ocd as any).studentDemographics?.lowIncomePct ?? null}
+            />
+          </div>
+        );
+      }
+      if (currentRoute.section === "publicAcademic.studentsWithDisabilities") {
+        return (
+          <div className="p-6">
+            <StudentsWithDisabilitiesView
+              data={(ocd as any).studentsWithDisabilities as StudentsWithDisabilitiesData | null | undefined}
+              onChange={(next) => setOcd((prev: any) => ({ ...prev, studentsWithDisabilities: next }))}
+            />
+          </div>
+        );
+      }
       if (currentRoute.section.startsWith("publicAcademic.")) return <div className="p-6">{placeholder("Public Academic Profile")}</div>;
     }
 

@@ -111,6 +111,227 @@ export const snapshotDataSchema = z.object({
           historyOfChangeText: "",
           otherContextText: "",
         }),
+      studentDemographics: z
+        .object({
+          raceEthnicity: z
+            .array(z.object({ label: z.string(), pct: z.number().nullable() }))
+            .default([]),
+          lowIncomePct: z.number().nullable().default(null),
+          femalePct: z.number().nullable().default(null),
+          currentAsOf: z.string().nullable().default(null),
+          verification: z.record(z.string(), z.object({ verified: z.boolean().default(false) })).default({}),
+        })
+        .nullable()
+        .optional(),
+      collegePrep: z
+        .object({
+          rows: z
+            .array(
+              z.object({
+                label: z.string(),
+                value: z.number().nullable().default(null),
+                stateAvg: z.number().nullable().default(null),
+                type: z.enum(["pct", "sat", "act"]).default("pct"),
+              }),
+            )
+            .default([]),
+          currentAsOf: z.string().nullable().default(null),
+          verification: z.record(z.string(), z.object({ verified: z.boolean().default(false) })).default({}),
+        })
+        .nullable()
+        .optional(),
+      testScores: z
+        .object({
+          subjects: z
+            .array(
+              z.object({
+                label: z.string(),
+                schoolPct: z.number().nullable().default(null),
+                stateAvg: z.number().nullable().default(null),
+              }),
+            )
+            .default([]),
+          currentAsOf: z.string().nullable().default(null),
+          verification: z.record(z.string(), z.object({ verified: z.boolean().default(false) })).default({}),
+        })
+        .nullable()
+        .optional(),
+      raceEthnicity: z
+        .object({
+          studentProgress: z
+            .object({
+              allStudents: z.number().nullable().default(null),
+              byRace: z
+                .array(
+                  z.object({
+                    label: z.string(),
+                    pctOfStudents: z.number().nullable().default(null),
+                    value: z.number().nullable().default(null),
+                  }),
+                )
+                .default([]),
+            })
+            .optional(),
+          graduationRates: z
+            .object({
+              allStudents: z
+                .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                .default({ school: null, stateAvg: null }),
+              byRace: z
+                .array(
+                  z.object({
+                    label: z.string(),
+                    pctOfStudents: z.number().nullable().default(null),
+                    school: z.number().nullable().default(null),
+                    stateAvg: z.number().nullable().default(null),
+                  }),
+                )
+                .default([]),
+            })
+            .optional(),
+          testScores: z
+            .object({
+              overview: z
+                .object({
+                  allStudents: z.number().nullable().default(null),
+                  byRace: z
+                    .array(
+                      z.object({
+                        label: z.string(),
+                        pctOfStudents: z.number().nullable().default(null),
+                        value: z.number().nullable().default(null),
+                      }),
+                    )
+                    .default([]),
+                })
+                .optional(),
+              subjects: z
+                .array(
+                  z.object({
+                    label: z.string(),
+                    allStudents: z
+                      .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                      .default({ school: null, stateAvg: null }),
+                    byRace: z
+                      .array(
+                        z.object({
+                          label: z.string(),
+                          pctOfStudents: z.number().nullable().default(null),
+                          school: z.number().nullable().default(null),
+                          stateAvg: z.number().nullable().default(null),
+                        }),
+                      )
+                      .default([]),
+                  }),
+                )
+                .default([]),
+            })
+            .optional(),
+          disciplineAttendance: z
+            .object({
+              suspended: z
+                .object({
+                  allStudents: z.number().nullable().default(null),
+                  byRace: z
+                    .array(
+                      z.object({
+                        label: z.string(),
+                        pctOfStudents: z.number().nullable().default(null),
+                        value: z.number().nullable().default(null),
+                      }),
+                    )
+                    .default([]),
+                })
+                .optional(),
+              chronicallyAbsent: z
+                .object({
+                  allStudents: z.number().nullable().default(null),
+                  byRace: z
+                    .array(
+                      z.object({
+                        label: z.string(),
+                        pctOfStudents: z.number().nullable().default(null),
+                        value: z.number().nullable().default(null),
+                      }),
+                    )
+                    .default([]),
+                })
+                .optional(),
+            })
+            .optional(),
+          currentAsOf: z.string().nullable().default(null),
+          verification: z.record(z.string(), z.object({ verified: z.boolean().default(false) })).default({}),
+        })
+        .nullable()
+        .optional(),
+      lowIncomeStudents: z
+        .object({
+          lowIncomeLabel: z.string().nullable().default(null),
+          studentProgress: z
+            .object({
+              allStudents: z.number().nullable().default(null),
+              lowIncome: z.number().nullable().default(null),
+            })
+            .optional(),
+          graduationRates: z
+            .object({
+              allStudents: z
+                .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                .default({ school: null, stateAvg: null }),
+              lowIncome: z
+                .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                .default({ school: null, stateAvg: null }),
+            })
+            .optional(),
+          testScores: z
+            .object({
+              overview: z
+                .object({
+                  allStudents: z.number().nullable().default(null),
+                  lowIncome: z.number().nullable().default(null),
+                })
+                .optional(),
+              subjects: z
+                .array(
+                  z.object({
+                    label: z.string(),
+                    allStudents: z
+                      .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                      .default({ school: null, stateAvg: null }),
+                    lowIncome: z
+                      .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                      .default({ school: null, stateAvg: null }),
+                  }),
+                )
+                .default([]),
+            })
+            .optional(),
+          currentAsOf: z.string().nullable().default(null),
+          verification: z.record(z.string(), z.object({ verified: z.boolean().default(false) })).default({}),
+        })
+        .nullable()
+        .optional(),
+      studentsWithDisabilities: z
+        .object({
+          swdLabel: z.string().nullable().default(null),
+          subjects: z
+            .array(
+              z.object({
+                label: z.string(),
+                allStudents: z
+                  .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                  .default({ school: null, stateAvg: null }),
+                swd: z
+                  .object({ school: z.number().nullable().default(null), stateAvg: z.number().nullable().default(null) })
+                  .default({ school: null, stateAvg: null }),
+              }),
+            )
+            .default([]),
+          currentAsOf: z.string().nullable().default(null),
+          verification: z.record(z.string(), z.object({ verified: z.boolean().default(false) })).default({}),
+        })
+        .nullable()
+        .optional(),
       stakeholderMap: z
         .object({
           students: z
@@ -134,7 +355,14 @@ export const snapshotDataSchema = z.object({
               keyRepresentatives: z.string().default(""),
             })
             .default({ populationSize: "", additionalContext: "", keyRepresentatives: "" }),
-          administration: z
+          administrationDistrict: z
+            .object({
+              populationSize: z.string().default(""),
+              additionalContext: z.string().default(""),
+              keyRepresentatives: z.string().default(""),
+            })
+            .default({ populationSize: "", additionalContext: "", keyRepresentatives: "" }),
+          administrationSchool: z
             .object({
               populationSize: z.string().default(""),
               additionalContext: z.string().default(""),
@@ -153,7 +381,8 @@ export const snapshotDataSchema = z.object({
           students: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
           families: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
           educatorsStaff: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
-          administration: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
+          administrationDistrict: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
+          administrationSchool: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
           otherCommunityLeaders: { populationSize: "", additionalContext: "", keyRepresentatives: "" },
         }),
     })

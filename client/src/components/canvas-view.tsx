@@ -96,10 +96,7 @@ type OverallNavTarget =
         | "contextOverview.historyOfChangeEfforts"
         | "contextOverview.otherContext"
         | "enrollment.studentDemographics"
-        | "enrollment.enrollmentComposition"
         | "publicAcademic.collegePrep"
-        | "publicAcademic.collegeSuccess"
-        | "publicAcademic.advancedCourses"
         | "publicAcademic.testScores"
         | "publicAcademic.raceEthnicity"
         | "publicAcademic.lowIncomeStudents"
@@ -107,7 +104,8 @@ type OverallNavTarget =
         | "stakeholder.students"
         | "stakeholder.families"
         | "stakeholder.educatorsStaff"
-        | "stakeholder.administration"
+        | "stakeholder.administrationDistrict"
+        | "stakeholder.administrationSchool"
         | "stakeholder.otherCommunityLeaders";
     };
 
@@ -581,8 +579,6 @@ const OctagonNode = ({
                         <>
                           {[
                             { key: "prep", label: "College Prep", section: "publicAcademic.collegePrep" as const },
-                            { key: "succ", label: "College Success", section: "publicAcademic.collegeSuccess" as const },
-                            { key: "adv", label: "Advanced Courses", section: "publicAcademic.advancedCourses" as const },
                             { key: "test", label: "Test Scores", section: "publicAcademic.testScores" as const },
                             { key: "race", label: "Race & Ethnicity", section: "publicAcademic.raceEthnicity" as const },
                             { key: "low", label: "Low Income Students", section: "publicAcademic.lowIncomeStudents" as const },
@@ -640,8 +636,9 @@ const OctagonNode = ({
                           {[
                             { key: "students", label: "Students", section: "stakeholder.students" as const },
                             { key: "families", label: "Families", section: "stakeholder.families" as const },
-                            { key: "staff", label: "Educators & Staff", section: "stakeholder.educatorsStaff" as const },
-                            { key: "admin", label: "Administration", section: "stakeholder.administration" as const },
+                            { key: "staff", label: "Educators / Staff", section: "stakeholder.educatorsStaff" as const },
+                            { key: "adminDistrict", label: "Administration (District)", section: "stakeholder.administrationDistrict" as const },
+                            { key: "adminSchool", label: "Administration (School)", section: "stakeholder.administrationSchool" as const },
                             { key: "other", label: "Other Community Leaders", section: "stakeholder.otherCommunityLeaders" as const },
                           ].map((row, idx) => (
                             <ContextMenu key={row.key}>
