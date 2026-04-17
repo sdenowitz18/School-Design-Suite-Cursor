@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronLeft, Info, Lock, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, Info, Lock, Plus, Star, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,17 +11,24 @@ import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 import type {
   RingConditionItem,
+  RingConditionStakeholderTag,
   RingConditionsCKey,
-  RingConditionsInstance,
   RingConditionsScoreData,
   RingConditionsStakeholderGroup,
   ScoreFilter,
 } from "@shared/schema";
-import { calculateRingConditionsScoreFromData, calculateRingConditionsSum } from "@shared/ring-conditions-score";
-import { inSelectedPeriod, normActor } from "@shared/score-instances";
-import { listSelectableYearKeys, parseIsoDate } from "@shared/marking-period";
+import {
+  calculateRingConditionsScoreFromData,
+  calculateRingConditionsSum,
+  conditionMatchesStakeholder,
+  effectiveConditionWindStrength,
+  getConditionStakeholderGroups,
+  getPrimaryStakeholderGroup,
+} from "@shared/ring-conditions-score";
+import { UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
+import { listSelectableYearKeys, minAsOfDate, parseIsoDate } from "@shared/marking-period";
 import ScoreFilterBar from "./score-filter-bar";
-import RingConditionsInstancesInlineEditor from "./ring-conditions-instances-inline-editor";
+import { Input } from "@/components/ui/input";
 import { useGlobalActors } from "@/lib/actors-store";
 import ScoreFlags, { SignalFlags } from "./score-flags";
 
@@ -145,34 +152,128 @@ function DirectionToggle({ value, onChange }: { value: "tailwind" | "headwind"; 
   );
 }
 
-function CsMultiSelect({ value, onChange }: { value: RingConditionsCKey[]; onChange: (next: RingConditionsCKey[]) => void }) {
+function CsMultiSelect({
+  value,
+  primaryC,
+  onChange,
+  onPrimaryChange,
+}: {
+  value: RingConditionsCKey[];
+  primaryC: RingConditionsCKey;
+  onChange: (next: RingConditionsCKey[]) => void;
+  onPrimaryChange: (next: RingConditionsCKey) => void;
+}) {
   const set = new Set(value);
   return (
-    <div className="flex flex-wrap gap-1.5" data-testid="c-multiselect">
+    <div className="flex flex-wrap gap-1.5 items-center" data-testid="c-multiselect">
       {C_KEYS.map((k) => {
         const active = set.has(k);
+        const isPrimary = active && primaryC === k;
         return (
-          <button
-            key={k}
-            type="button"
-            onClick={() => {
-              const next = new Set(set);
-              if (active) {
-                // Cs tagging is required: don't allow removing the last tag.
-                if (next.size <= 1) return;
-                next.delete(k);
-              }
-              else next.add(k);
-              onChange(Array.from(next));
-            }}
-            className={cn(
-              "text-[11px] font-semibold px-2 py-0.5 rounded-full border transition-colors",
-              active ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-gray-200 text-gray-500 hover:text-gray-800",
-            )}
-            aria-pressed={active}
-          >
-            {k}
-          </button>
+          <div key={k} className="inline-flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                const next = new Set(set);
+                if (active) {
+                  if (next.size <= 1) return;
+                  next.delete(k);
+                  const arr = Array.from(next) as RingConditionsCKey[];
+                  onChange(arr);
+                  if (primaryC === k) onPrimaryChange(arr[0]);
+                } else {
+                  const arr = [...Array.from(next), k] as RingConditionsCKey[];
+                  onChange(arr);
+                }
+              }}
+              className={cn(
+                "text-[11px] font-semibold px-2 py-0.5 rounded-full border transition-colors inline-flex items-center gap-1",
+                active ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-gray-200 text-gray-500 hover:text-gray-800",
+              )}
+              aria-pressed={active}
+            >
+              {k}
+            </button>
+            {active ? (
+              <button
+                type="button"
+                title="Primary C for this condition"
+                onClick={() => onPrimaryChange(k)}
+                className={cn(
+                  "p-0.5 rounded border border-transparent hover:border-amber-200",
+                  isPrimary ? "text-amber-600" : "text-gray-300 hover:text-amber-500",
+                )}
+                aria-label={`Set ${k} as primary C`}
+              >
+                <Star className={cn("w-3 h-3", isPrimary && "fill-amber-400")} />
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StakeholderTagsPicker({
+  value,
+  onChange,
+}: {
+  value: RingConditionStakeholderTag[];
+  onChange: (next: RingConditionStakeholderTag[]) => void;
+}) {
+  const keys = Object.keys(STAKEHOLDER_LABEL) as RingConditionsStakeholderGroup[];
+  const byGroup = new Map(value.map((t) => [t.group, t] as const));
+
+  const toggle = (g: RingConditionsStakeholderGroup) => {
+    if (byGroup.has(g)) {
+      if (value.length <= 1) return;
+      const next = value.filter((t) => t.group !== g);
+      if (!next.some((t) => t.primary)) next[0] = { group: next[0].group, primary: true };
+      onChange(next);
+    } else {
+      if (value.length === 0) onChange([{ group: g, primary: true }]);
+      else onChange([...value, { group: g, primary: false }]);
+    }
+  };
+
+  const setPrimary = (g: RingConditionsStakeholderGroup) => {
+    onChange(value.map((t) => ({ ...t, primary: t.group === g })));
+  };
+
+  return (
+    <div className="flex flex-wrap gap-1.5 items-center" data-testid="stakeholder-multiselect">
+      {keys.map((g) => {
+        const active = byGroup.has(g);
+        const isPrimary = !!value.find((t) => t.group === g)?.primary;
+        return (
+          <div key={g} className="inline-flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => toggle(g)}
+              className={cn(
+                "text-[11px] font-semibold px-2 py-0.5 rounded-full border transition-colors max-w-[200px] truncate",
+                active ? "bg-violet-50 border-violet-200 text-violet-800" : "bg-white border-gray-200 text-gray-500 hover:text-gray-800",
+              )}
+              aria-pressed={active}
+            >
+              {STAKEHOLDER_LABEL[g]}
+            </button>
+            {active ? (
+              <button
+                type="button"
+                title="Primary stakeholder group"
+                onClick={() => setPrimary(g)}
+                className={cn(
+                  "p-0.5 rounded border border-transparent hover:border-amber-200 shrink-0",
+                  isPrimary ? "text-amber-600" : "text-gray-300 hover:text-amber-500",
+                )}
+                aria-label={`Set ${STAKEHOLDER_LABEL[g]} as primary`}
+              >
+                <Star className={cn("w-3 h-3", isPrimary && "fill-amber-400")} />
+              </button>
+            ) : null}
+          </div>
         );
       })}
     </div>
@@ -229,50 +330,290 @@ function CsFilterChips({
   );
 }
 
-function normalizeConditionInstance(partial?: Partial<RingConditionsInstance>): RingConditionsInstance {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const id = String((partial as any)?.id || generateId());
-  const asOfDate = String(partial?.asOfDate || `${yyyy}-${mm}-${dd}`);
-  const actor = String(partial?.actor || "");
-  const windStrength = (partial?.windStrength === "H" || partial?.windStrength === "M" || partial?.windStrength === "L" ? partial.windStrength : "M") as any;
-  const rationale = String((partial as any)?.rationale || "");
-  return { id, asOfDate, actor, windStrength, rationale } as any;
+function StakeholderFilterChips({
+  value,
+  onChange,
+}: {
+  value: RingConditionsStakeholderGroup[];
+  onChange: (next: RingConditionsStakeholderGroup[]) => void;
+}) {
+  const set = new Set(value);
+  const keys = Object.keys(STAKEHOLDER_LABEL) as RingConditionsStakeholderGroup[];
+  const toggle = (g: RingConditionsStakeholderGroup) => {
+    const next = new Set(set);
+    if (next.has(g)) next.delete(g);
+    else next.add(g);
+    onChange(Array.from(next));
+  };
+
+  return (
+    <div className="flex flex-wrap gap-1.5" data-testid="stakeholder-conditions-filter">
+      <button
+        type="button"
+        onClick={() => onChange([])}
+        className={cn(
+          "text-[11px] font-semibold px-2 py-0.5 rounded-full border transition-colors",
+          value.length === 0 ? "bg-violet-50 border-violet-200 text-violet-800" : "bg-white border-gray-200 text-gray-500 hover:text-gray-800",
+        )}
+        aria-pressed={value.length === 0}
+      >
+        All
+      </button>
+      {keys.map((g) => {
+        const active = set.has(g);
+        return (
+          <button
+            key={g}
+            type="button"
+            onClick={() => toggle(g)}
+            className={cn(
+              "text-[11px] font-semibold px-2 py-0.5 rounded-full border transition-colors max-w-[160px] truncate",
+              active ? "bg-violet-50 border-violet-200 text-violet-800" : "bg-white border-gray-200 text-gray-500 hover:text-gray-800",
+            )}
+            aria-pressed={active}
+          >
+            {STAKEHOLDER_LABEL[g]}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
-function effectiveWindStrength(instances: RingConditionsInstance[], filter: any): number | null {
-  const agg = filter?.aggregation || "singleLatest";
-  const list = Array.isArray(instances) ? instances : [];
+function normalizeLoadedCondition(raw: any): RingConditionItem {
+  const id = String(raw?.id || generateId());
+  const direction = raw?.direction === "headwind" ? "headwind" : "tailwind";
+  const cs: RingConditionsCKey[] =
+    Array.isArray(raw?.cs) && raw.cs.length > 0 ? (raw.cs as RingConditionsCKey[]) : (["Conviction"] as RingConditionsCKey[]);
+  const primaryC: RingConditionsCKey = raw?.primaryC && cs.includes(raw.primaryC) ? raw.primaryC : cs[0];
 
-  const eligible: { actorKey: string; dt: number; strength: number }[] = [];
-  for (const inst of list) {
-    const d = parseIsoDate(String((inst as any)?.asOfDate || ""));
-    if (!d) continue;
-    if (!inSelectedPeriod(d, filter)) continue;
-    const actorKey = normActor((inst as any)?.actor);
-    eligible.push({ actorKey, dt: d.getTime(), strength: hmlValue((inst as any)?.windStrength) });
+  const allowedGroups = new Set(Object.keys(STAKEHOLDER_LABEL) as RingConditionsStakeholderGroup[]);
+  let stakeholderTags: RingConditionStakeholderTag[] = [];
+  if (Array.isArray(raw?.stakeholderTags) && raw.stakeholderTags.length > 0) {
+    stakeholderTags = raw.stakeholderTags
+      .map((t: any) => ({
+        group: t?.group as RingConditionsStakeholderGroup,
+        primary: !!t?.primary,
+      }))
+      .filter((t: RingConditionStakeholderTag) => allowedGroups.has(t.group));
+    if (stakeholderTags.length === 0) stakeholderTags = [{ group: "students", primary: true }];
+  } else if (raw?.stakeholderGroup && allowedGroups.has(raw.stakeholderGroup)) {
+    stakeholderTags = [{ group: raw.stakeholderGroup as RingConditionsStakeholderGroup, primary: true }];
+  } else {
+    stakeholderTags = [{ group: "students", primary: true }];
   }
-  if (eligible.length === 0) return null;
+  if (!stakeholderTags.some((t) => t.primary)) stakeholderTags[0] = { ...stakeholderTags[0], primary: true };
+  if (stakeholderTags.filter((t) => t.primary).length !== 1) {
+    stakeholderTags = stakeholderTags.map((t, i) => ({ ...t, primary: i === 0 }));
+  }
 
-  if (agg === "latestPerActor") {
-    const wanted = normActor(filter?.actorKey);
-    if (!wanted) return null;
-    const filtered = eligible.filter((e) => e.actorKey === wanted);
-    if (filtered.length === 0) return null;
-    filtered.sort((a, b) => b.dt - a.dt);
-    return filtered[0].strength;
-  }
+  let windStrength: Hml = "M";
+  if (raw?.windStrength === "H" || raw?.windStrength === "M" || raw?.windStrength === "L") windStrength = raw.windStrength;
+  let asOfDate = String(raw?.asOfDate || raw?.dateLogged || "");
+  let actor = String(raw?.actor || "");
+  let rationale = String(raw?.rationale || "");
 
-  const byActor = new Map<string, { dt: number; strength: number }>();
-  for (const e of eligible) {
-    const prev = byActor.get(e.actorKey);
-    if (!prev || e.dt > prev.dt) byActor.set(e.actorKey, { dt: e.dt, strength: e.strength });
+  const rawInsts: any[] = Array.isArray(raw?.instances) ? raw.instances : [];
+  if (rawInsts.length > 0) {
+    const parsed = rawInsts
+      .map((i: any) => ({ i, t: parseIsoDate(String(i?.asOfDate || ""))?.getTime() ?? 0 }))
+      .sort((a, b) => a.t - b.t);
+    const latest = parsed[parsed.length - 1]?.i;
+    if (latest) {
+      asOfDate = String(latest.asOfDate || asOfDate || todayYmd());
+      actor = String(latest.actor ?? actor);
+      if (latest.windStrength === "H" || latest.windStrength === "M" || latest.windStrength === "L") windStrength = latest.windStrength;
+      if (latest.rationale) rationale = String(latest.rationale);
+    }
   }
-  const values = Array.from(byActor.values());
-  if (values.length === 0) return null;
-  return values.reduce((s, v) => s + v.strength, 0) / values.length;
+  if (!asOfDate) asOfDate = todayYmd();
+
+  return {
+    id,
+    direction,
+    windStrength,
+    asOfDate,
+    actor,
+    rationale: rationale || undefined,
+    stakeholderTags,
+    cs,
+    primaryC,
+    description: String(raw?.description || ""),
+    instances: [],
+  } as RingConditionItem;
+}
+
+function ConditionLogFields({
+  asOfDate,
+  actor,
+  windStrength,
+  rationale,
+  actors,
+  onAddActor,
+  onPatch,
+  testIdPrefix,
+}: {
+  asOfDate: string;
+  actor: string;
+  windStrength: Hml;
+  rationale?: string;
+  actors: string[];
+  onAddActor: (label: string) => void;
+  onPatch: (patch: Partial<Pick<RingConditionItem, "asOfDate" | "actor" | "windStrength" | "rationale">>) => void;
+  testIdPrefix?: string;
+}) {
+  const minDate = minAsOfDate(new Date(), 5);
+  const actorOptions = useMemo(() => {
+    const out: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const a of Array.isArray(actors) ? actors : []) {
+      const clean = String(a ?? "").trim();
+      if (!clean) continue;
+      const key = normActor(clean);
+      if (!key || key === UNKNOWN_ACTOR_KEY) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, label: clean });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [actors]);
+
+  const actorLabelByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of actorOptions) m.set(a.key, a.label);
+    return m;
+  }, [actorOptions]);
+
+  const ADD_NEW_KEY = "__add_new__";
+  const [draftActor, setDraftActor] = useState("");
+  const [addingActor, setAddingActor] = useState(false);
+  const [rationaleOpen, setRationaleOpen] = useState(false);
+
+  const actorValue = normActor(actor);
+  const isAdding = addingActor;
+
+  return (
+    <div className="space-y-2" data-testid={testIdPrefix ? `${testIdPrefix}-log-fields` : undefined}>
+      <div className="text-xs font-semibold text-gray-700">Log</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold text-gray-600">Actor</span>
+          <select
+            className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+            value={isAdding ? ADD_NEW_KEY : actorValue}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              if (v === ADD_NEW_KEY) {
+                setAddingActor(true);
+                return;
+              }
+              setAddingActor(false);
+              if (v === UNKNOWN_ACTOR_KEY) return onPatch({ actor: "" });
+              const label = actorLabelByKey.get(v) || String(v);
+              onPatch({ actor: label });
+            }}
+            data-testid={testIdPrefix ? `${testIdPrefix}-actor` : undefined}
+          >
+            <option value={UNKNOWN_ACTOR_KEY}>Unknown</option>
+            {actorOptions.map((a) => (
+              <option key={a.key} value={a.key}>
+                {a.label}
+              </option>
+            ))}
+            <option value={ADD_NEW_KEY}>Add new…</option>
+          </select>
+        </div>
+
+        {isAdding ? (
+          <div className="flex items-center gap-2">
+            <Input
+              value={draftActor}
+              onChange={(e) => setDraftActor(e.currentTarget?.value ?? "")}
+              placeholder="New actor…"
+              className="h-8 w-[150px] text-xs bg-white"
+              data-testid={testIdPrefix ? `${testIdPrefix}-actor-draft` : undefined}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-[11px]"
+              onClick={() => {
+                const clean = String(draftActor || "").trim();
+                if (!clean) return;
+                onAddActor(clean);
+                onPatch({ actor: clean });
+                setDraftActor("");
+                setAddingActor(false);
+              }}
+              data-testid={testIdPrefix ? `${testIdPrefix}-actor-add` : undefined}
+            >
+              Add
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 text-[11px] text-gray-500"
+              onClick={() => {
+                setDraftActor("");
+                setAddingActor(false);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold text-gray-600">As-of</span>
+          <Input
+            type="date"
+            className="h-8 w-[150px] text-xs bg-white"
+            value={String(asOfDate || "")}
+            min={minDate}
+            onChange={(e) => onPatch({ asOfDate: e.currentTarget.value })}
+            data-testid={testIdPrefix ? `${testIdPrefix}-date` : undefined}
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold text-gray-600">Wind</span>
+          <select
+            className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
+            value={String(windStrength || "M")}
+            onChange={(e) => onPatch({ windStrength: e.currentTarget.value as Hml })}
+            data-testid={testIdPrefix ? `${testIdPrefix}-wind` : undefined}
+          >
+            <option value="H">H</option>
+            <option value="M">M</option>
+            <option value="L">L</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <button
+          type="button"
+          onClick={() => setRationaleOpen((v) => !v)}
+          className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
+        >
+          {rationaleOpen ? "Hide rationale" : rationale ? "Edit rationale" : "Add rationale"}
+        </button>
+        {rationaleOpen ? (
+          <div className="mt-2">
+            <Textarea
+              value={String(rationale || "")}
+              onChange={(e) => onPatch({ rationale: e.currentTarget.value })}
+              placeholder="Add rationale…"
+              className="text-xs min-h-[60px] bg-white"
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 interface RingConditionsScoreViewProps {
@@ -316,6 +657,7 @@ export default function RingConditionsScoreView({
   const [conditions, setConditions] = useState<RingConditionItem[]>([]);
   const [openById, setOpenById] = useState<Record<string, boolean>>({});
   const [filterCs, setFilterCs] = useState<RingConditionsCKey[]>([]);
+  const [filterStakeholders, setFilterStakeholders] = useState<RingConditionsStakeholderGroup[]>([]);
   const [summaryMode, setSummaryMode] = useState<"cs" | "stakeholder">("cs");
   const [initialized, setInitialized] = useState(false);
 
@@ -335,28 +677,7 @@ export default function RingConditionsScoreView({
             actorKey: saved?.actorKey,
           } as any));
     setLocalFilter(initial as any);
-    setConditions(
-      (((csd as any).conditions || []) as any[]).map((c) => {
-        const legacyWind = (c?.windStrength === "H" || c?.windStrength === "M" || c?.windStrength === "L" ? c.windStrength : "M") as any;
-        const rawInsts: any[] = Array.isArray(c?.instances) ? c.instances : [];
-        const insts =
-          rawInsts.length > 0
-            ? rawInsts.map((i: any) => normalizeConditionInstance(i))
-            : legacyWind
-              ? [normalizeConditionInstance({ asOfDate: todayYmd(), actor: "", windStrength: legacyWind, rationale: "" } as any)]
-              : [];
-        return {
-          id: String(c?.id || generateId()),
-          stakeholderGroup: (c?.stakeholderGroup || "students") as any,
-          direction: (c?.direction || "tailwind") as any,
-          windStrength: (c?.windStrength || "M") as any, // legacy fallback
-          instances: insts,
-          cs: Array.isArray(c?.cs) && c.cs.length > 0 ? c.cs : (["Conviction"] as any),
-          description: String(c?.description || ""),
-          dateLogged: c?.dateLogged ? String(c.dateLogged) : "", // legacy
-        };
-      }),
-    );
+    setConditions((((csd as any).conditions || []) as any[]).map((c) => normalizeLoadedCondition(c)));
     const open: Record<string, boolean> = {};
     ((((csd as any).conditions || []) as any[]) as any[]).forEach((c) => {
       const id = String(c?.id || "");
@@ -379,8 +700,7 @@ export default function RingConditionsScoreView({
     };
     for (const a of Array.isArray(globalActors) ? globalActors : []) add(a);
     for (const c of Array.isArray(conditions) ? conditions : []) {
-      const insts: any[] = Array.isArray((c as any)?.instances) ? ((c as any).instances as any[]) : [];
-      for (const inst of insts) add((inst as any)?.actor);
+      add((c as any)?.actor);
     }
     out.sort((a, b) => a.localeCompare(b));
     return out;
@@ -423,7 +743,7 @@ export default function RingConditionsScoreView({
   const stakeholderSummaries = useMemo(() => {
     const keys = Object.keys(STAKEHOLDER_LABEL) as RingConditionsStakeholderGroup[];
     return keys.map((k) => {
-      const subset = (Array.isArray(conditions) ? conditions : []).filter((c) => String((c as any)?.stakeholderGroup) === String(k));
+      const subset = (Array.isArray(conditions) ? conditions : []).filter((c) => conditionMatchesStakeholder(c, k));
       const data: RingConditionsScoreData = {
         actors: actorOptions,
         filter,
@@ -474,19 +794,18 @@ export default function RingConditionsScoreView({
 
   const addCondition = () => {
     const id = `cond_${generateId()}`;
-    setConditions((prev) => [
-      ...prev,
-      {
-        id,
-        stakeholderGroup: "students",
-        direction: "tailwind",
-        windStrength: "M", // legacy fallback
-        instances: [],
-        cs: ["Conviction"],
-        description: "",
-        dateLogged: todayYmd(), // legacy
-      },
-    ]);
+    const row = normalizeLoadedCondition({
+      id,
+      stakeholderTags: [{ group: "students", primary: true }],
+      direction: "tailwind",
+      windStrength: "M",
+      asOfDate: todayYmd(),
+      actor: "",
+      cs: ["Conviction"],
+      primaryC: "Conviction",
+      description: "",
+    });
+    setConditions((prev) => [...prev, row]);
     setOpenById((prev) => ({ ...prev, [id]: true }));
   };
 
@@ -504,22 +823,28 @@ export default function RingConditionsScoreView({
   };
 
   const contributionFor = (c: RingConditionItem): number => {
-    const insts: RingConditionsInstance[] = Array.isArray((c as any)?.instances) ? ((c as any).instances as any) : [];
-    const eff = insts.length > 0 ? effectiveWindStrength(insts, filter) : hmlValue((c as any).windStrength);
+    const eff = effectiveConditionWindStrength(c, filter);
     if (eff === null) return 0;
     const sign = c.direction === "tailwind" ? 1 : -1;
     return sign * eff;
   };
 
   const visibleConditions = useMemo(() => {
-    if (filterCs.length === 0) return conditions;
-    const want = new Set(filterCs);
-    return conditions.filter((c) => {
-      const tags = Array.isArray((c as any).cs) ? ((c as any).cs as any[]) : [];
-      if (tags.length === 0) return false;
-      return tags.some((t) => want.has(String(t) as any));
-    });
-  }, [conditions, filterCs]);
+    let list = conditions;
+    if (filterCs.length > 0) {
+      const want = new Set(filterCs);
+      list = list.filter((c) => {
+        const tags = Array.isArray((c as any).cs) ? ((c as any).cs as any[]) : [];
+        if (tags.length === 0) return false;
+        return tags.some((t) => want.has(String(t) as any));
+      });
+    }
+    if (filterStakeholders.length > 0) {
+      const want = new Set(filterStakeholders);
+      list = list.filter((c) => getConditionStakeholderGroups(c).some((g) => want.has(g)));
+    }
+    return list;
+  }, [conditions, filterCs, filterStakeholders]);
 
   return (
     <div className="space-y-6 pb-12 max-w-5xl mx-auto p-6" data-testid="ring-conditions-score-view">
@@ -586,8 +911,8 @@ export default function RingConditionsScoreView({
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
             <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
             <p className="text-xs text-blue-700 leading-relaxed">
-              Tailwinds add points and headwinds subtract points. Each condition contributes \(direction × wind strength\) based on its latest instance(s).
-              The total maps to a 1–5 score (rescaled).
+              Tailwinds add points and headwinds subtract points. Each logged condition contributes once to the overall score (direction × wind strength).
+              Rollups by 5C or stakeholder include the same condition in every matching category. The total maps to a 1–5 score (rescaled).
             </p>
           </div>
         </div>
@@ -605,8 +930,8 @@ export default function RingConditionsScoreView({
                   conditionsSum: null,
                 } as any) ?? null;
               const desc = String(c?.description || "").trim();
-              const group = String(c?.stakeholderGroup || "").trim();
-              const label = desc ? desc : group ? group : "Condition";
+              const group = getPrimaryStakeholderGroup(c);
+              const label = desc ? desc : group ? STAKEHOLDER_LABEL[group] : "Condition";
               return { key: String(c?.id || label), label, value: sum };
             })}
             maxPerSide={3}
@@ -633,14 +958,18 @@ export default function RingConditionsScoreView({
           </Button>
         </div>
         <div className="p-4 space-y-3">
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <Label className="text-xs text-gray-700">Filter by 5Cs</Label>
+              <Label className="text-xs text-gray-700">Filter list (5Cs)</Label>
               <span className="text-[10px] text-gray-400">
                 Showing {visibleConditions.length}/{conditions.length}
               </span>
             </div>
             <CsFilterChips value={filterCs} onChange={setFilterCs} />
+            <div className="space-y-2">
+              <Label className="text-xs text-gray-700">Filter list (stakeholders)</Label>
+              <StakeholderFilterChips value={filterStakeholders} onChange={setFilterStakeholders} />
+            </div>
           </div>
           {conditions.length === 0 ? (
             <div className="text-center py-6 text-xs text-gray-400">No conditions yet. Add one to start scoring.</div>
@@ -648,11 +977,12 @@ export default function RingConditionsScoreView({
             visibleConditions.map((c) => {
               const isOpen = !!openById[c.id];
               const contrib = contributionFor(c);
-              const insts: RingConditionsInstance[] = Array.isArray((c as any)?.instances) ? ((c as any).instances as any) : [];
-              const eff = insts.length > 0 ? effectiveWindStrength(insts, filter) : hmlValue((c as any).windStrength);
+              const eff = effectiveConditionWindStrength(c, filter);
               const effLabel: Hml =
                 eff === null ? "M" : eff >= 3.5 ? "H" : eff >= 1.5 ? "M" : "L";
               const csTags: string[] = Array.isArray((c as any)?.cs) ? ((c as any).cs as any[]).map((x) => String(x)) : [];
+              const primarySg = getPrimaryStakeholderGroup(c);
+              const sgCount = getConditionStakeholderGroups(c).length;
               return (
                 <Collapsible
                   key={c.id}
@@ -665,7 +995,12 @@ export default function RingConditionsScoreView({
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-semibold text-gray-900">{STAKEHOLDER_LABEL[c.stakeholderGroup]}</span>
+                              <span className="text-xs font-semibold text-gray-900">
+                                {primarySg ? STAKEHOLDER_LABEL[primarySg] : "Stakeholders"}
+                                {sgCount > 1 ? (
+                                  <span className="text-gray-500 font-normal"> +{sgCount - 1}</span>
+                                ) : null}
+                              </span>
                               <Badge
                                 variant="secondary"
                                 className={cn(
@@ -676,10 +1011,7 @@ export default function RingConditionsScoreView({
                                 {c.direction === "tailwind" ? "Tailwind" : "Headwind"}
                               </Badge>
                               <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
-                                Wind {effLabel}
-                              </Badge>
-                              <Badge variant="secondary" className="text-[10px] h-5 bg-gray-200 text-gray-700">
-                                {insts.length} inst
+                                Wind {c.windStrength}
                               </Badge>
                               {csTags.slice(0, 2).map((t) => (
                                 <span
@@ -715,20 +1047,13 @@ export default function RingConditionsScoreView({
                     <CollapsibleContent>
                       <div className="p-3 space-y-3 border-t border-gray-200 bg-white">
                         {/* Condition-level fields */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 gap-3">
                           <div className="space-y-1">
-                            <Label className="text-[11px] text-gray-600">Stakeholder group</Label>
-                            <select
-                              value={c.stakeholderGroup}
-                              onChange={(e) => updateCondition(c.id, { stakeholderGroup: e.target.value as any })}
-                              className="h-9 w-full rounded-md border border-gray-200 bg-white px-2 text-sm"
-                            >
-                              {(Object.keys(STAKEHOLDER_LABEL) as RingConditionsStakeholderGroup[]).map((k) => (
-                                <option key={k} value={k}>
-                                  {STAKEHOLDER_LABEL[k]}
-                                </option>
-                              ))}
-                            </select>
+                            <Label className="text-[11px] text-gray-600">Stakeholder groups (star = primary)</Label>
+                            <StakeholderTagsPicker
+                              value={c.stakeholderTags || []}
+                              onChange={(next) => updateCondition(c.id, { stakeholderTags: next })}
+                            />
                           </div>
 
                           <div className="space-y-1">
@@ -738,12 +1063,23 @@ export default function RingConditionsScoreView({
                             </div>
                           </div>
 
-                          <div className="md:col-span-2 space-y-1">
-                            <Label className="text-[11px] text-gray-600">Related 5Cs</Label>
-                            <CsMultiSelect value={c.cs || []} onChange={(next) => updateCondition(c.id, { cs: next })} />
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-gray-600">Related 5Cs (star = primary)</Label>
+                            <CsMultiSelect
+                              value={c.cs || []}
+                              primaryC={
+                                c.primaryC && (c.cs || []).includes(c.primaryC) ? c.primaryC : (c.cs || [])[0] || "Conviction"
+                              }
+                              onChange={(next) => {
+                                const pc =
+                                  c.primaryC && next.includes(c.primaryC) ? c.primaryC : next[0];
+                                updateCondition(c.id, { cs: next, primaryC: pc });
+                              }}
+                              onPrimaryChange={(pc) => updateCondition(c.id, { primaryC: pc })}
+                            />
                           </div>
 
-                          <div className="md:col-span-2 space-y-1">
+                          <div className="space-y-1">
                             <Label className="text-[11px] text-gray-600">Description</Label>
                             <Textarea
                               value={c.description || ""}
@@ -756,24 +1092,21 @@ export default function RingConditionsScoreView({
 
                         <Separator />
 
-                        {/* Instances */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="text-xs font-semibold text-gray-700">Instances</div>
-                              <span className={cn("text-[10px] px-2 py-0.5 rounded-full border", tinyChipClass(effLabel))}>
-                                Effective: {eff === null ? "—" : `${effLabel} (${format1(eff)})`}
-                              </span>
-                            </div>
-                          </div>
+                        <ConditionLogFields
+                          asOfDate={c.asOfDate || ""}
+                          actor={c.actor || ""}
+                          windStrength={(c.windStrength === "H" || c.windStrength === "M" || c.windStrength === "L" ? c.windStrength : "M") as Hml}
+                          rationale={c.rationale}
+                          actors={actorOptions}
+                          onAddActor={(label) => addGlobalActor(label)}
+                          onPatch={(patch) => updateCondition(c.id, patch)}
+                          testIdPrefix={`cond-${c.id}`}
+                        />
 
-                          <RingConditionsInstancesInlineEditor
-                            instances={insts as any}
-                            onChange={(next) => updateCondition(c.id, { instances: next as any })}
-                            actors={actorOptions}
-                            onAddActor={(label) => addGlobalActor(label)}
-                            testIdPrefix={`cond-${c.id}`}
-                          />
+                        <div className="flex items-center gap-2">
+                          <span className={cn("text-[10px] px-2 py-0.5 rounded-full border", tinyChipClass(effLabel))}>
+                            In selected period: {eff === null ? "—" : `${effLabel} (${format1(eff)})`}
+                          </span>
                         </div>
 
                         <Separator />

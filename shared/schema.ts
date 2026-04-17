@@ -964,17 +964,33 @@ export const ringConditionsInstanceSchema = z.object({
 });
 export type RingConditionsInstance = z.infer<typeof ringConditionsInstanceSchema>;
 
-export const ringConditionItemSchema = z.object({
-  id: z.string(),
-  stakeholderGroup: ringConditionsStakeholderGroupSchema,
-  direction: ringConditionsDirectionSchema,
-  // Legacy (pre-instances): keep for lazy migration fallback.
-  windStrength: z.enum(["H", "M", "L"]).optional().default("M"),
-  instances: z.array(ringConditionsInstanceSchema).default([]),
-  cs: z.array(ringConditionsCKeySchema).default([]),
-  description: z.string().default(""),
-  dateLogged: z.string().optional(),
+export const ringConditionStakeholderTagSchema = z.object({
+  group: ringConditionsStakeholderGroupSchema,
+  primary: z.boolean().default(false),
 });
+export type RingConditionStakeholderTag = z.infer<typeof ringConditionStakeholderTagSchema>;
+
+export const ringConditionItemSchema = z
+  .object({
+    id: z.string(),
+    direction: ringConditionsDirectionSchema,
+    /** Wind strength for this logged condition (single value per condition). */
+    windStrength: z.enum(["H", "M", "L"]).default("M"),
+    asOfDate: z.string().default(""),
+    actor: z.string().default(""),
+    rationale: z.string().optional(),
+    stakeholderTags: z.array(ringConditionStakeholderTagSchema).default([]),
+    cs: z.array(ringConditionsCKeySchema).default([]),
+    /** Must be one of `cs` when present; defaults to first C in UI. */
+    primaryC: ringConditionsCKeySchema.optional(),
+    description: z.string().default(""),
+    /** Legacy: pre multi-stakeholder; migrated to stakeholderTags on load. */
+    stakeholderGroup: ringConditionsStakeholderGroupSchema.optional(),
+    /** Legacy: historical instances; migrated to condition-level fields on load. */
+    instances: z.array(ringConditionsInstanceSchema).default([]),
+    dateLogged: z.string().optional(),
+  })
+  .passthrough();
 export type RingConditionItem = z.infer<typeof ringConditionItemSchema>;
 
 export const ringConditionsScoreDataSchema = z

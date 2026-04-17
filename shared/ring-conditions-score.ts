@@ -1,4 +1,4 @@
-import type { RingConditionsInstance, RingConditionsScoreData } from "./schema";
+import type { RingConditionsInstance, RingConditionsScoreData, RingConditionsStakeholderGroup } from "./schema";
 import { inSelectedPeriod, normActor } from "./score-instances";
 import { parseIsoDate } from "./marking-period";
 
@@ -52,6 +52,53 @@ function effectiveWindStrength(instances: RingConditionsInstance[], filter: any)
   return avg;
 }
 
+/** Eligible wind strength for one condition row (legacy instances or condition-level fields). */
+export function effectiveConditionWindStrength(condition: any, filter: any): number | null {
+  const instances = Array.isArray(condition?.instances) ? (condition.instances as RingConditionsInstance[]) : [];
+  if (instances.length > 0) return effectiveWindStrength(instances, filter);
+
+  const d = parseIsoDate(String(condition?.asOfDate || condition?.dateLogged || ""));
+  if (!d) return null;
+  if (!inSelectedPeriod(d, filter)) return null;
+  const strength = windValue(condition?.windStrength);
+  const agg = filter?.aggregation || "singleLatest";
+  if (agg === "latestPerActor") {
+    const wanted = normActor(filter?.actorKey);
+    if (!wanted) return null;
+    if (normActor(condition?.actor) !== wanted) return null;
+  }
+  return strength;
+}
+
+export function getConditionStakeholderGroups(condition: any): RingConditionsStakeholderGroup[] {
+  const tags = condition?.stakeholderTags;
+  if (Array.isArray(tags) && tags.length > 0) {
+    const out: RingConditionsStakeholderGroup[] = [];
+    for (const t of tags) {
+      const g = (t as any)?.group;
+      if (g) out.push(g as RingConditionsStakeholderGroup);
+    }
+    return out;
+  }
+  const legacy = condition?.stakeholderGroup;
+  if (legacy) return [legacy as RingConditionsStakeholderGroup];
+  return [];
+}
+
+export function getPrimaryStakeholderGroup(condition: any): RingConditionsStakeholderGroup | null {
+  const tags = condition?.stakeholderTags;
+  if (Array.isArray(tags) && tags.length > 0) {
+    const primary = tags.find((t: any) => t?.primary);
+    if (primary?.group) return primary.group as RingConditionsStakeholderGroup;
+    return (tags[0] as any)?.group ?? null;
+  }
+  return condition?.stakeholderGroup ?? null;
+}
+
+export function conditionMatchesStakeholder(condition: any, group: RingConditionsStakeholderGroup): boolean {
+  return getConditionStakeholderGroups(condition).some((g) => String(g) === String(group));
+}
+
 export function calculateRingConditionsSum(data: RingConditionsScoreData): number | null {
   const conditions = data?.conditions || [];
   if (conditions.length === 0) return null;
@@ -62,8 +109,7 @@ export function calculateRingConditionsSum(data: RingConditionsScoreData): numbe
 
   for (const c of conditions) {
     if (!c) continue;
-    const instances = Array.isArray((c as any)?.instances) ? ((c as any).instances as RingConditionsInstance[]) : [];
-    const wS = instances.length > 0 ? effectiveWindStrength(instances, filter) : windValue((c as any).windStrength);
+    const wS = effectiveConditionWindStrength(c, filter);
     if (wS === null) continue;
     const dir = directionFactor((c as any).direction);
     if (dir === 0) continue;

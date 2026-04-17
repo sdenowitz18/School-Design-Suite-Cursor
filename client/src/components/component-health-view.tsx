@@ -32,7 +32,13 @@ import { IMPLEMENTATION_SUBDIMENSION_TREE } from "@shared/implementation-subdime
 import { calcFinalDesignScore, calcDesignDimensionScore } from "@shared/design-score-calc";
 import { DESIGN_SUBDIMENSION_TREE } from "@shared/design-subdimension-tree";
 import RingConditionsScoreView from "./ring-conditions-score-view";
-import { calculateRingConditionsScore, calculateRingConditionsScoreFromData, calculateRingConditionsSum } from "@shared/ring-conditions-score";
+import {
+  calculateRingConditionsScore,
+  calculateRingConditionsScoreFromData,
+  calculateRingConditionsSum,
+  getConditionStakeholderGroups,
+  getPrimaryStakeholderGroup,
+} from "@shared/ring-conditions-score";
 import { effectiveFromInstances, UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
 import { calcOverallOutcomeScore, calcL1Score } from "@shared/outcome-score-calc";
 import { calcFinalExperienceScore, migrateLegacyExperienceScoreData } from "@shared/experience-score-calc";
@@ -1321,9 +1327,11 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                                };
 
                                                if (conditionsSummaryMode === "stakeholder") {
-                                                 const g = String(c?.stakeholderGroup || "");
-                                                 if (!g) continue;
-                                                 add(g);
+                                                 const groups = getConditionStakeholderGroups(c);
+                                                 for (const g of groups) {
+                                                   if (!g) continue;
+                                                   add(String(g));
+                                                 }
                                                } else {
                                                  const tags: any[] = Array.isArray(c?.cs) ? c.cs : [];
                                                  // Cs tagging is required; if missing, omit from type summary.
