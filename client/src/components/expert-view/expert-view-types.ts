@@ -30,6 +30,8 @@ export interface BucketDef {
   customAllowed?: boolean;
   centerOnly?: boolean;
   ringOnly?: boolean;
+  /** Hide this bucket entirely at the center level — no editor, no rollup placeholder. */
+  hideAtCenter?: boolean;
   /** Show “Adult experience” badge; buckets still visible so nothing is missed. */
   adultOnly?: boolean;
   contextNote?: string;

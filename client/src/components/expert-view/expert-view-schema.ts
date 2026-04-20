@@ -22,6 +22,8 @@ export const SCHEDULE_ELEMENT: ElementDef = {
           title: 'Formats of scheduled blocks of time',
           archetype: 'A1',
           customAllowed: true,
+          ringOnly: true,
+          contextNote: 'Configured at the ring / subcomponent level — center shows an aggregated view',
           tags: [
             { id: 'core-course', label: 'Core course' },
             { id: 'elective-special', label: 'Elective/special course' },
@@ -35,6 +37,14 @@ export const SCHEDULE_ELEMENT: ElementDef = {
             { id: 'integrated-block', label: 'Integrated into a time block mostly defined elsewhere' },
             { id: 'other-time-block', label: 'Other time block' },
           ],
+        },
+        {
+          id: 'number-of-classrooms-and-students',
+          title: 'Number of classrooms and students',
+          archetype: 'A5',
+          hideAtCenter: true,
+          placeholder:
+            'Describe the number of classrooms and students for this component…',
         },
         {
           id: 'general-purpose',
@@ -54,6 +64,7 @@ export const SCHEDULE_ELEMENT: ElementDef = {
           title: 'Duration',
           archetype: 'A3',
           customAllowed: false,
+          hideAtCenter: true,
           units: ['min', 'hrs', 'days'],
         },
         {
@@ -61,6 +72,7 @@ export const SCHEDULE_ELEMENT: ElementDef = {
           title: 'Frequency',
           archetype: 'A3',
           customAllowed: false,
+          hideAtCenter: true,
           units: ['per day', 'per week', 'per month', 'per quarter', 'per year', 'overall student experience'],
         },
         {
@@ -68,12 +80,14 @@ export const SCHEDULE_ELEMENT: ElementDef = {
           title: 'Specific times',
           archetype: 'A4',
           customAllowed: true,
+          hideAtCenter: true,
         },
         {
           id: 'sequencing',
           title: 'Sequencing',
           archetype: 'A1',
           customAllowed: true,
+          hideAtCenter: true,
           tags: [
             { id: 'multiyear-sequence', label: 'Multiyear sequence of experiences' },
             { id: 'standalone', label: 'Standalone experience' },

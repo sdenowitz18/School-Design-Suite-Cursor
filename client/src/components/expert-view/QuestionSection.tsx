@@ -264,6 +264,11 @@ function BucketSection({
     return value;
   }, [bucket.ringSchoolWideChoice, bucket.archetype, componentType, value, schoolWideBucketValue]);
 
+  // Fully hidden at center (no editor, no rollup placeholder)
+  if (bucket.hideAtCenter && componentType === 'center') {
+    return null;
+  }
+
   // Center-only bucket shown at ring level
   if (bucket.centerOnly && componentType !== 'center') {
     return (
@@ -280,9 +285,14 @@ function BucketSection({
     );
   }
 
-  // Ring-only bucket shown at center level — special case: general purpose shows tier distribution
+  // Ring-only bucket shown at center level — read-only rollup.
+  // `general-purpose` keeps its Tier 1 / Tier 2–3 distribution; other buckets show a minimal
+  // "aggregated from ring components" placeholder (no aggregation wired up yet).
   if (bucket.ringOnly && componentType === 'center') {
-    const tierDist: TierDistribution = (value as any).tierDistribution ?? defaultTierDist();
+    const isGeneralPurpose = bucket.id === 'general-purpose';
+    const tierDist: TierDistribution = isGeneralPurpose
+      ? ((value as any).tierDistribution ?? defaultTierDist())
+      : defaultTierDist();
     return (
       <div className="border border-gray-200 rounded-xl p-4 bg-white">
         <BucketHeader
@@ -294,7 +304,16 @@ function BucketSection({
         />
         {!collapsed && (
           <div className="mt-4">
-            <TierDistributionView value={tierDist} />
+            {isGeneralPurpose ? (
+              <TierDistributionView value={tierDist} />
+            ) : (
+              <div className="flex items-start gap-2 p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-500">
+                <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" />
+                <span>
+                  Aggregated from ring component entries. Go into individual ring components to configure.
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>

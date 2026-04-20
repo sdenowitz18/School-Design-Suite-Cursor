@@ -21,7 +21,6 @@ import {
   calculateRingConditionsScoreFromData,
   calculateRingConditionsSum,
   conditionMatchesStakeholder,
-  effectiveConditionWindStrength,
   getConditionStakeholderGroups,
   getPrimaryStakeholderGroup,
 } from "@shared/ring-conditions-score";
@@ -57,16 +56,6 @@ function todayYmd(): string {
   }
 }
 
-function hmlValue(v: unknown): number {
-  if (v === "H" || v === "M" || v === "L") return v === "H" ? 4 : v === "M" ? 2 : 1;
-  return 2;
-}
-
-function format1(v: number): string {
-  const r = Math.round(v * 10) / 10;
-  return String(r);
-}
-
 function ScoreChip({ score, size = "md" }: { score: number | null; size?: "sm" | "md" | "lg" }) {
   if (score === null)
     return (
@@ -100,12 +89,6 @@ function ScoreChip({ score, size = "md" }: { score: number | null; size?: "sm" |
       {rounded}
     </div>
   );
-}
-
-function tinyChipClass(v: Hml) {
-  if (v === "H") return "bg-emerald-100 text-emerald-800 border-emerald-200";
-  if (v === "M") return "bg-yellow-100 text-yellow-800 border-yellow-200";
-  return "bg-red-100 text-red-800 border-red-200";
 }
 
 function HmlPicker({ value, onChange }: { value: Hml; onChange: (v: Hml) => void }) {
@@ -822,13 +805,6 @@ export default function RingConditionsScoreView({
     });
   };
 
-  const contributionFor = (c: RingConditionItem): number => {
-    const eff = effectiveConditionWindStrength(c, filter);
-    if (eff === null) return 0;
-    const sign = c.direction === "tailwind" ? 1 : -1;
-    return sign * eff;
-  };
-
   const visibleConditions = useMemo(() => {
     let list = conditions;
     if (filterCs.length > 0) {
@@ -976,10 +952,6 @@ export default function RingConditionsScoreView({
           ) : (
             visibleConditions.map((c) => {
               const isOpen = !!openById[c.id];
-              const contrib = contributionFor(c);
-              const eff = effectiveConditionWindStrength(c, filter);
-              const effLabel: Hml =
-                eff === null ? "M" : eff >= 3.5 ? "H" : eff >= 1.5 ? "M" : "L";
               const csTags: string[] = Array.isArray((c as any)?.cs) ? ((c as any).cs as any[]).map((x) => String(x)) : [];
               const primarySg = getPrimaryStakeholderGroup(c);
               const sgCount = getConditionStakeholderGroups(c).length;
@@ -1047,15 +1019,7 @@ export default function RingConditionsScoreView({
                     <CollapsibleContent>
                       <div className="p-3 space-y-3 border-t border-gray-200 bg-white">
                         {/* Condition-level fields */}
-                        <div className="grid grid-cols-1 gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-[11px] text-gray-600">Stakeholder groups (star = primary)</Label>
-                            <StakeholderTagsPicker
-                              value={c.stakeholderTags || []}
-                              onChange={(next) => updateCondition(c.id, { stakeholderTags: next })}
-                            />
-                          </div>
-
+                        <div className="space-y-3">
                           <div className="space-y-1">
                             <Label className="text-[11px] text-gray-600">Direction</Label>
                             <div className="mt-1">
@@ -1063,20 +1027,30 @@ export default function RingConditionsScoreView({
                             </div>
                           </div>
 
-                          <div className="space-y-1">
-                            <Label className="text-[11px] text-gray-600">Related 5Cs (star = primary)</Label>
-                            <CsMultiSelect
-                              value={c.cs || []}
-                              primaryC={
-                                c.primaryC && (c.cs || []).includes(c.primaryC) ? c.primaryC : (c.cs || [])[0] || "Conviction"
-                              }
-                              onChange={(next) => {
-                                const pc =
-                                  c.primaryC && next.includes(c.primaryC) ? c.primaryC : next[0];
-                                updateCondition(c.id, { cs: next, primaryC: pc });
-                              }}
-                              onPrimaryChange={(pc) => updateCondition(c.id, { primaryC: pc })}
-                            />
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-gray-600">Stakeholder groups (star = primary)</Label>
+                              <StakeholderTagsPicker
+                                value={c.stakeholderTags || []}
+                                onChange={(next) => updateCondition(c.id, { stakeholderTags: next })}
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-gray-600">Related 5Cs (star = primary)</Label>
+                              <CsMultiSelect
+                                value={c.cs || []}
+                                primaryC={
+                                  c.primaryC && (c.cs || []).includes(c.primaryC) ? c.primaryC : (c.cs || [])[0] || "Conviction"
+                                }
+                                onChange={(next) => {
+                                  const pc =
+                                    c.primaryC && next.includes(c.primaryC) ? c.primaryC : next[0];
+                                  updateCondition(c.id, { cs: next, primaryC: pc });
+                                }}
+                                onPrimaryChange={(pc) => updateCondition(c.id, { primaryC: pc })}
+                              />
+                            </div>
                           </div>
 
                           <div className="space-y-1">
@@ -1102,20 +1076,6 @@ export default function RingConditionsScoreView({
                           onPatch={(patch) => updateCondition(c.id, patch)}
                           testIdPrefix={`cond-${c.id}`}
                         />
-
-                        <div className="flex items-center gap-2">
-                          <span className={cn("text-[10px] px-2 py-0.5 rounded-full border", tinyChipClass(effLabel))}>
-                            In selected period: {eff === null ? "—" : `${effLabel} (${format1(eff)})`}
-                          </span>
-                        </div>
-
-                        <Separator />
-                        <div className="flex items-center justify-between text-[11px] text-gray-500">
-                          <span>Effective wind: <span className="font-semibold">{eff === null ? "—" : `${effLabel} (${format1(eff)})`}</span></span>
-                          <span>
-                            Contribution: <span className="font-semibold">{format1(contrib)}</span>
-                          </span>
-                        </div>
                       </div>
                     </CollapsibleContent>
                   </div>

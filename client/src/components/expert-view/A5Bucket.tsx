@@ -11,7 +11,8 @@ interface A5BucketProps {
 }
 
 export function A5Bucket({ bucket, value, componentType, schoolWideText, onChange }: A5BucketProps) {
-  const showInheritance = componentType === 'ring';
+  // No school-wide value exists for buckets hidden at the center, so the toggle is meaningless.
+  const showInheritance = componentType === 'ring' && !bucket.hideAtCenter;
 
   return (
     <div className="space-y-3">
@@ -39,11 +40,15 @@ export function A5Bucket({ bucket, value, componentType, schoolWideText, onChang
       )}
 
       {/* Text area — hidden when inheriting */}
-      {value.inheritFromSchool && schoolWideText ? (
+      {showInheritance && value.inheritFromSchool && schoolWideText ? (
         <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2.5 italic">
           {schoolWideText}
         </div>
-      ) : !value.inheritFromSchool ? (
+      ) : showInheritance && value.inheritFromSchool ? (
+        <div className="text-sm text-gray-400 bg-gray-50 border border-gray-200 rounded-md px-3 py-2.5 italic">
+          Pull from center component once entered...
+        </div>
+      ) : (
         <textarea
           value={value.text}
           onChange={(e) => onChange({ ...value, text: e.target.value })}
@@ -51,10 +56,6 @@ export function A5Bucket({ bucket, value, componentType, schoolWideText, onChang
           rows={4}
           className="w-full text-sm text-gray-700 placeholder-gray-400 border border-gray-200 rounded-md px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300 bg-white"
         />
-      ) : (
-        <div className="text-sm text-gray-400 bg-gray-50 border border-gray-200 rounded-md px-3 py-2.5 italic">
-          Pull from center component once entered...
-        </div>
       )}
     </div>
   );
