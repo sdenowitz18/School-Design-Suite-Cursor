@@ -6,6 +6,7 @@ import { A1Bucket } from './A1Bucket';
 import { A2Bucket } from './A2Bucket';
 import { A3Bucket } from './A3Bucket';
 import { A3RatioBucket } from './A3RatioBucket';
+import { A3PairBucket } from './A3PairBucket';
 import { A4Bucket } from './A4Bucket';
 import { A5Bucket } from './A5Bucket';
 import { A2TensionBucket } from './A2TensionBucket';
@@ -20,6 +21,7 @@ import type {
   A2TensionValue,
   A3Value,
   A3RatioValue,
+  A3PairValue,
   A4Value,
   A5Value,
   ComponentType,
@@ -32,6 +34,7 @@ function defaultA1(): A1Value { return { selections: [] }; }
 function defaultA2(): A2Value { return { selectedId: null, isKey: false, notes: '' }; }
 function defaultA3(): A3Value { return { value: null, unit: '', description: '', isKey: false }; }
 function defaultA3Ratio(): A3RatioValue { return { learners: null, facilitators: null, isKey: false }; }
+function defaultA3Pair(): A3PairValue { return { first: null, second: null, isKey: false }; }
 function defaultA4(): A4Value { return { days: [], time: '', recurrence: '', notes: '', isKey: false }; }
 function defaultA5(): A5Value { return { text: '', inheritFromSchool: false, isKey: false }; }
 function defaultA2Tension(): A2TensionValue { return { selections: {} }; }
@@ -185,6 +188,16 @@ function BucketCollapsedSummary({ bucket, value }: { bucket: BucketDef; value: B
     );
   }
 
+  if (archetype === 'A3Pair') {
+    const p = value.archetypeA3Pair;
+    if (p?.first == null && p?.second == null) return null;
+    const [firstLabel, secondLabel] = bucket.pairLabels ?? ['First', 'Second'];
+    const parts: string[] = [];
+    if (p.first != null) parts.push(`${p.first} ${firstLabel.toLowerCase()}`);
+    if (p.second != null) parts.push(`${p.second} ${secondLabel.toLowerCase()}`);
+    return <p className="mt-2 text-sm text-gray-600 tabular-nums">{parts.join(' · ')}</p>;
+  }
+
   if (archetype === 'A4') {
     const a4 = value.archetypeA4;
     const parts: string[] = [];
@@ -320,10 +333,11 @@ function BucketSection({
     );
   }
 
-  const isA3orA4orA5 = ['A3', 'A3Ratio', 'A4', 'A5'].includes(bucket.archetype);
+  const isA3orA4orA5 = ['A3', 'A3Ratio', 'A3Pair', 'A4', 'A5'].includes(bucket.archetype);
   const bucketIsKey =
     value.archetypeA3?.isKey ||
     value.archetypeA3Ratio?.isKey ||
+    value.archetypeA3Pair?.isKey ||
     value.archetypeA4?.isKey ||
     value.archetypeA5?.isKey ||
     false;
@@ -331,6 +345,7 @@ function BucketSection({
   function toggleBucketKey() {
     if (bucket.archetype === 'A3') onChange({ ...value, archetypeA3: { ...(value.archetypeA3 ?? defaultA3()), isKey: !value.archetypeA3?.isKey } });
     if (bucket.archetype === 'A3Ratio') onChange({ ...value, archetypeA3Ratio: { ...(value.archetypeA3Ratio ?? defaultA3Ratio()), isKey: !value.archetypeA3Ratio?.isKey } });
+    if (bucket.archetype === 'A3Pair') onChange({ ...value, archetypeA3Pair: { ...(value.archetypeA3Pair ?? defaultA3Pair()), isKey: !value.archetypeA3Pair?.isKey } });
     if (bucket.archetype === 'A4') onChange({ ...value, archetypeA4: { ...(value.archetypeA4 ?? defaultA4()), isKey: !value.archetypeA4?.isKey } });
     if (bucket.archetype === 'A5') onChange({ ...value, archetypeA5: { ...(value.archetypeA5 ?? defaultA5()), isKey: !value.archetypeA5?.isKey } });
   }
@@ -398,6 +413,12 @@ function BucketSection({
             <A3RatioBucket
               value={value.archetypeA3Ratio ?? defaultA3Ratio()}
               onChange={(v) => onChange({ ...value, archetypeA3Ratio: v })}
+            />
+          ) : bucket.archetype === 'A3Pair' ? (
+            <A3PairBucket
+              bucket={bucket}
+              value={value.archetypeA3Pair ?? defaultA3Pair()}
+              onChange={(v) => onChange({ ...value, archetypeA3Pair: v })}
             />
           ) : bucket.archetype === 'A4' ? (
             <A4Bucket

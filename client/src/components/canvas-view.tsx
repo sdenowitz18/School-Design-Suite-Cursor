@@ -361,7 +361,7 @@ const OctagonNode = ({
      const setRoute = onSetOverallCardRoute;
 
      const titleForRoute = () => {
-       if (route.level === "L1") return "Overview & Context";
+       if (route.level === "L1") return "Journey & Overview";
        if (route.level === "L2") {
          return route.section === "mission"
            ? "Mission"
@@ -379,9 +379,9 @@ const OctagonNode = ({
        if (s.startsWith("contextOverview.")) return "Context & Overview";
        if (s.startsWith("enrollment.")) return "Enrollment & Composition";
        if (s.startsWith("publicAcademic.")) return "Public Academic Profile";
-       if (s.startsWith("stakeholder.")) return "Stakeholder Map";
-       return "Overview & Context";
-     };
+      if (s.startsWith("stakeholder.")) return "Stakeholder Map";
+      return "Journey & Overview";
+    };
 
      const showBack = route.level !== "L1";
 
@@ -794,7 +794,7 @@ const OctagonNode = ({
             {(() => {
               const left = otherModes[0];
               const right = otherModes[1];
-              const label = (m: OverallCenterMode) => (m === "overview" ? "Overview & Context" : m === "designed" ? "Designed Experience" : "Performance Status");
+              const label = (m: OverallCenterMode) => (m === "overview" ? "Journey & Overview" : m === "designed" ? "Designed Experience" : "Performance Status");
               const color = (m: OverallCenterMode) => (m === "overview" ? "text-orange-700" : m === "designed" ? "text-blue-700" : "text-emerald-700");
               const toTab = (m: OverallCenterMode) => (m === "overview" ? "overview-and-context" : m === "designed" ? "designed-experience" : "status-and-health");
               return (
@@ -922,7 +922,7 @@ function CanvasViewInner() {
 
   useEffect(() => {
     if (selectedNode?.nodeId === "overall") {
-      // Default to Overview & Context tab for the center component.
+      // Default to Journey & Overview tab for the center component.
       if (activeTab === "snapshot") setActiveTab("overview-and-context");
     }
   }, [activeTab, selectedNode?.nodeId]);
@@ -1263,6 +1263,11 @@ function CanvasViewInner() {
                 setOpenSubId(null);
               }
             }}
+            onRequestNavigateToStudentDemographics={() => {
+              setOpenSubId(null);
+              setActiveTab("overview-and-context");
+              setOverallNavTarget({ level: "L3", section: "enrollment.studentDemographics" });
+            }}
           />
           </div>
         </SheetContent>
@@ -1288,6 +1293,11 @@ function CanvasViewInner() {
             setActiveTab("snapshot");
             setOpenSubId(null);
           }
+        }}
+        onRequestNavigateToStudentDemographics={() => {
+          setOpenSubId(null);
+          setActiveTab("overview-and-context");
+          setOverallNavTarget({ level: "L3", section: "enrollment.studentDemographics" });
         }}
       />
       </div>

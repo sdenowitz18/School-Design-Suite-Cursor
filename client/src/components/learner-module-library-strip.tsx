@@ -25,7 +25,8 @@ import {
 import {
   ADULT_EXPERIENCE_PICKS,
   ADULT_EXPERIENCE_ROLE_OPTIONS,
-  adultPicksForRoleId,
+  adultPicksForRoleAndPrimary,
+  adultPrimariesForRoleId,
   type AdultCatalogPick,
 } from "@/lib/adult-experience-catalog";
 import { addRingComponentFromCatalogPick, setLearnerModuleDragData } from "@/lib/learner-module-drop";
@@ -78,7 +79,16 @@ export default function LearnerModuleLibraryStrip() {
   }, []);
 
   const [adultRoleId, setAdultRoleId] = useState(ADULT_EXPERIENCE_ROLE_OPTIONS[0]?.id ?? "");
-  const adultPicksRow = useMemo(() => adultPicksForRoleId(adultRoleId), [adultRoleId]);
+  const [adultPrimaryFilter, setAdultPrimaryFilter] = useState<string>("all");
+  const adultPrimaryOptions = useMemo(() => adultPrimariesForRoleId(adultRoleId), [adultRoleId]);
+  const adultPicksRow = useMemo(
+    () => adultPicksForRoleAndPrimary(adultRoleId, adultPrimaryFilter),
+    [adultRoleId, adultPrimaryFilter],
+  );
+
+  useEffect(() => {
+    setAdultPrimaryFilter("all");
+  }, [adultRoleId]);
 
   const activeBucket = LEARNER_EXPERIENCE_CATALOG.find((b) => b.id === activeBucketId);
 
@@ -286,7 +296,7 @@ export default function LearnerModuleLibraryStrip() {
         ))}
       </Tabs>
       ) : (
-        <div className="flex flex-1 min-h-0 flex-col gap-0">
+        <Tabs value={adultRoleId} onValueChange={setAdultRoleId} className="flex flex-1 min-h-0 flex-col gap-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b-2 border-violet-400 bg-violet-100/95 px-2 py-1.5 sm:px-3 shrink-0">
             <div className="flex items-center gap-1 shrink-0">
               <span className="text-xs font-semibold text-gray-900 whitespace-nowrap">Module library</span>
@@ -301,12 +311,12 @@ export default function LearnerModuleLibraryStrip() {
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-[240px] text-left font-normal bg-gray-900 text-white border-0">
-                  Adult experience modules: drag to the blueprint for a new ring component, or onto the working panel
-                  for an adult subcomponent. For whole-school, switch to Adult here and drop on the center panel when
-                  Overview is open.
+                  Adult experience modules: pick a role tab, narrow by primary, then drag a module onto the blueprint
+                  for a new ring component or onto a working panel for an adult subcomponent.
                 </TooltipContent>
               </Tooltip>
             </div>
+
             <div className="flex items-center gap-0.5 rounded-md border border-gray-200/80 bg-white p-0.5 shrink-0">
               <Button type="button" size="sm" variant="ghost" className="h-7 text-[11px] px-2" onClick={() => switchAudience("learner")}>
                 Learner
@@ -315,21 +325,43 @@ export default function LearnerModuleLibraryStrip() {
                 Adult
               </Button>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0 flex-1 min-w-[200px] max-w-full sm:max-w-xl">
-              <span className="text-[10px] text-gray-500 whitespace-nowrap hidden sm:inline">Audience</span>
-              <Select value={adultRoleId} onValueChange={setAdultRoleId}>
-                <SelectTrigger className="h-8 text-xs flex-1 min-w-0">
-                  <SelectValue placeholder="Role" />
-                </SelectTrigger>
-                <SelectContent className="z-[200]">
-                  {ADULT_EXPERIENCE_ROLE_OPTIONS.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+
+            <p className="w-full basis-full text-[10px] text-gray-600 leading-snug order-last sm:order-none sm:w-auto sm:basis-auto sm:max-w-md">
+              <span className="font-semibold text-gray-700">Drag:</span> blueprint → new component · ring working panel
+              → adult subcomponent on that component.
+            </p>
+
+            <TabsList className="h-8 flex-1 min-w-0 justify-start gap-0.5 overflow-x-auto rounded-md bg-violet-50/90 p-0.5 sm:flex-initial sm:max-w-none">
+              {ADULT_EXPERIENCE_ROLE_OPTIONS.map((r) => (
+                <TabsTrigger
+                  key={r.id}
+                  value={r.id}
+                  className="shrink-0 whitespace-nowrap px-2.5 py-1 text-[11px] h-7 data-[state=active]:shadow-sm"
+                >
+                  {r.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            {adultPrimaryOptions.length > 0 ? (
+              <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto sm:min-w-[200px]">
+                <span className="text-[10px] text-gray-500 whitespace-nowrap hidden sm:inline">Primary</span>
+                <Select value={adultPrimaryFilter} onValueChange={setAdultPrimaryFilter}>
+                  <SelectTrigger className="h-8 text-xs flex-1 sm:w-[260px] sm:flex-none">
+                    <SelectValue placeholder="All primaries" />
+                  </SelectTrigger>
+                  <SelectContent className="z-[200]">
+                    <SelectItem value="all">All primaries</SelectItem>
+                    {adultPrimaryOptions.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
             <Button
               type="button"
               variant="ghost"
@@ -341,61 +373,76 @@ export default function LearnerModuleLibraryStrip() {
               <X className="w-4 h-4" />
             </Button>
           </div>
-          <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden px-2 sm:px-3 pt-2 pb-1">
-            <div className="flex gap-3 items-stretch min-h-[min(100%,11rem)] h-full">
-              {adultPicksRow.map((item) => {
-                const sel = selectedCatalogKeys.has(item.key);
-                return (
-                  <div key={item.key} className="flex w-[168px] shrink-0 flex-col gap-1.5">
-                    <div
-                      title={item.title}
-                      draggable
-                      onDragStart={(e) => {
-                        setLearnerModuleDragData(e.dataTransfer, item.key, "adult");
-                        e.dataTransfer.effectAllowed = "copy";
-                      }}
-                      className={cn(
-                        "rounded-xl border border-transparent bg-violet-50/50 transition-all w-full overflow-hidden cursor-grab active:cursor-grabbing",
-                        sel ? "ring-2 ring-violet-500 ring-offset-2 border-violet-200 bg-white" : "hover:border-gray-200 hover:bg-white",
-                      )}
-                    >
-                      <div className="h-[136px] w-full flex items-start justify-center overflow-hidden pt-1">
-                        <div className="scale-[0.60] origin-top pointer-events-none">
-                          <OctagonCard
-                            title={item.title}
-                            subtitle={item.subtitle}
-                            bgClassName="bg-white"
-                            centerVariant="pill"
-                            centerText="Drag"
-                            leftStat={{ label: "Exp", value: "0" }}
-                            rightStat={{ label: "Out", value: "0" }}
-                            onClick={() => {}}
-                          />
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="w-full py-1 text-[10px] font-medium text-violet-700 hover:text-violet-900 hover:bg-violet-50/80"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleCatalogKey(item.key);
-                        }}
-                      >
-                        {sel ? "Deselect" : "Select for bulk add"}
-                      </button>
-                    </div>
-                    <p
-                      className="text-[11px] leading-snug text-center text-gray-800 px-0.5 line-clamp-4 min-h-[3.5rem]"
-                      title={item.title}
-                    >
-                      {item.title}
-                    </p>
+
+          {ADULT_EXPERIENCE_ROLE_OPTIONS.map((r) => (
+            <TabsContent
+              key={r.id}
+              value={r.id}
+              className="mt-0 flex-1 min-h-0 flex flex-col overflow-hidden outline-none data-[state=inactive]:hidden"
+            >
+              <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden px-2 sm:px-3 pt-2 pb-1">
+                {adultPicksRow.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-[11px] text-gray-500 italic">
+                    No adult modules for this primary.
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+                ) : (
+                  <div className="flex gap-3 items-stretch min-h-[min(100%,11rem)] h-full">
+                    {adultPicksRow.map((item) => {
+                      const sel = selectedCatalogKeys.has(item.key);
+                      return (
+                        <div key={item.key} className="flex w-[168px] shrink-0 flex-col gap-1.5">
+                          <div
+                            title={item.title}
+                            draggable
+                            onDragStart={(e) => {
+                              setLearnerModuleDragData(e.dataTransfer, item.key, "adult");
+                              e.dataTransfer.effectAllowed = "copy";
+                            }}
+                            className={cn(
+                              "rounded-xl border border-transparent bg-violet-50/50 transition-all w-full overflow-hidden cursor-grab active:cursor-grabbing",
+                              sel ? "ring-2 ring-violet-500 ring-offset-2 border-violet-200 bg-white" : "hover:border-gray-200 hover:bg-white",
+                            )}
+                          >
+                            <div className="h-[136px] w-full flex items-start justify-center overflow-hidden pt-1">
+                              <div className="scale-[0.60] origin-top pointer-events-none">
+                                <OctagonCard
+                                  title={item.title}
+                                  subtitle={item.subtitle}
+                                  bgClassName="bg-white"
+                                  centerVariant="pill"
+                                  centerText="Drag"
+                                  leftStat={{ label: "Exp", value: "0" }}
+                                  rightStat={{ label: "Out", value: "0" }}
+                                  onClick={() => {}}
+                                />
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="w-full py-1 text-[10px] font-medium text-violet-700 hover:text-violet-900 hover:bg-violet-50/80"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCatalogKey(item.key);
+                              }}
+                            >
+                              {sel ? "Deselect" : "Select for bulk add"}
+                            </button>
+                          </div>
+                          <p
+                            className="text-[11px] leading-snug text-center text-gray-800 px-0.5 line-clamp-4 min-h-[3.5rem]"
+                            title={item.title}
+                          >
+                            {item.title}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          ))}
+        </Tabs>
       )}
 
       <div className="flex flex-wrap items-center gap-2 shrink-0 border-t border-gray-100 bg-white px-2 sm:px-3 py-1.5">

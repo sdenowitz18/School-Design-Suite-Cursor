@@ -3,7 +3,11 @@ import type { TagDef } from "./expert-view/expert-view-types";
 /**
  * Learner design taxonomy from "Design tags_updatedv2" — Learners sheet.
  * Columns: Set of design choices → Choice buckets → Primary tags → Secondary tags.
- * "Incoming skills…" is a separate top-level block from "Learning attributes…" (not nested).
+ * Two top-level questions:
+ *   1) Learning attributes that affect what makes rest of design a strong fit
+ *      Buckets: Demographic & situational factors, Grade Band, Incoming skills knowledge & mindsets
+ *   2) Ways of selection-gating learners in parts of the experience
+ *      Buckets: Selection Gating
  */
 
 export type LearnerSecondaryDef = { id: string; label: string };
@@ -33,13 +37,13 @@ export type LearnerSectionDef = {
   buckets: LearnerBucketDef[];
 };
 
-/** Full hierarchy: separate sections (each is its own design-choice question). */
+/** Full hierarchy: two top-level questions, each with one or more choice buckets. */
 export const LEARNER_SECTIONS: LearnerSectionDef[] = [
   {
     id: "learning_attributes",
-    title: "Learning attributes & context",
+    title: "Learning attributes that affect what makes rest of design a strong fit",
     setOfDesignChoices:
-      "Which learning attributes and situational factors should this component account for so the rest of the design is a strong fit for the young people you serve?",
+      "Learning attributes that affect what makes rest of design a strong fit",
     buckets: [
       {
         id: "demographic_situational",
@@ -76,17 +80,54 @@ export const LEARNER_SECTIONS: LearnerSectionDef[] = [
           { id: "systems_involvement", label: "Involvement with systems such as foster care or juvenile justice" },
         ],
       },
-    ],
-  },
-  {
-    id: "incoming_skills",
-    title: "Incoming skills, knowledge, and mindsets",
-    setOfDesignChoices:
-      "What are learners bringing into this experience in terms of prior knowledge, interests, and past experiences — including success, failure, and bias?",
-    buckets: [
+      {
+        id: "grade_band",
+        title: "Grade Band",
+        primaries: [
+          {
+            id: "grade_preschool",
+            label: "Preschool",
+            secondaries: [
+              { id: "preschool_3", label: "3-year-olds (PK3)" },
+              { id: "preschool_4", label: "4-year-olds (PK4)" },
+            ],
+          },
+          { id: "grade_kindergarten", label: "Kindergarten" },
+          {
+            id: "grade_elementary_school",
+            label: "Elementary school",
+            secondaries: [
+              { id: "grade_1", label: "1st grade" },
+              { id: "grade_2", label: "2nd grade" },
+              { id: "grade_3", label: "3rd grade" },
+              { id: "grade_4", label: "4th grade" },
+              { id: "grade_5", label: "5th grade" },
+            ],
+          },
+          {
+            id: "grade_middle_school",
+            label: "Middle school",
+            secondaries: [
+              { id: "grade_6", label: "6th grade" },
+              { id: "grade_7", label: "7th grade" },
+              { id: "grade_8", label: "8th grade" },
+            ],
+          },
+          {
+            id: "grade_high_school",
+            label: "High school",
+            secondaries: [
+              { id: "grade_9", label: "9th grade" },
+              { id: "grade_10", label: "10th grade" },
+              { id: "grade_11", label: "11th grade" },
+              { id: "grade_12", label: "12th grade" },
+            ],
+          },
+        ],
+      },
       {
         id: "incoming_skills_bucket",
-        title: "Skills, knowledge & mindsets",
+        title: "Incoming skills, knowledge, and mindsets",
         primaries: [
           { id: "prior_knowledge", label: "Current skill level and prior knowledge" },
           { id: "interests_motivations", label: "Interests and motivations" },
@@ -97,9 +138,9 @@ export const LEARNER_SECTIONS: LearnerSectionDef[] = [
   },
   {
     id: "selection_gating",
-    title: "Selection & gating",
+    title: "Ways of selection-gating learners in parts of the experience",
     setOfDesignChoices:
-      "How are learners selected or gated into parts of this experience — who must participate, who can opt in, and how?",
+      "Ways of selection-gating learners in parts of the experience",
     buckets: [
       {
         id: "selection_gating_bucket",

@@ -256,19 +256,21 @@ export function ScheduleElement({ componentType, data, onChange }: ScheduleEleme
                 }
               />
 
-              {question.id === 'schedule-q2' && componentType === 'center' && (
-                <ScheduleSchoolCalendarCard
-                  summary={calendarSummary}
-                  structureTab={structureTab}
-                  setStructureTab={setStructureTab}
-                  calendarCollapsed={calendarCollapsed}
-                  setCalendarCollapsed={setCalendarCollapsed}
-                  yearlyScheduleValue={yearlyScheduleValue}
-                  markingPeriodsValue={markingPeriodsValue}
-                  onYearlyChange={handleYearlyChange}
-                  onMarkingChange={handleMarkingChange}
-                />
-              )}
+              {question.id === 'schedule-q2' &&
+                componentType === 'center' &&
+                openQuestionId === question.id && (
+                  <ScheduleSchoolCalendarCard
+                    summary={calendarSummary}
+                    structureTab={structureTab}
+                    setStructureTab={setStructureTab}
+                    calendarCollapsed={calendarCollapsed}
+                    setCalendarCollapsed={setCalendarCollapsed}
+                    yearlyScheduleValue={yearlyScheduleValue}
+                    markingPeriodsValue={markingPeriodsValue}
+                    onYearlyChange={handleYearlyChange}
+                    onMarkingChange={handleMarkingChange}
+                  />
+                )}
             </div>
           );
         })}

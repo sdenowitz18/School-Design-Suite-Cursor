@@ -1,6 +1,6 @@
 export type ComponentType = 'center' | 'ring';
 
-export type Archetype = 'A1' | 'A2' | 'A3' | 'A3Ratio' | 'A4' | 'A5' | 'A2Tension';
+export type Archetype = 'A1' | 'A2' | 'A3' | 'A3Ratio' | 'A3Pair' | 'A4' | 'A5' | 'A2Tension';
 
 export interface TagDef {
   id: string;
@@ -36,6 +36,10 @@ export interface BucketDef {
   adultOnly?: boolean;
   contextNote?: string;
   units?: string[];
+  /** For archetype A3Pair: field labels for the two number inputs. */
+  pairLabels?: [string, string];
+  /** For archetype A3Pair: optional placeholders for the two number inputs. */
+  pairPlaceholders?: [string, string];
   tags?: TagDef[];
   /** For archetype A2Tension only */
   tensions?: TensionPairDef[];
@@ -116,6 +120,12 @@ export interface A3RatioValue {
   isKey: boolean;
 }
 
+export interface A3PairValue {
+  first: number | null;
+  second: number | null;
+  isKey: boolean;
+}
+
 export interface A4Value {
   days: string[];
   time: string;
@@ -172,6 +182,7 @@ export interface BucketValue {
   archetypeA2Tension?: A2TensionValue;
   archetypeA3?: A3Value;
   archetypeA3Ratio?: A3RatioValue;
+  archetypeA3Pair?: A3PairValue;
   archetypeA4?: A4Value;
   archetypeA5?: A5Value;
   yearlySchedule?: YearlyScheduleValue;

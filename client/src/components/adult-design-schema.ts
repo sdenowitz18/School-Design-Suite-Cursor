@@ -165,10 +165,8 @@ export const ADULT_ADDITIONAL_INFO_BUCKETS: AdultAdditionalInfoBucketDef[] = [
   },
   {
     id: "name",
-    title: "Name",
+    title: "Names",
     uiType: "A5",
-    devNotes: "Post MVP — PII implications",
-    postMvp: true,
   },
 ];
 

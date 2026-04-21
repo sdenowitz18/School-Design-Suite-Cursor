@@ -64,6 +64,7 @@ export default function ComponentWorkingSpaceOverlay({
   overallNavTarget,
   onOverallNavTargetConsumed,
   onRequestOpenComponent,
+  onRequestNavigateToStudentDemographics,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -78,6 +79,8 @@ export default function ComponentWorkingSpaceOverlay({
   overallNavTarget: any | null;
   onOverallNavTargetConsumed: () => void;
   onRequestOpenComponent?: (nodeId: string) => void;
+  /** Overall school only: re-route the Learners "Manage" link to the Student Demographics chart. */
+  onRequestNavigateToStudentDemographics?: () => void;
 }) {
   const nodeId = selectedNode?.nodeId || "";
   const listComponent =
@@ -305,6 +308,7 @@ export default function ComponentWorkingSpaceOverlay({
                     onOverallNavTargetConsumed={onOverallNavTargetConsumed}
                     onClose={() => onOpenChange(false)}
                     onRequestOpenComponent={onRequestOpenComponent}
+                    onRequestNavigateToStudentDemographics={onRequestNavigateToStudentDemographics}
                   />
                 </div>
               </ResizablePanel>

@@ -41,10 +41,9 @@ export const SCHEDULE_ELEMENT: ElementDef = {
         {
           id: 'number-of-classrooms-and-students',
           title: 'Number of classrooms and students',
-          archetype: 'A5',
-          hideAtCenter: true,
-          placeholder:
-            'Describe the number of classrooms and students for this component…',
+          archetype: 'A3Pair',
+          pairLabels: ['Number of classrooms', 'Number of students'],
+          pairPlaceholders: ['e.g. 4', 'e.g. 100'],
         },
         {
           id: 'general-purpose',

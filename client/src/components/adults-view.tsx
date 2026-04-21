@@ -49,6 +49,7 @@ export interface AdultSliceDetail {
   incomingSkills?: { text: string; isKey?: boolean };
   background?: A1Value;
   staffing?: { text: string; isKey?: boolean };
+  name?: { text: string; isKey?: boolean };
 }
 
 export interface AdultsProfile {
@@ -260,6 +261,54 @@ function AdultSliceSection({
                     })
                   }
                   placeholder="How staffing works for this role in this component…"
+                  rows={3}
+                  className="text-sm resize-none"
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible defaultOpen className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+            <CollapsibleTrigger className={bucketTriggerClass}>
+              <span className="text-xs font-semibold text-gray-800">Names</span>
+              <ChevronDown className="w-4 h-4 shrink-0 text-gray-400 transition-transform" />
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-3 pb-3 pt-2 space-y-2 border-t border-gray-100 bg-white">
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onChangeDetail({
+                        name: {
+                          text: detail.name?.text ?? "",
+                          isKey: !detail.name?.isKey,
+                        },
+                      });
+                    }}
+                    className={cn(
+                      "flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border transition-colors",
+                      detail.name?.isKey
+                        ? "bg-amber-50 text-amber-900 border-amber-200"
+                        : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50",
+                    )}
+                  >
+                    <Star className={cn("w-3 h-3", detail.name?.isKey ? "fill-amber-500 text-amber-500" : "text-gray-300")} />
+                    Key
+                  </button>
+                </div>
+                <Textarea
+                  value={detail.name?.text ?? ""}
+                  onChange={(e) =>
+                    onChangeDetail({
+                      name: {
+                        text: e.target.value,
+                        isKey: detail.name?.isKey,
+                      },
+                    })
+                  }
+                  placeholder="Who fills this role — names, initials, or placeholders (e.g. Ms. Alvarez, Mr. Tran…)."
                   rows={3}
                   className="text-sm resize-none"
                 />

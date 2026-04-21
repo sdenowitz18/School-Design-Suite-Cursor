@@ -6,11 +6,11 @@ import { useMergedComponent } from "@/lib/useMergedComponent";
 import { PlainLanguageInput } from "@/components/expert-view/PlainLanguageInput";
 import { PrimaryTagPill } from "@/components/expert-view/PrimaryTagPill";
 import { TagNoteBlock } from "@/components/expert-view/TagNoteBlock";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   LEARNER_SECTIONS,
   formatLearnerSelectionPreview,
   learnerSelectionIsKey,
+  type LearnerBucketDef,
   type LearnerPrimaryDef,
   type LearnerSectionDef,
 } from "./learner-design-schema";
@@ -395,7 +395,7 @@ export default function LearnersView({
 function SectionBlock({
   section,
   sectionIndex,
-  variant,
+  variant: _variant,
   plainValue,
   onPlainChange,
   isPrimarySelected,
@@ -422,119 +422,159 @@ function SectionBlock({
   toggleSecondaryKey: (pid: string, sid: string) => void;
 }) {
   const [bucketsCollapsed, setBucketsCollapsed] = useState(false);
-  const ring = variant === "expert" ? "border-purple-100" : "border-gray-200";
+
+  return (
+    <div className="space-y-5">
+      {/* Question header — inline, no card (matches Key Design Elements / QuestionSection) */}
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={() => setBucketsCollapsed((c) => !c)}
+          className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 text-xs font-bold flex items-center justify-center mt-0.5 hover:bg-purple-200 transition-colors cursor-pointer"
+          title={bucketsCollapsed ? "Expand choice buckets" : "Collapse choice buckets"}
+        >
+          {sectionIndex}
+        </button>
+        <p className="text-sm font-medium text-gray-800 leading-relaxed pt-0.5">{section.setOfDesignChoices}</p>
+      </div>
+
+      {/* Plain language input — bare textarea, directly under question */}
+      <PlainLanguageInput value={plainValue} onChange={onPlainChange} />
+
+      {/* Choice buckets — each its own card */}
+      {!bucketsCollapsed && (
+        <div className="space-y-3">
+          {section.buckets.map((bucket) => (
+            <BucketCard
+              key={bucket.id}
+              bucket={bucket}
+              isPrimarySelected={isPrimarySelected}
+              getSelection={getSelection}
+              togglePrimary={togglePrimary}
+              toggleSecondary={toggleSecondary}
+              setDescription={setDescription}
+              setSecondaryNote={setSecondaryNote}
+              toggleKey={toggleKey}
+              toggleSecondaryKey={toggleSecondaryKey}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BucketCard({
+  bucket,
+  isPrimarySelected,
+  getSelection,
+  togglePrimary,
+  toggleSecondary,
+  setDescription,
+  setSecondaryNote,
+  toggleKey,
+  toggleSecondaryKey,
+}: {
+  bucket: LearnerBucketDef;
+  isPrimarySelected: (id: string) => boolean;
+  getSelection: (id: string) => LearnerSelection | undefined;
+  togglePrimary: (id: string) => void;
+  toggleSecondary: (pid: string, sid: string) => void;
+  setDescription: (pid: string, text: string) => void;
+  setSecondaryNote: (pid: string, sid: string, text: string) => void;
+  toggleKey: (pid: string) => void;
+  toggleSecondaryKey: (pid: string, sid: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
 
   const noteRows: React.ReactNode[] = [];
-  for (const bucket of section.buckets) {
-    for (const primary of bucket.primaries) {
-      const sel = getSelection(primary.id);
-      if (!sel) continue;
-      const secIds = sel.secondaryIds ?? [];
-      if (secIds.length === 0) {
+  for (const primary of bucket.primaries) {
+    const sel = getSelection(primary.id);
+    if (!sel) continue;
+    const secIds = sel.secondaryIds ?? [];
+    if (secIds.length === 0) {
+      noteRows.push(
+        <TagNoteBlock
+          key={`n-${primary.id}-p`}
+          label={primary.label}
+          isPrimary
+          isKey={!!sel.isKey}
+          notes={sel.description ?? ""}
+          onKeyToggle={() => toggleKey(primary.id)}
+          onNotesChange={(v) => setDescription(primary.id, v)}
+        />,
+      );
+    } else {
+      for (const sid of secIds) {
         noteRows.push(
           <TagNoteBlock
-            key={`n-${primary.id}-p`}
-            label={primary.label}
-            isPrimary
-            isKey={!!sel.isKey}
-            notes={sel.description ?? ""}
-            onKeyToggle={() => toggleKey(primary.id)}
-            onNotesChange={(v) => setDescription(primary.id, v)}
+            key={`n-${primary.id}-${sid}`}
+            label={secondaryLabel(primary, sid)}
+            isPrimary={false}
+            isKey={!!sel.secondaryKeys?.[sid]}
+            notes={sel.secondaryNotes?.[sid] ?? ""}
+            onKeyToggle={() => toggleSecondaryKey(primary.id, sid)}
+            onNotesChange={(v) => setSecondaryNote(primary.id, sid, v)}
           />,
         );
-      } else {
-        for (const sid of secIds) {
-          noteRows.push(
-            <TagNoteBlock
-              key={`n-${primary.id}-${sid}`}
-              label={secondaryLabel(primary, sid)}
-              isPrimary={false}
-              isKey={!!sel.secondaryKeys?.[sid]}
-              notes={sel.secondaryNotes?.[sid] ?? ""}
-              onKeyToggle={() => toggleSecondaryKey(primary.id, sid)}
-              onNotesChange={(v) => setSecondaryNote(primary.id, sid, v)}
-            />,
-          );
-        }
       }
     }
   }
 
   return (
-    <div className={cn("bg-white border rounded-xl shadow-sm overflow-hidden", ring)}>
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50 flex items-start gap-3">
-        <button
-          type="button"
-          onClick={() => setBucketsCollapsed((c) => !c)}
-          className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-100 text-purple-700 text-xs font-bold flex items-center justify-center hover:bg-purple-200 transition-colors"
-          title={bucketsCollapsed ? "Expand choice buckets" : "Collapse choice buckets"}
-        >
-          {sectionIndex}
-        </button>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-gray-900">{section.title}</h3>
-          <p className="text-xs text-gray-600 mt-1 leading-relaxed">{section.setOfDesignChoices}</p>
-        </div>
-      </div>
-
-      <div className="px-4 py-4 space-y-4">
-        <PlainLanguageInput
-          value={plainValue}
-          onChange={onPlainChange}
-          placeholder="Describe your design choices in plain language — voice and mapping work like other elements…"
+    <div className="border border-gray-200 rounded-xl p-5 bg-white">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="w-full flex items-center justify-between gap-2 text-left group"
+        title={collapsed ? "Expand bucket" : "Collapse bucket"}
+      >
+        <h4 className="text-sm font-semibold text-gray-900">{bucket.title}</h4>
+        <ChevronDown
+          className={cn(
+            "w-4 h-4 shrink-0 text-gray-400 transition-transform",
+            collapsed && "-rotate-90",
+          )}
         />
+      </button>
 
-        {!bucketsCollapsed && (
-          <>
-            <div className="border-t border-gray-100 pt-4 space-y-3">
-              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Choice buckets</p>
-              {section.buckets.map((bucket) => (
-                <Collapsible key={bucket.id} defaultOpen className="border border-gray-100 rounded-lg bg-gray-50/30 overflow-hidden">
-                  <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-semibold text-gray-700 hover:bg-gray-50/80 transition-colors [&[data-state=open]>svg]:rotate-180">
-                    {bucket.title}
-                    <ChevronDown className="w-4 h-4 shrink-0 text-gray-400 transition-transform" />
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="px-3 pb-3 flex flex-wrap gap-2">
-                      {bucket.primaries.map((primary) => {
-                        const selected = isPrimarySelected(primary.id);
-                        const sel = getSelection(primary.id);
-                        const pillSel = selected && sel
-                          ? {
-                              isKey: !!sel.isKey,
-                              selectedSecondaryIds: sel.secondaryIds ?? [],
-                              secondaryKeys: sel.secondaryKeys,
-                            }
-                          : null;
-                        return (
-                          <PrimaryTagPill
-                            key={primary.id}
-                            label={primary.label}
-                            secondaries={primary.secondaries}
-                            selection={pillSel}
-                            onToggle={() => togglePrimary(primary.id)}
-                            onKeyToggle={() => toggleKey(primary.id)}
-                            onSecondaryToggle={(secId) => toggleSecondary(primary.id, secId)}
-                            onSecondaryKeyToggle={(secId) => toggleSecondaryKey(primary.id, secId)}
-                            starMode="a1"
-                          />
-                        );
-                      })}
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              ))}
+      {!collapsed && (
+        <div className="mt-4 space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {bucket.primaries.map((primary) => {
+              const selected = isPrimarySelected(primary.id);
+              const sel = getSelection(primary.id);
+              const pillSel = selected && sel
+                ? {
+                    isKey: !!sel.isKey,
+                    selectedSecondaryIds: sel.secondaryIds ?? [],
+                    secondaryKeys: sel.secondaryKeys,
+                  }
+                : null;
+              return (
+                <PrimaryTagPill
+                  key={primary.id}
+                  label={primary.label}
+                  secondaries={primary.secondaries}
+                  selection={pillSel}
+                  onToggle={() => togglePrimary(primary.id)}
+                  onKeyToggle={() => toggleKey(primary.id)}
+                  onSecondaryToggle={(secId) => toggleSecondary(primary.id, secId)}
+                  onSecondaryKeyToggle={(secId) => toggleSecondaryKey(primary.id, secId)}
+                  starMode="a1"
+                />
+              );
+            })}
+          </div>
+
+          {noteRows.length > 0 && (
+            <div className="space-y-2 pt-3 border-t border-gray-100">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Notes on selected tags</p>
+              <div className="space-y-2">{noteRows}</div>
             </div>
-
-            {noteRows.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-gray-100">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Notes on selected tags</p>
-                <div className="space-y-2">{noteRows}</div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

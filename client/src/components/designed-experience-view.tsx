@@ -851,7 +851,7 @@ function KeyDesignElementsSummary({
   );
 }
 
-export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange, onRequestOpenComponent }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void, onRequestOpenComponent?: (nodeId: string) => void }) {
+export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange, onRequestOpenComponent, onRequestNavigateToStudentDemographics }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void, onRequestOpenComponent?: (nodeId: string) => void, onRequestNavigateToStudentDemographics?: () => void }) {
   const [description, setDescription] = useState("");
   const [keyDesignElements, setKeyDesignElements] = useState<KeyDesignElements>({ aims: [], practices: [], supports: [] });
   const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
@@ -2859,7 +2859,18 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         <section className="border border-gray-200 rounded-xl p-5 bg-white">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-tight">Learners</h3>
-            <Button variant="link" size="sm" className="text-xs text-gray-500 h-auto p-0" onClick={() => setShowLearnersView(true)}>
+            <Button
+              variant="link"
+              size="sm"
+              className="text-xs text-gray-500 h-auto p-0"
+              onClick={() => {
+                if (isOverall && onRequestNavigateToStudentDemographics) {
+                  onRequestNavigateToStudentDemographics();
+                  return;
+                }
+                setShowLearnersView(true);
+              }}
+            >
               Manage
             </Button>
           </div>

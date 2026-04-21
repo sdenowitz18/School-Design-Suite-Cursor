@@ -8,6 +8,8 @@ const ARCHETYPE_LABELS: Record<string, string> = {
   A2: 'A-2 single-select',
   A2Tension: 'A-2 tensions',
   A3: 'A-3 numeric',
+  A3Ratio: 'A-3 ratio',
+  A3Pair: 'A-3 paired numeric',
   A4: 'A-4 structured',
   A5: 'A-5 free text',
   MultiSelect: 'multi-select',

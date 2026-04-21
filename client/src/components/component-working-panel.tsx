@@ -42,6 +42,7 @@ export default function ComponentWorkingPanel({
   onExpand,
   showExpandButton = false,
   onRequestOpenComponent,
+  onRequestNavigateToStudentDemographics,
 }: {
   selectedNode: ComponentWorkingPanelNode | null;
   componentsRaw: any[] | undefined;
@@ -58,6 +59,8 @@ export default function ComponentWorkingPanel({
   showExpandButton?: boolean;
   /** Whole-school learner experience: open another component’s working panel (snapshot tab). */
   onRequestOpenComponent?: (nodeId: string) => void;
+  /** Overall school only: re-route the Learners "Manage" link to the Student Demographics chart. */
+  onRequestNavigateToStudentDemographics?: () => void;
 }) {
   const updateMutation = useUpdateComponent();
   const nodeId = selectedNode?.nodeId || "";
@@ -171,12 +174,12 @@ export default function ComponentWorkingPanel({
             <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-transparent gap-6">
               {(selectedNode?.nodeId === "overall"
                 ? [
-                    { label: "Overview & Context", value: "overview-and-context" },
+                    { label: "Journey & Overview", value: "overview-and-context" },
                     { label: "Designed Experience", value: "designed-experience" },
                     { label: "Status and Health", value: "status-and-health" },
                   ]
                 : [
-                    { label: "Snapshot", value: "snapshot" },
+                    { label: "Journey & Overview", value: "snapshot" },
                     { label: "Designed Experience", value: "designed-experience" },
                     ...(!openSubId ? [{ label: "Status and Health", value: "status-and-health" }] : []),
                   ]
@@ -229,6 +232,7 @@ export default function ComponentWorkingPanel({
                   openSubId={openSubId}
                   onOpenSubIdChange={onOpenSubIdChange}
                   onRequestOpenComponent={onRequestOpenComponent}
+                  onRequestNavigateToStudentDemographics={onRequestNavigateToStudentDemographics}
                 />
               );
             }
