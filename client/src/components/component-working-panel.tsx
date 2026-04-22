@@ -16,7 +16,7 @@ import {
 import DesignedExperienceView from "./designed-experience-view";
 import type { DESubcomponent } from "./designed-experience-view";
 import SnapshotView from "./snapshot-view";
-import ComponentHealthView from "./component-health-view";
+import ComponentHealthView, { type StatusHealthPage } from "./component-health-view";
 import SubcomponentSnapshotView from "./subcomponent-snapshot-view";
 import OverviewContextView from "./overview-context-view";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
@@ -40,6 +40,7 @@ export default function ComponentWorkingPanel({
   onOverallNavTargetConsumed,
   deNavTarget,
   onDeNavTargetConsumed,
+  shPage,
   onClose,
   onExpand,
   showExpandButton = false,
@@ -58,6 +59,8 @@ export default function ComponentWorkingPanel({
   onOverallNavTargetConsumed: () => void;
   deNavTarget?: import("./designed-experience-card-content").DESubView | null;
   onDeNavTargetConsumed?: () => void;
+  /** When navigating to status-and-health, which dimension sub-page to open. */
+  shPage?: StatusHealthPage | null;
   onClose: () => void;
   onExpand?: () => void;
   showExpandButton?: boolean;
@@ -243,7 +246,7 @@ export default function ComponentWorkingPanel({
               );
             }
             if (activeTab === "status-and-health") {
-              return <ComponentHealthView nodeId={selectedNode?.nodeId} title={selectedNode?.title} />;
+              return <ComponentHealthView nodeId={selectedNode?.nodeId} title={selectedNode?.title} initialPage={shPage} />;
             }
             return null;
           })()}

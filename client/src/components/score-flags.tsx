@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { scoreBgCls } from "@/lib/score-threshold-colors";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown, Flag, FlagTriangleRight } from "lucide-react";
@@ -17,13 +18,6 @@ export type SignalFlagItem = {
   label: string;
   value: number | null; // positive = tailwind/up, negative = headwind/down
 };
-
-function scoreChip(score: number | null) {
-  if (score === null) return "bg-gray-100 text-gray-400 border-gray-200";
-  if (score >= 4) return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  if (score >= 3) return "bg-yellow-100 text-yellow-700 border-yellow-200";
-  return "bg-red-100 text-red-700 border-red-200";
-}
 
 function round1(x: number) {
   // Keep helper (used for signal values), but scores are now whole numbers.
@@ -97,7 +91,7 @@ export default function ScoreFlags({
                 {up.map((it) => (
                   <div key={it.key} className="flex items-center justify-between gap-3 text-xs">
                     <div className="min-w-0 flex items-center gap-2">
-                      <span className={cn("w-7 h-6 rounded flex items-center justify-center text-[11px] font-bold border shrink-0", scoreChip(it.roundedScore))}>
+                      <span className={cn("w-7 h-6 rounded flex items-center justify-center text-[11px] font-bold border shrink-0", scoreBgCls(it.roundedScore))}>
                         {String(it.roundedScore)}
                       </span>
                       <span className="text-gray-700 truncate">{it.label}</span>
@@ -117,7 +111,7 @@ export default function ScoreFlags({
                 {down.map((it) => (
                   <div key={it.key} className="flex items-center justify-between gap-3 text-xs">
                     <div className="min-w-0 flex items-center gap-2">
-                      <span className={cn("w-7 h-6 rounded flex items-center justify-center text-[11px] font-bold border shrink-0", scoreChip(it.roundedScore))}>
+                      <span className={cn("w-7 h-6 rounded flex items-center justify-center text-[11px] font-bold border shrink-0", scoreBgCls(it.roundedScore))}>
                         {String(it.roundedScore)}
                       </span>
                       <span className="text-gray-700 truncate">{it.label}</span>

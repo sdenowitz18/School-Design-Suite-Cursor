@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { ChevronLeft, ChevronRight, ChevronDown, Maximize2 } from "lucide-react";
+
 import { cn } from "@/lib/utils";
+import { scoreBgCls } from "@/lib/score-threshold-colors";
 // LEAP_DESCRIPTIONS removed — leaps panel now shows name + priority only
 import {
   adultSliceKeysFromSelections,
@@ -11,6 +13,8 @@ import {
 import { isLeapAimActive, isTargetingAimActive } from "@shared/aim-selection";
 import { ALL_ELEMENTS } from "@/components/expert-view/expert-view-schema";
 import type { BucketDef, BucketValue, TagDef } from "@/components/expert-view/expert-view-types";
+
+export { scoreBgCls };
 
 // ─── Window type registry ─────────────────────────────────────────────────────
 
@@ -34,15 +38,6 @@ export const DATA_WINDOWS: { key: DataWindowKey; label: string }[] = [
   { key: "snapshot", label: "Snapshot" },
   { key: "embedded", label: "Embedded Locations" },
 ];
-
-// ─── Score helpers ────────────────────────────────────────────────────────────
-
-export function scoreBgCls(score: number | null): string {
-  if (score === null) return "bg-gray-100 border-gray-200 text-gray-400";
-  if (score >= 4) return "bg-emerald-50 border-emerald-200 text-emerald-700";
-  if (score >= 3) return "bg-amber-50 border-amber-200 text-amber-700";
-  return "bg-red-50 border-red-200 text-red-600";
-}
 
 // ─── Priority helpers ─────────────────────────────────────────────────────────
 
@@ -292,18 +287,27 @@ const BK_SCHEDULE_CLASSROOMS_STUDENTS = "schedule-q1__number-of-classrooms-and-s
 const BK_SCHEDULE_DURATION = "schedule-q1__duration";
 const BK_SCHEDULE_FREQUENCY = "schedule-q1__frequency";
 
+const BUCKET_ID_CLASSROOMS_STUDENTS = "number-of-classrooms-and-students";
+
+/** A3 pair for schedule “classrooms + students” bucket: `first` = classrooms, `second` = students. */
+function formatA3PairClassroomsStudentsLine(first: number | null, second: number | null): string {
+  if (second != null && first != null) {
+    return `${second} students across ${first} classrooms`;
+  }
+  if (second != null) return `${second} students`;
+  if (first != null) return `${first} classrooms`;
+  return "";
+}
+
+function isClassroomsStudentsPairBucket(bucket: { id?: string }): boolean {
+  return bucket.id === BUCKET_ID_CLASSROOMS_STUDENTS;
+}
+
 function formatScheduleClassroomsStudents(expert: Record<string, Record<string, unknown>>): string {
   const bv = expert?.schedule?.[BK_SCHEDULE_CLASSROOMS_STUDENTS] as { archetypeA3Pair?: { first: number | null; second: number | null } } | undefined;
   const pair = bv?.archetypeA3Pair;
   if (!pair) return "";
-  const classrooms = pair.first;
-  const students = pair.second;
-  if (students != null && classrooms != null) {
-    return `${students} students across ${classrooms} classrooms`;
-  }
-  if (students != null) return `${students} students`;
-  if (classrooms != null) return `${classrooms} classrooms`;
-  return "";
+  return formatA3PairClassroomsStudentsLine(pair.first, pair.second);
 }
 
 function formatA3Phrase(v: { value: number | null; unit?: string } | undefined): string {
@@ -330,13 +334,37 @@ function formatScheduleDurationFrequency(expert: Record<string, Record<string, u
 }
 
 /**
+ * Subcomponent rows from `subcomponents` / `adultSubcomponents` are stored flat
+ * (aims, elementsExpertData, snapshotData) — normalize to the same shape as a ring component
+ * so snapshot helpers can read a single `designedExperienceData` block.
+ */
+export function toSnapshotViewComp(raw: any): any {
+  if (!raw) return raw;
+  if (raw.designedExperienceData && typeof raw.designedExperienceData === "object") return raw;
+  return {
+    ...raw,
+    snapshotData: raw.snapshotData ?? {},
+    designedExperienceData: {
+      keyDesignElements: raw.keyDesignElements ?? { aims: raw.aims ?? [] },
+      elementsExpertData: raw.elementsExpertData ?? {},
+      subcomponents: [],
+      adultSubcomponents: [],
+      learnersProfile: raw.learnersProfile,
+      adultsProfile: raw.adultsProfile,
+    },
+  };
+}
+
+/**
  * Snapshot lines for the ring data preview.
- * @param sourceComp — context (e.g. sub) when showing multi-source enlarged view
- * @param designRoot — ring component used for primary outcomes + Schedule expert + snapshot fallbacks (classrooms/duration); defaults to `sourceComp`
+ * @param sourceComp — the component or sub whose snapshot / DE data to show
+ * @param designRoot — optional full ring parent; when set, read schedule/expert/aims from parent (e.g. sub tile rollups)
  */
 export function getSnapshotData(sourceComp: any, designRoot?: any) {
-  const root = designRoot ?? sourceComp;
-  const profileComp = designRoot != null ? designRoot : sourceComp;
+  const src = toSnapshotViewComp(sourceComp);
+  const dr = designRoot != null ? toSnapshotViewComp(designRoot) : null;
+  const root = dr ?? src;
+  const profileComp = dr ?? src;
   const expert = (root?.designedExperienceData?.elementsExpertData ?? {}) as Record<string, Record<string, unknown>>;
   const rootSnap: any = root?.snapshotData || {};
 
@@ -448,19 +476,28 @@ export function extractKeyLabelsFromBucket(bucket: BucketDef, bv: BucketValue): 
     }
   } else if (bv.archetypeA3Pair) {
     if (bv.archetypeA3Pair.isKey) {
-      const [l1, l2] = bucket.pairLabels ?? ["Value 1", "Value 2"];
       const { first, second } = bv.archetypeA3Pair;
-      if (first != null) labels.push(`${l1}: ${first}`);
-      if (second != null) labels.push(`${l2}: ${second}`);
+      if (isClassroomsStudentsPairBucket(bucket)) {
+        const combined = formatA3PairClassroomsStudentsLine(first, second);
+        if (combined) labels.push(combined);
+        else {
+          const [l1, l2] = bucket.pairLabels ?? ["Value 1", "Value 2"];
+          if (first != null) labels.push(`${l1}: ${first}`);
+          if (second != null) labels.push(`${l2}: ${second}`);
+        }
+      } else {
+        const [l1, l2] = bucket.pairLabels ?? ["Value 1", "Value 2"];
+        if (first != null) labels.push(`${l1}: ${first}`);
+        if (second != null) labels.push(`${l2}: ${second}`);
+      }
     }
   } else if (bv.archetypeA4) {
     if (bv.archetypeA4.isKey) {
-      const parts = [bv.archetypeA4.days?.join(", "), bv.archetypeA4.time, bv.archetypeA4.recurrence].filter(Boolean);
-      if (parts.length) labels.push(parts.join(" · "));
+      labels.push(`… ${bucket.title}`);
     }
   } else if (bv.archetypeA5) {
     if (bv.archetypeA5.isKey && bv.archetypeA5.text?.trim()) {
-      labels.push(bv.archetypeA5.text.trim());
+      labels.push(`… ${bucket.title}`);
     }
   }
   return labels;
@@ -514,8 +551,18 @@ export function extractAllItemsFromBucket(
   } else if (bv.archetypeA3Pair) {
     const [l1, l2] = bucket.pairLabels ?? ["Value 1", "Value 2"];
     const { first, second } = bv.archetypeA3Pair;
-    if (first != null) items.push({ label: `${l1}: ${first}`, isKey: bv.archetypeA3Pair.isKey });
-    if (second != null) items.push({ label: `${l2}: ${second}`, isKey: bv.archetypeA3Pair.isKey });
+    if (isClassroomsStudentsPairBucket(bucket)) {
+      const combined = formatA3PairClassroomsStudentsLine(first, second);
+      if (combined) {
+        items.push({ label: combined, isKey: bv.archetypeA3Pair.isKey });
+      } else {
+        if (first != null) items.push({ label: `${l1}: ${first}`, isKey: bv.archetypeA3Pair.isKey });
+        if (second != null) items.push({ label: `${l2}: ${second}`, isKey: bv.archetypeA3Pair.isKey });
+      }
+    } else {
+      if (first != null) items.push({ label: `${l1}: ${first}`, isKey: bv.archetypeA3Pair.isKey });
+      if (second != null) items.push({ label: `${l2}: ${second}`, isKey: bv.archetypeA3Pair.isKey });
+    }
   } else if (bv.archetypeA4) {
     const parts = [bv.archetypeA4.days?.join(", "), bv.archetypeA4.time, bv.archetypeA4.recurrence].filter(Boolean);
     if (parts.length) items.push({ label: parts.join(" · "), isKey: bv.archetypeA4.isKey });
@@ -563,6 +610,183 @@ function _getExpertKeyItems(comp: any, section: "practices" | "tools"): string[]
 
 export function getPracticesKeyItems(comp: any): string[] { return _getExpertKeyItems(comp, "practices"); }
 export function getToolsKeyItems(comp: any): string[] { return _getExpertKeyItems(comp, "tools"); }
+
+/** A single attribution of a practice/tool to a source (component or sub). */
+export interface PracticeAttribution {
+  sourceName: string;
+  isAdult: boolean;
+  isKey: boolean;
+  notes: string; // TagSelection.notes for A1; notes field for others
+}
+
+/** Full dossier for one practice/tool label within a ring component tree. */
+export interface PracticeDossier {
+  section: "practices" | "tools";
+  elementId: string;
+  elementShortTitle: string;
+  bucketId: string;
+  bucketTitle: string;
+  label: string;
+  attributions: PracticeAttribution[];
+}
+
+/** Build a dossier for a given display label within a ring component and its subs. */
+export function buildPracticeDossier(
+  comp: any,
+  section: "practices" | "tools",
+  elementId: string,
+  bucketCompositeKey: string, // e.g. "schedule-q1__number-of-classrooms-and-students"
+  label: string,
+): PracticeDossier | null {
+  const element = ALL_ELEMENTS.find((e) => e.id === elementId);
+  if (!element) return null;
+
+  // Find bucket
+  let foundBucket: import("./expert-view/expert-view-types").BucketDef | undefined;
+  for (const q of element.questions) {
+    for (const b of q.buckets) {
+      if (`${q.id}__${b.id}` === bucketCompositeKey) { foundBucket = b; break; }
+    }
+    if (foundBucket) break;
+  }
+  if (!foundBucket) return null;
+
+  const de = comp?.designedExperienceData ?? {};
+  const compName = comp?.snapshotData?.name || comp?.title || "Component";
+
+  const sources: Array<{ name: string; isAdult: boolean; expertData: any }> = [
+    { name: compName, isAdult: false, expertData: de.elementsExpertData ?? {} },
+    ...(de.subcomponents ?? []).map((s: any) => ({
+      name: s.name || "Subcomponent",
+      isAdult: false,
+      expertData: s.elementsExpertData ?? {},
+    })),
+    ...(de.adultSubcomponents ?? []).map((s: any) => ({
+      name: s.name || "Adult Subcomponent",
+      isAdult: true,
+      expertData: s.elementsExpertData ?? {},
+    })),
+  ];
+
+  const attributions: PracticeAttribution[] = [];
+  const normLabel = label.trim().toLowerCase();
+
+  for (const src of sources) {
+    const bv = src.expertData?.[elementId]?.[bucketCompositeKey];
+    if (!bv) continue;
+
+    // Check if this source includes our label
+    if (bv.archetypeA1) {
+      for (const sel of bv.archetypeA1.selections ?? []) {
+        const primaryTag = (foundBucket.tags ?? []).find((t: any) => t.id === sel.tagId);
+        const primaryLabel = _resolveTag(sel.tagId, sel.isCustom, sel.customLabel, _flatTags(foundBucket));
+        const secondaries = sel.selectedSecondaries ?? [];
+        if (foundBucket.groupedSecondaryDisplay) {
+          const combined = secondaries.length > 0
+            ? `${primaryLabel} (${secondaries.map((s: any) => primaryTag?.secondaries?.find((x: any) => x.id === s.tagId)?.label ?? s.tagId).join(", ")})`
+            : primaryLabel;
+          if (combined.trim().toLowerCase() === normLabel) {
+            attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sel.isKey, notes: sel.notes || "" });
+          }
+        } else if (secondaries.length > 0) {
+          for (const sec of secondaries) {
+            const secLabel = primaryTag?.secondaries?.find((s: any) => s.id === sec.tagId)?.label ?? sec.tagId;
+            if (secLabel.trim().toLowerCase() === normLabel) {
+              attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sec.isKey, notes: (sec as any).notes || "" });
+            }
+          }
+        } else {
+          if (primaryLabel.trim().toLowerCase() === normLabel) {
+            attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sel.isKey, notes: sel.notes || "" });
+          }
+        }
+      }
+    } else {
+      const allItems = extractAllItemsFromBucket(foundBucket, bv);
+      for (const item of allItems) {
+        if (item.label.trim().toLowerCase() === normLabel) {
+          const notes = bv.archetypeA3?.description || bv.archetypeA4?.notes || bv.archetypeA5?.text || "";
+          attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: item.isKey, notes });
+        }
+      }
+    }
+  }
+
+  return {
+    section,
+    elementId,
+    elementShortTitle: element.shortTitle,
+    bucketId: foundBucket.id,
+    bucketTitle: foundBucket.title,
+    label,
+    attributions,
+  };
+}
+
+/**
+ * Enumerate all practice/tool items across a component tree and return them
+ * with enough context to open a dossier (element id + composite bucket key).
+ */
+export interface PracticeItem {
+  section: "practices" | "tools";
+  elementId: string;
+  elementShortTitle: string;
+  bucketCompositeKey: string;
+  bucketTitle: string;
+  label: string;
+  isKey: boolean;
+  /** True when the value comes from an A4 or A5 bucket (free-text / schedule entry).
+   *  Compact views should show bucketTitle + " …" instead of the raw label. */
+  isLongText: boolean;
+}
+
+export function getAllPracticeItems(comp: any, section: "practices" | "tools"): PracticeItem[] {
+  const de = comp?.designedExperienceData ?? {};
+  const sources = [
+    de.elementsExpertData ?? {},
+    ...(de.subcomponents ?? []).map((s: any) => s.elementsExpertData ?? {}),
+    ...(de.adultSubcomponents ?? []).map((s: any) => s.elementsExpertData ?? {}),
+  ];
+
+  const seen = new Map<string, PracticeItem>(); // key → item
+
+  for (const element of ALL_ELEMENTS) {
+    for (const question of element.questions) {
+      if (question.section !== section) continue;
+      for (const bucket of question.buckets) {
+        const bk = `${question.id}__${bucket.id}`;
+        for (const expertData of sources) {
+          const bv: import("./expert-view/expert-view-types").BucketValue | undefined = (expertData as any)?.[element.id]?.[bk];
+          if (!bv) continue;
+          const isLongText = bucket.archetype === "A4" || bucket.archetype === "A5";
+          const items = extractAllItemsFromBucket(bucket, bv);
+          for (const item of items) {
+            // For A4/A5 (free-text / schedule), collapse all sources into one entry
+            // keyed only by bucket — the drill view shows per-source tabs when opened.
+            const uid = isLongText
+              ? `${element.id}::${bk}`
+              : `${element.id}::${bk}::${item.label}`;
+            if (!seen.has(uid)) {
+              seen.set(uid, {
+                section,
+                elementId: element.id,
+                elementShortTitle: element.shortTitle,
+                bucketCompositeKey: bk,
+                bucketTitle: bucket.title,
+                label: item.label,
+                isKey: item.isKey,
+                isLongText,
+              });
+            } else if (item.isKey) {
+              seen.get(uid)!.isKey = true;
+            }
+          }
+        }
+      }
+    }
+  }
+  return Array.from(seen.values());
+}
 
 /** Where ring rollup data came from — drives deep-link into the working panel. */
 export type RingSourceScope =
@@ -697,10 +921,11 @@ function ComingSoonContent() {
 // ─── Key Drivers SVG diagram (scales to fill any container) ──────────────────
 
 function kdColor(score: number | null): { fill: string; stroke: string; text: string } {
-  if (score === null) return { fill: "#f3f4f6", stroke: "#e5e7eb", text: "#9ca3af" };
-  if (score >= 4)     return { fill: "#d1fae5", stroke: "#6ee7b7", text: "#059669" };
-  if (score >= 3)     return { fill: "#fef3c7", stroke: "#fcd34d", text: "#b45309" };
-  return               { fill: "#fee2e2", stroke: "#fca5a5", text: "#dc2626" };
+  if (score === null || Number.isNaN(score)) return { fill: "#f3f4f6", stroke: "#e5e7eb", text: "#9ca3af" };
+  const r = Math.round(score);
+  if (r <= 2) return { fill: "#fee2e2", stroke: "#fca5a5", text: "#b91c1c" };
+  if (r === 3) return { fill: "#fef9c3", stroke: "#fde047", text: "#854d0e" };
+  return { fill: "#d1fae5", stroke: "#6ee7b7", text: "#047857" };
 }
 
 function kdScoreLabel(score: number | null): string {
@@ -711,7 +936,15 @@ function kdScoreLabel(score: number | null): string {
  * SVG diagram showing the 4 Key Driver sub-dimensions with directional flow lines.
  * Uses viewBox so it scales to fill whatever container it's placed in.
  */
-export function KeyDriversDiagram({ data }: { data: ReturnType<typeof getKeyDriversData> }) {
+export type KDNodeKey = "design" | "conditions" | "implementation" | "experience";
+
+export function KeyDriversDiagram({
+  data,
+  onNodeClick,
+}: {
+  data: ReturnType<typeof getKeyDriversData>;
+  onNodeClick?: (dim: KDNodeKey) => void;
+}) {
   const VW = 200, VH = 148;
   const PILL_H = 14, GAP = 3, FONT_LBL = 8.5, FONT_SCORE = 8;
 
@@ -720,24 +953,35 @@ export function KeyDriversDiagram({ data }: { data: ReturnType<typeof getKeyDriv
   const DX = 40, CX = 162, IX = 100, EX = 100;
 
   function KDNode({
-    nx, ny, label, shortLabel, score, pw,
-  }: { nx: number; ny: number; label: string; shortLabel?: string; score: number | null; pw: number }) {
+    nx, ny, label, shortLabel, score, pw, dimKey,
+  }: { nx: number; ny: number; label: string; shortLabel?: string; score: number | null; pw: number; dimKey: KDNodeKey }) {
     const col = kdColor(score);
     const pillTop = ny + GAP;
     const pillX = nx - pw / 2;
+    const hitW = Math.max(pw + 8, 44);
+    const hitH = FONT_LBL + GAP + PILL_H + 4;
+    const hitX = nx - hitW / 2;
+    const hitY = ny - FONT_LBL;
+    const clickable = !!onNodeClick;
     return (
-      <>
+      <g
+        onClick={clickable ? (e) => { e.stopPropagation(); onNodeClick(dimKey); } : undefined}
+        style={clickable ? { cursor: "pointer" } : undefined}
+      >
+        {clickable && (
+          <rect x={hitX} y={hitY} width={hitW} height={hitH} rx={3} fill="transparent" />
+        )}
         <text x={nx} y={ny} textAnchor="middle"
-          fontSize={FONT_LBL} fontWeight="600" fill="#374151">
+          fontSize={FONT_LBL} fontWeight="600" fill={clickable ? "#1d4ed8" : "#374151"}>
           {shortLabel ?? label}
         </text>
         <rect x={pillX} y={pillTop} width={pw} height={PILL_H} rx={3}
-          fill={col.fill} stroke={col.stroke} strokeWidth={0.8} />
+          fill={col.fill} stroke={clickable ? "#93c5fd" : col.stroke} strokeWidth={clickable ? 1.2 : 0.8} />
         <text x={nx} y={pillTop + PILL_H / 2} textAnchor="middle" dominantBaseline="middle"
           fontSize={FONT_SCORE} fontWeight="700" fill={col.text}>
           {kdScoreLabel(score)}
         </text>
-      </>
+      </g>
     );
   }
 
@@ -761,65 +1005,117 @@ export function KeyDriversDiagram({ data }: { data: ReturnType<typeof getKeyDriv
       <line x1={IX} y1={iBot} x2={EX} y2={eTop}
         stroke="#d1d5db" strokeWidth={1.2} markerEnd="url(#kdArr)" />
       {/* Nodes */}
-      <KDNode nx={DX} ny={DY} label="Design"         score={data.design}         pw={38} />
-      <KDNode nx={CX} ny={CY} label="Conditions"     score={data.conditions}     pw={44} />
-      <KDNode nx={IX} ny={IY} label="Implementation" shortLabel="Impl."          score={data.implementation} pw={42} />
-      <KDNode nx={EX} ny={EY} label="Experience"     score={data.experience}     pw={44} />
+      <KDNode nx={DX} ny={DY} label="Design"         score={data.design}         pw={38} dimKey="design" />
+      <KDNode nx={CX} ny={CY} label="Conditions"     score={data.conditions}     pw={44} dimKey="conditions" />
+      <KDNode nx={IX} ny={IY} label="Implementation" shortLabel="Impl."          score={data.implementation} pw={42} dimKey="implementation" />
+      <KDNode nx={EX} ny={EY} label="Experience"     score={data.experience}     pw={44} dimKey="experience" />
     </svg>
   );
 }
 
-function KeyDriversContent({ comp }: { comp: any }) {
+function KeyDriversContent({ comp, onDimensionClick }: { comp: any; onDimensionClick?: (dim: KDNodeKey) => void }) {
   const data = getKeyDriversData(comp);
   return (
     <div className="w-full h-full flex items-stretch p-0.5">
-      <KeyDriversDiagram data={data} />
+      <KeyDriversDiagram data={data} onNodeClick={onDimensionClick} />
     </div>
   );
 }
 
-function LeapsContent({ comp }: { comp: any }) {
+// ─── Drill event types (used by compact content + enlarged lists) ─────────────
+
+export type CompactDrillEvent =
+  | { kind: "leap"; label: string }
+  | { kind: "outcome"; label: string }
+  | { kind: "subcomponent"; name: string }
+  | { kind: "practice"; item: PracticeItem }
+  | { kind: "tool"; item: PracticeItem };
+
+function BulletButton({
+  children,
+  onClick,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <li className="flex items-start gap-1 text-[9px] leading-tight">
+      <span className="shrink-0 mt-px select-none text-gray-400">•</span>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        className="min-w-0 text-left text-gray-800 hover:text-blue-700 hover:underline transition-colors"
+      >
+        {children}
+      </button>
+    </li>
+  );
+}
+
+function LeapsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
   const leaps = aggregateLeaps(comp);
   if (leaps.length === 0) return <EmptyState text="No leaps defined" />;
   return (
     <ul className="space-y-0.5">
-      {leaps.map((leap) => (
-        <BulletRow key={leap.label}>
-          {leap.label}{" "}
-          <span className="text-gray-500">({leap.priority})</span>
-        </BulletRow>
-      ))}
+      {leaps.map((leap) =>
+        onDrill ? (
+          <BulletButton key={leap.label} onClick={() => onDrill({ kind: "leap", label: leap.label })}>
+            {leap.label}{" "}
+            <span className="text-gray-500">({leap.priority})</span>
+          </BulletButton>
+        ) : (
+          <BulletRow key={leap.label}>
+            {leap.label}{" "}
+            <span className="text-gray-500">({leap.priority})</span>
+          </BulletRow>
+        )
+      )}
     </ul>
   );
 }
 
-function OutcomesContent({ comp }: { comp: any }) {
+function OutcomesContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
   const outcomes = aggregateOutcomes(comp);
   if (outcomes.length === 0) return <EmptyState text="No outcomes defined" />;
   return (
     <ul className="space-y-0.5">
-      {outcomes.map((o) => (
-        <BulletRow key={o.label}>
-          {o.label}
-          {o.isPrimary && <span className="text-blue-600"> ★</span>}{" "}
-          <span className="text-gray-500">({o.priority})</span>
-        </BulletRow>
-      ))}
+      {outcomes.map((o) =>
+        onDrill ? (
+          <BulletButton key={o.label} onClick={() => onDrill({ kind: "outcome", label: o.label })}>
+            {o.label}
+            {o.isPrimary && <span className="text-blue-600"> ★</span>}{" "}
+            <span className="text-gray-500">({o.priority})</span>
+          </BulletButton>
+        ) : (
+          <BulletRow key={o.label}>
+            {o.label}
+            {o.isPrimary && <span className="text-blue-600"> ★</span>}{" "}
+            <span className="text-gray-500">({o.priority})</span>
+          </BulletRow>
+        )
+      )}
     </ul>
   );
 }
 
-function SubcomponentsContent({ comp }: { comp: any }) {
+function SubcomponentsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
   const subs = getSubcomponents(comp);
   if (subs.length === 0) return <EmptyState text="No subcomponents" />;
   return (
     <ul className="space-y-0.5">
-      {subs.map((sub, i) => (
-        <BulletRow key={i}>
-          {sub.isAdult && <span className="text-gray-500">(A) </span>}
-          {sub.name}
-        </BulletRow>
-      ))}
+      {subs.map((sub, i) =>
+        onDrill ? (
+          <BulletButton key={i} onClick={() => onDrill({ kind: "subcomponent", name: sub.name })}>
+            {sub.isAdult && <span className="text-gray-500">(A) </span>}
+            {sub.name}
+          </BulletButton>
+        ) : (
+          <BulletRow key={i}>
+            {sub.isAdult && <span className="text-gray-500">(A) </span>}
+            {sub.name}
+          </BulletRow>
+        )
+      )}
     </ul>
   );
 }
@@ -845,22 +1141,92 @@ function SnapshotContent({ comp }: { comp: any }) {
   );
 }
 
-function PracticesContent({ comp }: { comp: any }) {
-  const items = getPracticesKeyItems(comp);
-  if (items.length === 0) return <EmptyState text="No key practices marked yet" />;
+/**
+ * Merge schedule duration + frequency A3 items into a single "X min/day · Yx/week" line.
+ * Duration key: "schedule-q1__duration", Frequency key: "schedule-q1__frequency".
+ * Returns a new array with those two items replaced by one combined item.
+ */
+function mergeScheduleDurationFrequency(items: PracticeItem[]): PracticeItem[] {
+  const DUR_KEY = "schedule-q1__duration";
+  const FREQ_KEY = "schedule-q1__frequency";
+  const durIdx = items.findIndex((i) => i.bucketCompositeKey === DUR_KEY);
+  const freqIdx = items.findIndex((i) => i.bucketCompositeKey === FREQ_KEY);
+  if (durIdx === -1 || freqIdx === -1) return items;
+
+  const dur = items[durIdx];
+  const freq = items[freqIdx];
+
+  // Build a human label: "5x per week · 30 min/session"
+  // The raw labels are e.g. "30 min", "5 days" — reformat them.
+  const formatFreq = (raw: string) => {
+    const m = raw.match(/^(\d+)\s*(.*)/);
+    if (!m) return raw;
+    const [, n, unit] = m;
+    if (!unit || unit === "x") return `${n}x`;
+    return `${n}x/${unit.replace(/s$/, "")}`;
+  };
+  const formatDur = (raw: string) => {
+    const m = raw.match(/^(\d+)\s*(.*)/);
+    if (!m) return raw;
+    const [, n, unit] = m;
+    const u = unit.toLowerCase();
+    if (u === "min" || u === "mins" || u === "minutes") return `${n} min/session`;
+    if (u === "hrs" || u === "hours" || u === "hour") return `${n} hr/session`;
+    return raw;
+  };
+
+  const combined: PracticeItem = {
+    ...dur,
+    label: `${formatFreq(freq.label)} · ${formatDur(dur.label)}`,
+    isKey: dur.isKey || freq.isKey,
+    isLongText: false,
+  };
+
+  // Replace both items with the merged one (insert at the earlier index)
+  const result = items.filter((_, idx) => idx !== durIdx && idx !== freqIdx);
+  result.splice(Math.min(durIdx, freqIdx), 0, combined);
+  return result;
+}
+
+function PracticesContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
+  const allItems = useMemo(() => getAllPracticeItems(comp, "practices"), [comp]);
+  const keyItems = useMemo(
+    () => mergeScheduleDurationFrequency(allItems.filter((i) => i.isKey)),
+    [allItems],
+  );
+  if (keyItems.length === 0) return <EmptyState text="No key practices marked yet" />;
   return (
     <ul className="space-y-0.5">
-      {items.map((item, i) => <BulletRow key={i}>{item}</BulletRow>)}
+      {keyItems.map((item, i) => {
+        const displayLabel = item.isLongText ? `… ${item.bucketTitle}` : item.label;
+        return onDrill ? (
+          <BulletButton key={i} onClick={() => onDrill({ kind: "practice", item })}>
+            {displayLabel}
+          </BulletButton>
+        ) : (
+          <BulletRow key={i}>{displayLabel}</BulletRow>
+        );
+      })}
     </ul>
   );
 }
 
-function ToolsContent({ comp }: { comp: any }) {
-  const items = getToolsKeyItems(comp);
-  if (items.length === 0) return <EmptyState text="No key tools marked yet" />;
+function ToolsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
+  const allItems = useMemo(() => getAllPracticeItems(comp, "tools"), [comp]);
+  const keyItems = allItems.filter((i) => i.isKey);
+  if (keyItems.length === 0) return <EmptyState text="No key tools marked yet" />;
   return (
     <ul className="space-y-0.5">
-      {items.map((item, i) => <BulletRow key={i}>{item}</BulletRow>)}
+      {keyItems.map((item, i) => {
+        const displayLabel = item.isLongText ? `… ${item.bucketTitle}` : item.label;
+        return onDrill ? (
+          <BulletButton key={i} onClick={() => onDrill({ kind: "tool", item })}>
+            {displayLabel}
+          </BulletButton>
+        ) : (
+          <BulletRow key={i}>{displayLabel}</BulletRow>
+        );
+      })}
     </ul>
   );
 }
@@ -871,12 +1237,24 @@ export interface RingDataPreviewWindowProps {
   comp: any;
   selectedWindow: DataWindowKey;
   onWindowChange: (w: DataWindowKey) => void;
+  /** When provided, clicking the expand button in the header opens the full view. */
+  onOpenFullView?: () => void;
+  /** When provided, list items become clickable and fire drill-down events. */
+  onDrill?: (e: CompactDrillEvent) => void;
+  /** When provided, clicking a Key Drivers node fires a dimension-detail event. */
+  onDimensionClick?: (dim: KDNodeKey) => void;
+  /** Double-click on the scrollable body (not on buttons) opens the working panel scoped to this window. */
+  onDoubleClickToEdit?: () => void;
 }
 
 export function RingDataPreviewWindow({
   comp,
   selectedWindow,
   onWindowChange,
+  onOpenFullView,
+  onDrill,
+  onDimensionClick,
+  onDoubleClickToEdit,
 }: RingDataPreviewWindowProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -895,11 +1273,18 @@ export function RingDataPreviewWindow({
     <div
       data-preview-interactive
       className="w-full h-full flex flex-col overflow-hidden pointer-events-auto"
-      onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => {
+        if (!onDoubleClickToEdit) return;
+        const el = e.target as HTMLElement;
+        if (el.closest("button, a, [role='button'], input, select, textarea")) return;
+        e.stopPropagation();
+        e.preventDefault();
+        onDoubleClickToEdit();
+      }}
     >
       {/* ── Header ── */}
-      <div className="flex items-center shrink-0 px-0.5">
+      <div className="group/header flex items-center shrink-0 px-0.5">
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
@@ -964,6 +1349,22 @@ export function RingDataPreviewWindow({
         >
           <ChevronRight className="w-2.5 h-2.5 text-gray-500" />
         </button>
+
+        {/* Expand button — always visible when onOpenFullView is provided */}
+        {onOpenFullView && (
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenFullView();
+            }}
+            className="ml-0.5 p-0.5 rounded transition-colors shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+            title="Open full view"
+          >
+            <Maximize2 className="w-2.5 h-2.5" />
+          </button>
+        )}
       </div>
 
       {/* ── Divider ── */}
@@ -971,12 +1372,12 @@ export function RingDataPreviewWindow({
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1 min-h-0">
-        {selectedWindow === "keyDrivers" && <KeyDriversContent comp={comp} />}
-        {selectedWindow === "leaps" && <LeapsContent comp={comp} />}
-        {selectedWindow === "outcomes" && <OutcomesContent comp={comp} />}
-        {selectedWindow === "subcomponents" && <SubcomponentsContent comp={comp} />}
-        {selectedWindow === "practices" && <PracticesContent comp={comp} />}
-        {selectedWindow === "tools" && <ToolsContent comp={comp} />}
+        {selectedWindow === "keyDrivers" && <KeyDriversContent comp={comp} onDimensionClick={onDimensionClick} />}
+        {selectedWindow === "leaps" && <LeapsContent comp={comp} onDrill={onDrill} />}
+        {selectedWindow === "outcomes" && <OutcomesContent comp={comp} onDrill={onDrill} />}
+        {selectedWindow === "subcomponents" && <SubcomponentsContent comp={comp} onDrill={onDrill} />}
+        {selectedWindow === "practices" && <PracticesContent comp={comp} onDrill={onDrill} />}
+        {selectedWindow === "tools" && <ToolsContent comp={comp} onDrill={onDrill} />}
         {selectedWindow === "snapshot" && <SnapshotContent comp={comp} />}
         {selectedWindow === "embedded" && <ComingSoonContent />}
       </div>

@@ -2,6 +2,18 @@
 
 import React from "react";
 import { cn } from "@/lib/utils";
+import { scoreBgCls } from "@/lib/score-threshold-colors";
+
+type OctagonStat = { label: string; value: string; className?: string; score?: number | null };
+
+function statPillClassName(stat: OctagonStat, centerVariant: "text" | "pill" | "dataPreview", side: "left" | "right") {
+  if (stat.className) return stat.className;
+  if (stat.score !== undefined) return scoreBgCls(stat.score);
+  if (centerVariant === "dataPreview") return scoreBgCls(null);
+  return side === "left"
+    ? "bg-yellow-300 text-yellow-900 border-yellow-400/30"
+    : "bg-red-300 text-red-900 border-red-400/30";
+}
 
 export default function OctagonCard({
   title,
@@ -14,6 +26,8 @@ export default function OctagonCard({
   onOpenDataPreviewFullView,
   leftStat,
   rightStat,
+  onLeftStatClick,
+  onRightStatClick,
   footerLabel,
   footerValue,
   onClick,
@@ -30,8 +44,12 @@ export default function OctagonCard({
   dataPreviewContent?: React.ReactNode;
   /** Called when the user clicks the ring border around the data preview window. */
   onOpenDataPreviewFullView?: () => void;
-  leftStat?: { label: string; value: string; className?: string };
-  rightStat?: { label: string; value: string; className?: string };
+  leftStat?: OctagonStat;
+  rightStat?: OctagonStat;
+  /** When provided, the left stat box becomes a clickable button. */
+  onLeftStatClick?: () => void;
+  /** When provided, the right stat box becomes a clickable button. */
+  onRightStatClick?: () => void;
   footerLabel?: string;
   footerValue?: string;
   onClick?: () => void;
@@ -39,16 +57,18 @@ export default function OctagonCard({
   testId?: string;
 }) {
   const showStats = !!leftStat && !!rightStat;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "relative w-[220px] h-[220px] transition-transform hover:scale-[1.03] active:scale-[1.01] focus:outline-none focus:ring-2 focus:ring-blue-500/20",
-        className,
-      )}
-      data-testid={testId}
-    >
+  /** Data preview embeds real `<button>`s (nav, drill). A native `<button>` root is invalid HTML and breaks dblclick — use `<div>`. */
+  const useDivRoot = centerVariant === "dataPreview";
+
+  const shellClassName = cn(
+    "relative w-[220px] h-[220px] transition-transform hover:scale-[1.03] active:scale-[1.01]",
+    !useDivRoot && "focus:outline-none focus:ring-2 focus:ring-blue-500/20",
+    useDivRoot && onClick && "cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20",
+    className,
+  );
+
+  const inner = (
+    <>
       <div
         className={cn(
           "w-full h-full flex flex-col items-center shadow-md transition-colors",
@@ -89,7 +109,7 @@ export default function OctagonCard({
           <div
             data-preview-ring
             onClick={(e) => {
-              // Only fire if NOT coming from inside the interactive preview content
+              // Fire if clicked directly on the ring border padding (not on inner interactive content)
               if ((e.target as HTMLElement).closest("[data-preview-interactive]")) return;
               e.stopPropagation();
               onOpenDataPreviewFullView?.();
@@ -100,11 +120,12 @@ export default function OctagonCard({
             }}
             className={cn(
               "flex-1 w-full overflow-hidden rounded-md bg-white/80 shadow-inner min-h-0",
-              "border-[3px] border-gray-400/50 transition-all",
-              onOpenDataPreviewFullView && "cursor-pointer hover:border-blue-500/60 hover:shadow-md",
+              "border-[3px] transition-all",
+              onOpenDataPreviewFullView
+                ? "border-gray-400/50 hover:border-blue-500/70 hover:shadow-md cursor-default"
+                : "border-gray-400/50",
               "pointer-events-auto",
             )}
-            title={onOpenDataPreviewFullView ? "Click ring to open full view" : undefined}
           >
             {dataPreviewContent}
           </div>
@@ -135,31 +156,55 @@ export default function OctagonCard({
         )}>
           {showStats ? (
             <>
-              <div className="flex flex-col items-center flex-1 min-w-0">
+              <div
+                data-octagon-stat={onLeftStatClick ? "" : undefined}
+                className={cn(
+                  "flex flex-col items-center flex-1 min-w-0",
+                  onLeftStatClick && "cursor-pointer group/lstat pointer-events-auto",
+                )}
+                onClick={onLeftStatClick ? (e) => { e.stopPropagation(); onLeftStatClick(); } : undefined}
+                role={onLeftStatClick ? "button" : undefined}
+                tabIndex={onLeftStatClick ? 0 : undefined}
+                onKeyDown={onLeftStatClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onLeftStatClick(); } } : undefined}
+              >
                 <span className={cn(
                   "font-medium mb-0.5 truncate w-full text-center",
                   centerVariant === "dataPreview" ? "text-[7px] text-blue-600" : "text-[9px] text-blue-600",
+                  onLeftStatClick && "group-hover/lstat:text-blue-700",
                 )}>{leftStat.label}</span>
                 <div
                   className={cn(
                     "font-bold rounded w-full text-center shadow-sm border",
                     centerVariant === "dataPreview" ? "text-[10px] px-1 py-px" : "text-sm px-2 py-0.5",
-                    leftStat.className || "bg-yellow-300 text-yellow-900 border-yellow-400/30",
+                    statPillClassName(leftStat, centerVariant, "left"),
+                    onLeftStatClick && "hover:opacity-80 transition-opacity",
                   )}
                 >
                   {leftStat.value}
                 </div>
               </div>
-              <div className="flex flex-col items-center flex-1 min-w-0">
+              <div
+                data-octagon-stat={onRightStatClick ? "" : undefined}
+                className={cn(
+                  "flex flex-col items-center flex-1 min-w-0",
+                  onRightStatClick && "cursor-pointer group/rstat pointer-events-auto",
+                )}
+                onClick={onRightStatClick ? (e) => { e.stopPropagation(); onRightStatClick(); } : undefined}
+                role={onRightStatClick ? "button" : undefined}
+                tabIndex={onRightStatClick ? 0 : undefined}
+                onKeyDown={onRightStatClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onRightStatClick(); } } : undefined}
+              >
                 <span className={cn(
                   "font-medium mb-0.5 truncate w-full text-center",
                   centerVariant === "dataPreview" ? "text-[7px] text-blue-600" : "text-[9px] text-blue-600",
+                  onRightStatClick && "group-hover/rstat:text-blue-700",
                 )}>{rightStat.label}</span>
                 <div
                   className={cn(
                     "font-bold rounded w-full text-center shadow-sm border",
                     centerVariant === "dataPreview" ? "text-[10px] px-1 py-px" : "text-sm px-2 py-0.5",
-                    rightStat.className || "bg-red-300 text-red-900 border-red-400/30",
+                    statPillClassName(rightStat, centerVariant, "right"),
+                    onRightStatClick && "hover:opacity-80 transition-opacity",
                   )}
                 >
                   {rightStat.value}
@@ -187,6 +232,36 @@ export default function OctagonCard({
           clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)",
         }}
       />
+    </>
+  );
+
+  if (useDivRoot) {
+    return (
+      <div
+        className={shellClassName}
+        data-testid={testId}
+        onClick={onClick}
+        role={onClick ? "button" : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onKeyDown={
+          onClick
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onClick();
+                }
+              }
+            : undefined
+        }
+      >
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onClick} className={shellClassName} data-testid={testId}>
+      {inner}
     </button>
   );
 }

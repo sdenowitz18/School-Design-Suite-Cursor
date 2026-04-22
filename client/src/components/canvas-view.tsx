@@ -35,7 +35,7 @@ import {
   RingDataPreviewWindow,
   type DataWindowKey,
 } from "./ring-data-preview-window";
-import { RingFullView, type RingNode } from "./ring-full-view";
+import { RingFullView, type RingNode, type DrillTarget, type DimensionKey, scopedEditPayloadForDataWindow } from "./ring-full-view";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -72,7 +72,9 @@ interface CanvasNode {
     right: string;
     leftLabel: string;
     rightLabel: string;
-  }
+    leftScore: number | null;
+    rightScore: number | null;
+  };
 }
 
 const EMPTY_STAKEHOLDER = { populationSize: "", additionalContext: "", keyRepresentatives: "" };
@@ -113,7 +115,14 @@ const SHELL_OVERALL_CANVAS_NODE: CanvasNode = {
   x: 600,
   y: 300,
   color: "bg-white",
-  stats: { left: "—", right: "—", leftLabel: "Learning & Adv.", rightLabel: "Wellbeing" },
+  stats: {
+    left: "—",
+    right: "—",
+    leftLabel: "Learning & Adv.",
+    rightLabel: "Wellbeing",
+    leftScore: null,
+    rightScore: null,
+  },
 };
 
 function chartPreview(data: any): { currentAsOf: string | null; verified: boolean; hasData: boolean } {
@@ -229,6 +238,8 @@ export function componentToCanvasNode(comp: any, allComponents?: any[]): CanvasN
         right: wcScore !== null ? String(wcScore) : "—",
         leftLabel: "Learning & Adv.",
         rightLabel: "Wellbeing",
+        leftScore: laScore,
+        rightScore: wcScore,
       };
     })(),
   };
@@ -281,6 +292,9 @@ function DraggableRingOctagon({
   selectedDataWindow,
   onDataWindowChange,
   onDesignItemDrop,
+  onDrill,
+  onDimensionClick,
+  onDoubleClickDataPreviewEdit,
 }: {
   node: CanvasNode;
   rawComp?: any;
@@ -297,6 +311,10 @@ function DraggableRingOctagon({
   selectedDataWindow: DataWindowKey;
   onDataWindowChange: (w: DataWindowKey) => void;
   onDesignItemDrop?: (payload: DesignItemDragPayload) => void;
+  onDrill?: (t: DrillTarget) => void;
+  onDimensionClick?: (key: DimensionKey) => void;
+  /** Double-click compact preview body → working panel scoped to current data window. */
+  onDoubleClickDataPreviewEdit?: (nodeId: string) => void;
 }) {
   const [draggingPos, setDraggingPos] = useState<{ x: number; y: number } | null>(null);
   const [isDesignDropTarget, setIsDesignDropTarget] = useState(false);
@@ -352,6 +370,7 @@ function DraggableRingOctagon({
       onPointerDown={(e) => {
         if ((e.target as HTMLElement).closest("[data-octagon-delete]")) return;
         if ((e.target as HTMLElement).closest("[data-preview-interactive]")) return;
+        if ((e.target as HTMLElement).closest("[data-octagon-stat]")) return;
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         sessionRef.current = {
           pointerId: e.pointerId,
@@ -388,6 +407,7 @@ function DraggableRingOctagon({
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest("[data-octagon-delete]")) return;
         if ((e.target as HTMLElement).closest("[data-preview-interactive]")) return;
+        if ((e.target as HTMLElement).closest("[data-octagon-stat]")) return;
         // Cancel the pending single-click timer and open the working panel instead.
         if (clickTimerRef.current) {
           clearTimeout(clickTimerRef.current);
@@ -473,6 +493,12 @@ function DraggableRingOctagon({
               comp={rawComp}
               selectedWindow={selectedDataWindow}
               onWindowChange={onDataWindowChange}
+              onOpenFullView={rawComp ? () => onOpenDataPreviewFullView(selectedDataWindow) : undefined}
+              onDrill={onDrill}
+              onDimensionClick={onDimensionClick}
+              onDoubleClickToEdit={
+                onDoubleClickDataPreviewEdit ? () => onDoubleClickDataPreviewEdit(node.nodeId) : undefined
+              }
             />
           ) : undefined
         }
@@ -482,8 +508,10 @@ function DraggableRingOctagon({
             : undefined
         }
         bgClassName={node.color}
-        leftStat={{ label: node.stats.leftLabel, value: node.stats.left }}
-        rightStat={{ label: node.stats.rightLabel, value: node.stats.right }}
+        leftStat={{ label: node.stats.leftLabel, value: node.stats.left, score: node.stats.leftScore }}
+        rightStat={{ label: node.stats.rightLabel, value: node.stats.right, score: node.stats.rightScore }}
+        onLeftStatClick={onDimensionClick ? () => onDimensionClick("learningAdvancement") : undefined}
+        onRightStatClick={onDimensionClick ? () => onDimensionClick("wellbeingConduct") : undefined}
         className="pointer-events-none"
       />
     </motion.div>
@@ -517,6 +545,9 @@ const OctagonNode = ({
   onDataWindowChange,
   onDesignItemDrop,
   onOpenCenterFullView,
+  onDrill,
+  onDimensionClick,
+  onDoubleClickDataPreviewEdit,
 }: {
   node: CanvasNode;
   rawComp?: any;
@@ -547,6 +578,12 @@ const OctagonNode = ({
   onDesignItemDrop?: (payload: DesignItemDragPayload) => void;
   /** Open center full view with the given slot (designed or overview). */
   onOpenCenterFullView?: (slot: CenterFullViewSlot) => void;
+  /** Compact canvas drill — clicking an item opens full view + drill for that item. */
+  onDrill?: (nodeId: string, t: DrillTarget) => void;
+  /** Clicking a dimension node/stat opens the full view scoped to that dimension. */
+  onDimensionClick?: (nodeId: string, key: DimensionKey) => void;
+  /** Double-click preview body → working panel scoped to current global data window. */
+  onDoubleClickDataPreviewEdit?: (nodeId: string) => void;
 }) => {
   const isOverall = node.nodeId === "overall";
 
@@ -760,6 +797,9 @@ const OctagonNode = ({
         selectedDataWindow={selectedDataWindow ?? "keyDrivers"}
         onDataWindowChange={onDataWindowChange ?? (() => {})}
         onDesignItemDrop={onDesignItemDrop}
+        onDrill={onDrill ? (t) => onDrill(node.nodeId, t) : undefined}
+        onDimensionClick={onDimensionClick ? (key) => onDimensionClick(node.nodeId, key) : undefined}
+        onDoubleClickDataPreviewEdit={onDoubleClickDataPreviewEdit}
       />
     );
   }
@@ -795,6 +835,11 @@ const OctagonNode = ({
               comp={rawComp}
               selectedWindow={selectedDataWindow ?? "keyDrivers"}
               onWindowChange={onDataWindowChange ?? (() => {})}
+              onOpenFullView={rawComp ? () => onOpenDataPreviewFullView?.(node.nodeId, selectedDataWindow ?? "keyDrivers") : undefined}
+              onDimensionClick={onDimensionClick ? (key) => onDimensionClick(node.nodeId, key) : undefined}
+              onDoubleClickToEdit={
+                onDoubleClickDataPreviewEdit ? () => onDoubleClickDataPreviewEdit(node.nodeId) : undefined
+              }
             />
           ) : undefined
         }
@@ -804,8 +849,10 @@ const OctagonNode = ({
             : undefined
         }
         bgClassName={node.color}
-        leftStat={{ label: node.stats.leftLabel, value: node.stats.left }}
-        rightStat={{ label: node.stats.rightLabel, value: node.stats.right }}
+        leftStat={{ label: node.stats.leftLabel, value: node.stats.left, score: node.stats.leftScore }}
+        rightStat={{ label: node.stats.rightLabel, value: node.stats.right, score: node.stats.rightScore }}
+        onLeftStatClick={onDimensionClick ? () => onDimensionClick(node.nodeId, "learningAdvancement") : undefined}
+        onRightStatClick={onDimensionClick ? () => onDimensionClick(node.nodeId, "wellbeingConduct") : undefined}
         onClick={onClick}
       />
     </motion.div>
@@ -824,12 +871,14 @@ function CanvasViewInner() {
   const [designedCardRoute, setDesignedCardRoute] = useState<DesignedExperienceCardRoute>({ level: "L1" });
   const [ringHighlight, setRingHighlight] = useState<{ sourceKey: string; nodeIds: Set<string> } | null>(null);
   const [deNavTarget, setDeNavTarget] = useState<import("./designed-experience-card-content").DESubView | null>(null);
+  const [shPage, setShPage] = useState<import("./component-health-view").StatusHealthPage | null>(null);
   const [selectedDataWindow, setSelectedDataWindow] = useState<DataWindowKey>("keyDrivers");
   const [ringFullViewState, setRingFullViewState] = useState<{
     nodeId: string;
     rawComp: any;
     bgClassName: string;
     mode: "component" | "dataWindow";
+    initialDrillTarget?: DrillTarget | null;
   } | null>(null);
   const [centerFullViewRoute, setCenterFullViewRoute] =
     useState<CenterFullViewSlot | null>(null);
@@ -1311,6 +1360,51 @@ function CanvasViewInner() {
                   setRingFullViewState({ nodeId, rawComp: raw, bgClassName: canvasNode.color, mode: "dataWindow" });
                 }
               }}
+              onDrill={(nodeId, drillTarget) => {
+                if (nodeId === "overall") return;
+                const raw = Array.isArray(componentsRaw)
+                  ? componentsRaw.find((c: any) => String(c?.nodeId) === nodeId)
+                  : undefined;
+                const canvasNode = derivedNodes.find((n) => n.nodeId === nodeId);
+                if (raw && canvasNode) {
+                  setSelectedNode(null);
+                  setOpenSubId(null);
+                  setIsExpandedWorkingSpace(false);
+                  setRingFullViewState({ nodeId, rawComp: raw, bgClassName: canvasNode.color, mode: "dataWindow", initialDrillTarget: drillTarget });
+                }
+              }}
+              onDimensionClick={(nodeId, dimensionKey) => {
+                if (nodeId === "overall") return;
+                const raw = Array.isArray(componentsRaw)
+                  ? componentsRaw.find((c: any) => String(c?.nodeId) === nodeId)
+                  : undefined;
+                const canvasNode = derivedNodes.find((n) => n.nodeId === nodeId);
+                if (raw && canvasNode) {
+                  setSelectedNode(null);
+                  setOpenSubId(null);
+                  setIsExpandedWorkingSpace(false);
+                  setRingFullViewState({
+                    nodeId,
+                    rawComp: raw,
+                    bgClassName: canvasNode.color,
+                    mode: "dataWindow",
+                    initialDrillTarget: { kind: "dimension", dimensionKey },
+                  });
+                }
+              }}
+              onDoubleClickDataPreviewEdit={(nodeId) => {
+                if (nodeId === "overall") return;
+                const targetNode = derivedNodes.find((n) => n.nodeId === nodeId);
+                if (!targetNode) return;
+                const payload = scopedEditPayloadForDataWindow(selectedDataWindow);
+                setRingFullViewState(null);
+                setSelectedNode(targetNode);
+                setActiveTab(payload.tab);
+                setOpenSubId(payload.openSubId ?? null);
+                setInitialSubId(payload.initialSubId ?? null);
+                setDeNavTarget(payload.deNav ?? null);
+                setIsExpandedWorkingSpace(false);
+              }}
               overallCenterMode={overallCenterMode}
               onSetOverallCenterMode={setOverallCenterMode}
               onNavigateOverall={(target) => {
@@ -1464,7 +1558,7 @@ function CanvasViewInner() {
             selectedNode={selectedNode ? { nodeId: selectedNode.nodeId, title: selectedNode.title, color: selectedNode.color } : null}
             componentsRaw={componentsRaw}
             activeTab={activeTab}
-            onActiveTabChange={(tab) => setActiveTab(tab)}
+            onActiveTabChange={(tab) => { setActiveTab(tab); if (tab !== "status-and-health") setShPage(null); }}
             initialSubId={initialSubId}
             onInitialSubIdConsumed={() => setInitialSubId(null)}
             openSubId={openSubId}
@@ -1473,6 +1567,7 @@ function CanvasViewInner() {
             onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
             deNavTarget={deNavTarget}
             onDeNavTargetConsumed={() => setDeNavTarget(null)}
+            shPage={shPage}
             onClose={() => {
               setSelectedNode(null);
               setOpenSubId(null);
@@ -1569,21 +1664,29 @@ function CanvasViewInner() {
               comp={ringFullViewState.rawComp}
               bgClassName={ringFullViewState.bgClassName}
               mode={ringFullViewState.mode}
+              initialDrillTarget={ringFullViewState.initialDrillTarget}
               selectedDataWindow={selectedDataWindow}
               onDataWindowChange={setSelectedDataWindow}
               ringNodes={ringNodeList}
               onNavigate={(node) => {
                 setRingFullViewState((prev) =>
-                  prev ? { ...prev, nodeId: node.nodeId, rawComp: node.rawComp, bgClassName: node.bgClassName } : null,
+                  prev ? { ...prev, nodeId: node.nodeId, rawComp: node.rawComp, bgClassName: node.bgClassName, initialDrillTarget: null } : null,
                 );
               }}
               onClose={() => setRingFullViewState(null)}
               onSwitchToDataWindow={(w) => {
                 setSelectedDataWindow(w);
-                setRingFullViewState((prev) => prev ? { ...prev, mode: "dataWindow" } : null);
+                setRingFullViewState((prev) => prev ? { ...prev, mode: "dataWindow", initialDrillTarget: null } : null);
               }}
               onSwitchToComponent={() => {
-                setRingFullViewState((prev) => prev ? { ...prev, mode: "component" } : null);
+                setRingFullViewState((prev) => prev ? { ...prev, mode: "component", initialDrillTarget: null } : null);
+              }}
+              onSwitchToDimension={(dimensionKey) => {
+                setRingFullViewState((prev) =>
+                  prev
+                    ? { ...prev, mode: "dataWindow", initialDrillTarget: { kind: "dimension", dimensionKey } }
+                    : null
+                );
               }}
               onOpenEdit={() => {
                 const state = ringFullViewState;
@@ -1610,6 +1713,7 @@ function CanvasViewInner() {
                 setOpenSubId(payload.openSubId ?? null);
                 setInitialSubId(payload.initialSubId ?? null);
                 setDeNavTarget(payload.deNav ?? null);
+                setShPage(payload.shPage ?? null);
                 setIsExpandedWorkingSpace(false);
               }}
             />

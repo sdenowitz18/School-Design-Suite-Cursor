@@ -1998,7 +1998,7 @@ function L2SubDimensionPage({
           <ScoreFlags
             overallScore={l1Score}
             items={collectInstanceFlagItems(filterL2Id ? visibleMeasures : measuresForL1, filter)}
-            threshold={1}
+            threshold={2}
             defaultOpen={false}
             testId="outcome-l2-flags"
           />
@@ -2411,7 +2411,7 @@ export default function OutcomeScoreView({
               <ScoreFlags
                 overallScore={finalScore}
                 items={collectInstanceFlagItems(flagMeasures, filter)}
-                threshold={1}
+                threshold={2}
                 defaultOpen={false}
                 testId="outcome-l1-flags"
               />

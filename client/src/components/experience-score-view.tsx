@@ -436,7 +436,7 @@ export default function ExperienceScoreView({
                   : [...measures, ...overallMeasures],
                 filter,
               )}
-              threshold={1}
+              threshold={2}
               defaultOpen={false}
               testId="experience-l1-flags"
             />

@@ -12,6 +12,11 @@
     "db:push": "drizzle-kit push",
     "setup:env": "node --import tsx script/ensure-env.ts",
     "seed": "node --env-file=.env --import tsx script/seed-cli.ts",
+    "seed:de:world-languages": "node --env-file=.env --import tsx/esm scripts/designed-experience/seed-world-languages.ts",
+    "seed:de:batch-2": "node --env-file=.env --import tsx/esm scripts/designed-experience/seed-batch-2.ts",
+    "seed:de:batch-3": "node --env-file=.env --import tsx/esm scripts/designed-experience/seed-batch-3.ts",
+    "seed:scores:overall": "node --env-file=.env --import tsx/esm scripts/scores/seed-health-scores.ts",
+    "seed:scores:ring-components": "node --env-file=.env --import tsx/esm scripts/scores/seed-health-scores-ring-components.ts",
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {

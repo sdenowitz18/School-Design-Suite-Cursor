@@ -208,7 +208,7 @@ function ImplementationTopDetailPage({
           <ScoreFlags
             overallScore={topScore}
             items={collectInstanceFlagItems(filterChildId ? visibleSubMeasures : measuresForTop, filter)}
-            threshold={1}
+            threshold={2}
             defaultOpen={false}
             testId="implementation-nested-flags"
           />
@@ -663,7 +663,7 @@ export default function ImplementationScoreView({
               <ScoreFlags
                 overallScore={finalScore}
                 items={collectInstanceFlagItems(flagMeasures, filter)}
-                threshold={1}
+                threshold={2}
                 defaultOpen={false}
                 testId="implementation-l1-flags"
               />

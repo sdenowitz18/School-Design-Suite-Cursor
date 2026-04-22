@@ -351,7 +351,7 @@ export default function DesignScoreView({
               <ScoreFlags
                 overallScore={finalScore}
                 items={collectInstanceFlagItems(flagMeasures, filter)}
-                threshold={1}
+                threshold={2}
                 defaultOpen={false}
                 testId="design-l1-flags"
               />

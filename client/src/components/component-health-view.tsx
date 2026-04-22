@@ -40,7 +40,7 @@ import {
   getPrimaryStakeholderGroup,
 } from "@shared/ring-conditions-score";
 import { effectiveFromInstances, UNKNOWN_ACTOR_KEY, normActor } from "@shared/score-instances";
-import { calcOverallOutcomeScore, calcL1Score } from "@shared/outcome-score-calc";
+import { calcOverallOutcomeScore, calcL1Score, collectInstanceFlagItems } from "@shared/outcome-score-calc";
 import { calcFinalExperienceScore, migrateLegacyExperienceScoreData } from "@shared/experience-score-calc";
 import { isLeapAimActive } from "@shared/aim-selection";
 import {
@@ -58,7 +58,7 @@ import {
 import { getSchoolYearKey, getSemesterKey, listSelectableSemesterKeys, listSelectableYearKeys, parseIsoDate } from "@shared/marking-period";
 import type { ScoreFilter, ScoreInstance } from "@shared/schema";
 import ScoreFilterBar from "./score-filter-bar";
-import ScoreFlags, { SignalFlags } from "./score-flags";
+import ScoreFlags from "./score-flags";
 import { DrilldownNavBar } from "./drilldown-nav-bar";
 /** Ring node = any component that isn't "overall". No hardcoded list. */
 
@@ -77,9 +77,12 @@ function flowConnectorStroke(score: number | null): string {
   return "#ef4444";
 }
 
+export type StatusHealthPage = "design" | "conditions" | "implementation" | "experience" | "learningAdvancement" | "wellbeingConduct";
+
 interface ComponentHealthViewProps {
   nodeId?: string;
   title?: string;
+  initialPage?: StatusHealthPage | null;
 }
 
 
@@ -132,7 +135,7 @@ const PERFORMANCE_DATA = {
   }
 };
 
-export default function ComponentHealthView({ nodeId, title }: ComponentHealthViewProps) {
+export default function ComponentHealthView({ nodeId, title, initialPage }: ComponentHealthViewProps) {
   const { data: comp } = useQuery(componentQueries.byNodeId(nodeId || ""));
   const { data: allComponents } = useQuery(componentQueries.all as any);
 
@@ -144,12 +147,12 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
   const canOpenDriverScoring = !!comp;
 
   const [status, setStatus] = useState("Test & Refine");
-  const [showLearningOutcomeScore, setShowLearningOutcomeScore] = useState(false);
-  const [showWellbeingOutcomeScore, setShowWellbeingOutcomeScore] = useState(false);
-  const [showExperienceScore, setShowExperienceScore] = useState(false);
-  const [showRingDesignScore, setShowRingDesignScore] = useState(false);
-  const [showRingImplementationScore, setShowRingImplementationScore] = useState(false);
-  const [showRingConditionsScore, setShowRingConditionsScore] = useState(false);
+  const [showLearningOutcomeScore, setShowLearningOutcomeScore] = useState(() => initialPage === "learningAdvancement");
+  const [showWellbeingOutcomeScore, setShowWellbeingOutcomeScore] = useState(() => initialPage === "wellbeingConduct");
+  const [showExperienceScore, setShowExperienceScore] = useState(() => initialPage === "experience");
+  const [showRingDesignScore, setShowRingDesignScore] = useState(() => initialPage === "design");
+  const [showRingImplementationScore, setShowRingImplementationScore] = useState(() => initialPage === "implementation");
+  const [showRingConditionsScore, setShowRingConditionsScore] = useState(() => initialPage === "conditions");
   /** L1 outcome sub-dimension drill (STEM, etc.) — synced with OutcomeScoreView when shell breadcrumbs are used. */
   const [learningOutcomeScoreL1Id, setLearningOutcomeScoreL1Id] = useState<string | null>(null);
   const [wellbeingOutcomeScoreL1Id, setWellbeingOutcomeScoreL1Id] = useState<string | null>(null);
@@ -1099,11 +1102,13 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                    <ScoreFlags
                                      collapsible={false}
                                      overallScore={computedRingDesignScore}
-                                     items={designSummaryRows.map((row) => ({
-                                       key: row.id,
-                                       label: row.label,
-                                       score: row.score,
-                                     }))}
+                                     items={collectInstanceFlagItems(
+                                       [
+                                         ...(Array.isArray((designScoreData as any)?.measures) ? (designScoreData as any).measures : []),
+                                         ...(Array.isArray((designScoreData as any)?.overallMeasures) ? (designScoreData as any).overallMeasures : []),
+                                       ],
+                                       globalFilter,
+                                     )}
                                      threshold={2}
                                      testId="health-design-flags"
                                    />
@@ -1267,95 +1272,54 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                       ) : null}
                                      </div>
                                      <div className="space-y-1.5">
-                                       {healthSummaryView === "flags"
-                                         ? (() => {
-                                             const list: any[] = ((comp as any)?.healthData?.ringConditionsScoreData?.conditions || []) as any[];
-                                             const stakeholderLabels: Record<string, string> = {
-                                               students: "Students",
-                                               families: "Families",
-                                               educators_staff: "Educators / Staff",
-                                               admin_district: "Administration (District)",
-                                               admin_school: "Administration (School)",
-                                               other_leaders: "Other Community Leaders",
-                                             };
-
-                                            const items = list.map((c: any) => {
-                                              const sum =
-                                                calculateRingConditionsSum({
-                                                  actors: globalActors as any,
-                                                  filter: globalFilter as any,
-                                                  conditions: [c],
-                                                  finalConditionsScore: null,
-                                                  conditionsSum: null,
-                                                } as any) ?? null;
-                                              const desc = String(c?.description || "").trim();
-                                              const group = String(c?.stakeholderGroup || "").trim();
-                                              const label = desc ? desc : group ? (stakeholderLabels[group] || group) : "Condition";
-                                              return { key: String(c?.id || label), label, value: sum };
-                                            });
-
-                                            return (
-                                              <SignalFlags
-                                                collapsible={false}
-                                                title="Flags"
-                                                items={items as any}
-                                                maxPerSide={3}
-                                                showValues={false}
-                                                testId="health-conditions-flags"
-                                              />
-                                            );
-                                           })()
-                                         : (() => {
-                                             const list: any[] = ((comp as any)?.healthData?.ringConditionsScoreData?.conditions || []) as any[];
-                                             const stakeholderLabels: Record<string, string> = {
-                                               students: "Students",
-                                               families: "Families",
-                                               educators_staff: "Educators / Staff",
-                                               admin_district: "Administration (District)",
-                                               admin_school: "Administration (School)",
-                                               other_leaders: "Other Community Leaders",
-                                             };
-
-                                             const grouped = new Map<string, { tail: number; head: number }>();
-                                             for (const c of list) {
-                                               const dir = c?.direction;
-                                               const add = (k: string) => {
-                                                 const cur = grouped.get(k) || { tail: 0, head: 0 };
-                                                 if (dir === "tailwind") cur.tail += 1;
-                                                 else if (dir === "headwind") cur.head += 1;
-                                                 grouped.set(k, cur);
-                                               };
-
-                                               if (conditionsSummaryMode === "stakeholder") {
-                                                 const groups = getConditionStakeholderGroups(c);
-                                                 for (const g of groups) {
-                                                   if (!g) continue;
-                                                   add(String(g));
-                                                 }
-                                               } else {
-                                                 const tags: any[] = Array.isArray(c?.cs) ? c.cs : [];
-                                                 // Cs tagging is required; if missing, omit from type summary.
-                                                 for (const t of tags) {
-                                                   const kk = String(t || "").trim();
-                                                   if (kk) add(kk);
-                                                 }
-                                               }
+                                       {(() => {
+                                         const list: any[] = ((comp as any)?.healthData?.ringConditionsScoreData?.conditions || []) as any[];
+                                         const stakeholderLabels: Record<string, string> = {
+                                           students: "Students",
+                                           families: "Families",
+                                           educators_staff: "Educators / Staff",
+                                           admin_district: "Administration (District)",
+                                           admin_school: "Administration (School)",
+                                           other_leaders: "Other Community Leaders",
+                                         };
+                                         const grouped = new Map<string, { tail: number; head: number }>();
+                                         for (const c of list) {
+                                           const dir = c?.direction;
+                                           const add = (k: string) => {
+                                             const cur = grouped.get(k) || { tail: 0, head: 0 };
+                                             if (dir === "tailwind") cur.tail += 1;
+                                             else if (dir === "headwind") cur.head += 1;
+                                             grouped.set(k, cur);
+                                           };
+                                           if (conditionsSummaryMode === "stakeholder") {
+                                             const groups = getConditionStakeholderGroups(c);
+                                             for (const g of groups) {
+                                               if (!g) continue;
+                                               add(String(g));
                                              }
-                                             const entries = Array.from(grouped.entries());
-                                             entries.sort((a, b) => (b[1].head + b[1].tail) - (a[1].head + a[1].tail));
-                                             return entries.map(([g, counts]) => (
-                                               <div key={g} className="flex items-center justify-between text-xs">
-                                                 <span className="text-gray-700">
-                                                   {conditionsSummaryMode === "stakeholder" ? (stakeholderLabels[g] || g) : g}
-                                                 </span>
-                                                 <div className="flex items-center gap-1.5">
-                                                   <span className="text-[10px] text-green-600 font-semibold">{counts.tail}T</span>
-                                                   <span className="text-[10px] text-gray-300">•</span>
-                                                   <span className="text-[10px] text-red-600 font-semibold">{counts.head}H</span>
-                                                 </div>
-                                               </div>
-                                             ));
-                                           })()}
+                                           } else {
+                                             const tags: any[] = Array.isArray(c?.cs) ? c.cs : [];
+                                             for (const t of tags) {
+                                               const kk = String(t || "").trim();
+                                               if (kk) add(kk);
+                                             }
+                                           }
+                                         }
+                                         const entries = Array.from(grouped.entries());
+                                         entries.sort((a, b) => (b[1].head + b[1].tail) - (a[1].head + a[1].tail));
+                                         return entries.map(([g, counts]) => (
+                                           <div key={g} className="flex items-center justify-between text-xs">
+                                             <span className="text-gray-700">
+                                               {conditionsSummaryMode === "stakeholder" ? (stakeholderLabels[g] || g) : g}
+                                             </span>
+                                             <div className="flex items-center gap-1.5">
+                                               <span className="text-[10px] text-green-600 font-semibold">{counts.tail}T</span>
+                                               <span className="text-[10px] text-gray-300">•</span>
+                                               <span className="text-[10px] text-red-600 font-semibold">{counts.head}H</span>
+                                             </div>
+                                           </div>
+                                         ));
+                                       })()}
                                      </div>
                                    </div>
                                  </div>
@@ -1431,11 +1395,13 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                    <ScoreFlags
                                      collapsible={false}
                                      overallScore={computedRingImplementationScore}
-                                     items={implementationSummaryRows.map((row) => ({
-                                       key: row.id,
-                                       label: row.label,
-                                       score: row.score,
-                                     }))}
+                                     items={collectInstanceFlagItems(
+                                       [
+                                         ...(Array.isArray((implementationScoreData as any)?.measures) ? (implementationScoreData as any).measures : []),
+                                         ...(Array.isArray((implementationScoreData as any)?.overallMeasures) ? (implementationScoreData as any).overallMeasures : []),
+                                       ],
+                                       globalFilter,
+                                     )}
                                      threshold={2}
                                      testId="health-implementation-flags"
                                    />
@@ -1549,16 +1515,17 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                            <div className="space-y-1.5">
                               {(() => {
                                 if (healthSummaryView === "flags") {
-                                  const items = experienceSubdimensionRows.map((r) => ({
-                                    key: r.key,
-                                    label: r.label,
-                                    score: r.score,
-                                  }));
                                   return (
                                     <ScoreFlags
                                       collapsible={false}
                                       overallScore={realExperienceScore}
-                                      items={items as any}
+                                      items={collectInstanceFlagItems(
+                                        [
+                                          ...(migratedExperienceData.measures as OutcomeMeasure[]),
+                                          ...(migratedExperienceData.overallMeasures as OutcomeMeasure[] ?? []),
+                                        ],
+                                        globalFilter,
+                                      )}
                                       threshold={2}
                                       maxPerSide={6}
                                       testId="health-experience-flags"
@@ -1692,11 +1659,13 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                <ScoreFlags
                                  collapsible={false}
                                  overallScore={realLearningOutcomeScore}
-                                items={learningOutcomeDimensionRows.map((row) => ({
-                                  key: row.key,
-                                  label: row.label,
-                                  score: row.score,
-                                }))}
+                                 items={collectInstanceFlagItems(
+                                   [
+                                     ...(Array.isArray((learningAdvancementOutcomeScoreData as any)?.measures) ? (learningAdvancementOutcomeScoreData as any).measures : []),
+                                     ...(Array.isArray((learningAdvancementOutcomeScoreData as any)?.overallMeasures) ? (learningAdvancementOutcomeScoreData as any).overallMeasures : []),
+                                   ],
+                                   globalFilter,
+                                 )}
                                  threshold={2}
                                  testId="health-outcomes-learning-flags"
                                />
@@ -1779,11 +1748,13 @@ export default function ComponentHealthView({ nodeId, title }: ComponentHealthVi
                                <ScoreFlags
                                  collapsible={false}
                                  overallScore={realWellbeingOutcomeScore}
-                                items={wellbeingOutcomeDimensionRows.map((row) => ({
-                                  key: row.key,
-                                  label: row.label,
-                                  score: row.score,
-                                }))}
+                                 items={collectInstanceFlagItems(
+                                   [
+                                     ...(Array.isArray((wellbeingConductOutcomeScoreData as any)?.measures) ? (wellbeingConductOutcomeScoreData as any).measures : []),
+                                     ...(Array.isArray((wellbeingConductOutcomeScoreData as any)?.overallMeasures) ? (wellbeingConductOutcomeScoreData as any).overallMeasures : []),
+                                   ],
+                                   globalFilter,
+                                 )}
                                  threshold={2}
                                  testId="health-outcomes-wellbeing-flags"
                                />
