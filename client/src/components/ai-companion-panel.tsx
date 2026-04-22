@@ -539,9 +539,9 @@ export default function AICompanionPanel({
 
       // Specific list-type questions.
       if (q.includes("primary outcome") || (q.includes("outcome") && q.includes("primary"))) {
-        const primary = Array.isArray(snap.primaryOutcomes) ? snap.primaryOutcomes : [];
-        const list = primary.map((x: any) => String(x || "").trim()).filter(Boolean);
-        reply(list.length ? `Primary outcomes: ${list.join(", ")}` : "Primary outcomes: —");
+        const deAims: any[] = (component as any)?.designedExperienceData?.keyDesignElements?.aims ?? [];
+        const primary = deAims.filter((a: any) => a.type === "outcome" && a.isPrimary === true).map((a: any) => String(a.label || "").trim()).filter(Boolean);
+        reply(primary.length ? `Primary outcomes: ${primary.join(", ")}` : "Primary outcomes: —");
         return;
       }
       if (q.includes("subcomponent")) {

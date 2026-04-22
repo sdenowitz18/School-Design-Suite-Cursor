@@ -138,6 +138,7 @@ export const IMPROVEMENT_ELEMENT: ElementDef = {
           title: 'Broader set of community contributors',
           archetype: 'A1',
           customAllowed: true,
+          groupedSecondaryDisplay: true,
           tags: TAGS_COMMUNITY_CONTRIBUTORS,
         },
         {

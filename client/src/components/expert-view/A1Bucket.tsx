@@ -100,11 +100,90 @@ interface PrimaryPillProps {
   onToggle: () => void;
   onKeyToggle: () => void;
   onSecondaryToggle: (secId: string) => void;
+  /** When true, renders as a bullet-list row instead of a rounded pill. */
+  listMode?: boolean;
 }
 
-function PrimaryPill({ tag, selection, onToggle, onKeyToggle, onSecondaryToggle }: PrimaryPillProps) {
+function PrimaryPill({ tag, selection, onToggle, onKeyToggle, onSecondaryToggle, listMode }: PrimaryPillProps) {
   const isSelected = !!selection;
   const hasSecondaries = tag.secondaries && tag.secondaries.length > 0;
+
+  if (listMode) {
+    return (
+      <div className="select-none">
+        {/* Bullet row */}
+        <div
+          className="flex items-center gap-2 py-0.5 cursor-pointer group"
+          onClick={onToggle}
+        >
+          {/* Bullet indicator */}
+          <span
+            className={cn(
+              'flex-shrink-0 w-2 h-2 rounded-full transition-colors mt-px',
+              isSelected ? 'bg-purple-600' : 'bg-gray-300 group-hover:bg-gray-400',
+            )}
+          />
+          <span
+            className={cn(
+              'text-sm transition-colors leading-snug',
+              isSelected ? 'text-gray-900 font-medium' : 'text-gray-600',
+            )}
+          >
+            {tag.label}
+          </span>
+          {isSelected && ((selection?.selectedSecondaries ?? []).length === 0) && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onKeyToggle(); }}
+              className="ml-0.5 focus:outline-none"
+              title={selection?.isKey ? 'Remove key' : 'Mark as key'}
+            >
+              <Star
+                className={cn(
+                  'w-3 h-3 transition-colors',
+                  selection?.isKey ? 'fill-purple-600 text-purple-600' : 'text-gray-300 hover:text-purple-400',
+                )}
+              />
+            </button>
+          )}
+        </div>
+
+        {/* Sub-bullets when secondaries are selected */}
+        {isSelected && hasSecondaries && (
+          <div className="ml-4 mt-0.5 space-y-0.5">
+            {tag.secondaries!.map((sec) => {
+              const secSel = (selection!.selectedSecondaries ?? []).find((s) => s.tagId === sec.id);
+              const isSecSelected = !!secSel;
+              return (
+                <div
+                  key={sec.id}
+                  className="flex items-center gap-2 py-0.5 cursor-pointer group"
+                  onClick={(e) => { e.stopPropagation(); onSecondaryToggle(sec.id); }}
+                >
+                  <span
+                    className={cn(
+                      'flex-shrink-0 w-1.5 h-1.5 rounded-full transition-colors mt-px',
+                      isSecSelected ? 'bg-emerald-600' : 'bg-gray-200 group-hover:bg-gray-300',
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      'text-xs transition-colors',
+                      isSecSelected ? 'text-gray-800 font-medium' : 'text-gray-500',
+                    )}
+                  >
+                    {sec.label}
+                  </span>
+                  {isSecSelected && secSel!.isKey && (
+                    <Star className="w-2.5 h-2.5 fill-emerald-600 text-emerald-600 flex-shrink-0" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -127,7 +206,7 @@ function PrimaryPill({ tag, selection, onToggle, onKeyToggle, onSecondaryToggle 
         >
           {tag.label}
         </span>
-        {isSelected && (selection?.selectedSecondaries.length ?? 0) === 0 && (
+        {isSelected && ((selection?.selectedSecondaries ?? []).length === 0) && (
           <button
             onClick={(e) => { e.stopPropagation(); onKeyToggle(); }}
             className="ml-0.5 focus:outline-none"
@@ -147,7 +226,7 @@ function PrimaryPill({ tag, selection, onToggle, onKeyToggle, onSecondaryToggle 
       {isSelected && hasSecondaries && (
         <div className="px-3 pb-2 flex flex-wrap gap-1.5">
           {tag.secondaries!.map((sec) => {
-            const secSel = selection!.selectedSecondaries.find((s) => s.tagId === sec.id);
+            const secSel = (selection!.selectedSecondaries ?? []).find((s) => s.tagId === sec.id);
             const isSecSelected = !!secSel;
             return (
               <button
@@ -180,14 +259,18 @@ interface A1BucketProps {
   value: A1Value;
   onChange: (value: A1Value) => void;
   componentType?: ComponentType;
+  /** When true, tags render as a vertical bullet list instead of pill chips. */
+  listMode?: boolean;
 }
 
-export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: A1BucketProps) {
+export function A1Bucket({ bucket, value, onChange, componentType = 'center', listMode }: A1BucketProps) {
   const [customInput, setCustomInput] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
   const customInputRef = useRef<HTMLInputElement>(null);
 
-  const selections = value.selections ?? [];
+  const selections = (value.selections ?? []).map((s) =>
+    s.selectedSecondaries ? s : { ...s, selectedSecondaries: [] },
+  );
   const inheritRing =
     bucket.ringSchoolWideChoice && componentType === 'ring' && value.inheritFromSchool === true;
 
@@ -221,10 +304,11 @@ export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: 
     setSelections(
       selections.map((s) => {
         if (s.tagId !== primaryTagId) return s;
-        const hasSec = s.selectedSecondaries.some((sec) => sec.tagId === secTagId);
+        const secs = s.selectedSecondaries ?? [];
+        const hasSec = secs.some((sec) => sec.tagId === secTagId);
         const nextSecs = hasSec
-          ? s.selectedSecondaries.filter((sec) => sec.tagId !== secTagId)
-          : [...s.selectedSecondaries, makeSecondarySelection(secTagId)];
+          ? secs.filter((sec) => sec.tagId !== secTagId)
+          : [...secs, makeSecondarySelection(secTagId)];
         return { ...s, selectedSecondaries: nextSecs };
       }),
     );
@@ -249,7 +333,7 @@ export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: 
         if (s.tagId !== primaryTagId) return s;
         return {
           ...s,
-          selectedSecondaries: s.selectedSecondaries.map((sec) =>
+          selectedSecondaries: (s.selectedSecondaries ?? []).map((sec) =>
             sec.tagId === secTagId ? { ...sec, notes } : sec,
           ),
         };
@@ -267,7 +351,7 @@ export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: 
         if (s.tagId !== primaryTagId) return s;
         return {
           ...s,
-          selectedSecondaries: s.selectedSecondaries.map((sec) =>
+          selectedSecondaries: (s.selectedSecondaries ?? []).map((sec) =>
             sec.tagId === secTagId ? { ...sec, isKey: !sec.isKey } : sec,
           ),
         };
@@ -297,10 +381,10 @@ export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: 
   for (const sel of selections) {
     const tagDef = resolveTagDef(sel);
     if (!tagDef) continue;
-    if (sel.selectedSecondaries.length === 0) {
+    if ((sel.selectedSecondaries ?? []).length === 0) {
       noteBlocks.push({ type: 'primary', sel, tagDef });
     } else {
-      for (const sec of sel.selectedSecondaries) {
+      for (const sec of (sel.selectedSecondaries ?? [])) {
         const secDef = resolveSecDef(sel.tagId, sec.tagId);
         if (!secDef) continue;
         noteBlocks.push({ type: 'secondary', primarySel: sel, sec, secDef });
@@ -317,6 +401,7 @@ export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: 
         onToggle={() => togglePrimary(tag)}
         onKeyToggle={() => togglePrimaryKey(tag.id)}
         onSecondaryToggle={(secId) => toggleSecondary(tag.id, secId)}
+        listMode={listMode}
       />
     ));
 
@@ -328,17 +413,17 @@ export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: 
           {disciplineGroups.map((group) => (
             <div key={group.id} className="space-y-2">
               <h4 className="text-sm font-bold text-gray-900 tracking-tight">{group.label}</h4>
-              <div className="flex flex-wrap gap-2">{tagGrid(group.tags)}</div>
+              <div className={listMode ? 'space-y-1' : 'flex flex-wrap gap-2'}>{tagGrid(group.tags)}</div>
             </div>
           ))}
         </div>
       ) : !inheritRing ? (
-        <div className="flex flex-wrap gap-2">{tagGrid(allTags)}</div>
+        <div className={listMode ? 'space-y-1' : 'flex flex-wrap gap-2'}>{tagGrid(allTags)}</div>
       ) : null}
 
       {/* Custom selected tags */}
       {!inheritRing && (
-      <div className="flex flex-wrap gap-2">
+      <div className={listMode ? 'space-y-1' : 'flex flex-wrap gap-2'}>
         {selections
           .filter((s) => s.isCustom)
           .map((s) => {
@@ -351,6 +436,7 @@ export function A1Bucket({ bucket, value, onChange, componentType = 'center' }: 
                 onToggle={() => togglePrimary(tag)}
                 onKeyToggle={() => togglePrimaryKey(tag.id)}
                 onSecondaryToggle={() => {}}
+                listMode={listMode}
               />
             );
           })}

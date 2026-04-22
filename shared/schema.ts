@@ -32,7 +32,6 @@ export const snapshotDataSchema = z.object({
   variants: z.array(z.string()).optional(),
   studentGroups: z.array(z.string()).optional(),
   keyExperiences: z.array(z.string()).optional(),
-  primaryOutcomes: z.array(z.string()).optional(),
   embeddedComponents: z.array(z.string()).optional(),
   hostCourses: z.array(z.string()).optional(),
   selectionGating: z.string().optional(),

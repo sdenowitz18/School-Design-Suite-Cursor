@@ -63,6 +63,8 @@ export default function ComponentWorkingSpaceOverlay({
   onOpenSubIdChange,
   overallNavTarget,
   onOverallNavTargetConsumed,
+  deNavTarget,
+  onDeNavTargetConsumed,
   onRequestOpenComponent,
   onRequestNavigateToStudentDemographics,
 }: {
@@ -78,6 +80,8 @@ export default function ComponentWorkingSpaceOverlay({
   onOpenSubIdChange: (id: string | null) => void;
   overallNavTarget: any | null;
   onOverallNavTargetConsumed: () => void;
+  deNavTarget?: import("./designed-experience-card-content").DESubView | null;
+  onDeNavTargetConsumed?: () => void;
   onRequestOpenComponent?: (nodeId: string) => void;
   /** Overall school only: re-route the Learners "Manage" link to the Student Demographics chart. */
   onRequestNavigateToStudentDemographics?: () => void;
@@ -306,6 +310,8 @@ export default function ComponentWorkingSpaceOverlay({
                     onOpenSubIdChange={onOpenSubIdChange}
                     overallNavTarget={overallNavTarget}
                     onOverallNavTargetConsumed={onOverallNavTargetConsumed}
+                    deNavTarget={deNavTarget}
+                    onDeNavTargetConsumed={onDeNavTargetConsumed}
                     onClose={() => onOpenChange(false)}
                     onRequestOpenComponent={onRequestOpenComponent}
                     onRequestNavigateToStudentDemographics={onRequestNavigateToStudentDemographics}

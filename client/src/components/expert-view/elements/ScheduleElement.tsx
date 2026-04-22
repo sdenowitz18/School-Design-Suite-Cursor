@@ -180,8 +180,10 @@ export function ScheduleElement({ componentType, data, onChange }: ScheduleEleme
 
   function handleBucketChange(questionId: string, bucketId: string, value: BucketValue) {
     const key = `${questionId}__${bucketId}`;
-    const nextElementData = { ...elementData, [key]: value };
-    onChange({ ...data, schedule: nextElementData });
+    // Read from the freshest data (passed in) to avoid stale-closure overwrites
+    // when multiple bucket edits batch in the same React tick.
+    const latestSchedule = (data['schedule'] ?? {}) as Record<string, BucketValue>;
+    onChange({ ...data, schedule: { ...latestSchedule, [key]: value } });
   }
 
   function getQuestionData(questionId: string): Record<string, BucketValue> {
@@ -202,11 +204,19 @@ export function ScheduleElement({ componentType, data, onChange }: ScheduleEleme
     (elementData['schedule-q2__marking-periods']?.markingPeriods) ?? { periodType: null, periods: [] };
 
   function handleYearlyChange(v: YearlyScheduleValue) {
-    onChange({ ...data, schedule: { ...elementData, 'schedule-q2__yearly-schedule': { yearlySchedule: v } } });
+    const latestSchedule = (data['schedule'] ?? {}) as Record<string, BucketValue>;
+    onChange({
+      ...data,
+      schedule: { ...latestSchedule, 'schedule-q2__yearly-schedule': { yearlySchedule: v } as any },
+    });
   }
 
   function handleMarkingChange(v: MarkingPeriodsValue) {
-    onChange({ ...data, schedule: { ...elementData, 'schedule-q2__marking-periods': { markingPeriods: v } } });
+    const latestSchedule = (data['schedule'] ?? {}) as Record<string, BucketValue>;
+    onChange({
+      ...data,
+      schedule: { ...latestSchedule, 'schedule-q2__marking-periods': { markingPeriods: v } as any },
+    });
   }
 
   const visibleQuestions = SCHEDULE_ELEMENT.questions.filter(

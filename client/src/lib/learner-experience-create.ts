@@ -14,7 +14,6 @@ export function defaultSnapshotForLearnerComponent(title: string) {
     description: `School-level learner experience component: ${title}.`,
     componentType: "Cross-cutting",
     level: "Course" as const,
-    primaryOutcomes: [] as string[],
     subcomponents: [] as string[],
     variants: [] as string[],
     studentGroups: ["All Students"],

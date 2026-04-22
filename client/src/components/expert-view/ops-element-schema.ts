@@ -257,6 +257,7 @@ export const OPS_ELEMENT: ElementDef = {
           title: 'Hardware / tech devices',
           archetype: 'A1',
           customAllowed: true,
+          groupedSecondaryDisplay: true,
           tags: TAGS_HARDWARE,
         },
       ],

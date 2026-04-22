@@ -93,6 +93,45 @@ import {
 } from "./targeting-rollup-utils";
 import { isAdultRingComponent, isLearnerRingComponent } from "@/lib/ring-experience-audience";
 import { scheduleMigrateLegacyOverallAdultSubcomponents } from "@/lib/legacy-overall-adult-subs-migration";
+
+/** Deep clone so stashed / flushed expert trees never share nested refs with live state. */
+function cloneElementsExpertData(src: ElementsExpertData | undefined): ElementsExpertData {
+  if (!src || typeof src !== "object") return {};
+  try {
+    return structuredClone(src) as ElementsExpertData;
+  } catch {
+    try {
+      return JSON.parse(JSON.stringify(src)) as ElementsExpertData;
+    } catch {
+      return { ...src };
+    }
+  }
+}
+
+/**
+ * Per element id, merge bucket maps: overlay wins per bucket key; keys only in base are kept.
+ * Avoids PATCH replacing `elementsExpertData` with a partial object (e.g. dropping schedule duration / frequency / classrooms).
+ */
+function mergeElementsExpertData(base: ElementsExpertData | undefined, overlay: ElementsExpertData | undefined): ElementsExpertData {
+  const b = base && typeof base === "object" ? base : {};
+  const o = overlay && typeof overlay === "object" ? overlay : {};
+  const out: ElementsExpertData = {};
+  const ids = Array.from(new Set<string>([...Object.keys(b), ...Object.keys(o)]));
+  for (const id of ids) {
+    const bb = (b as any)[id];
+    const oo = (o as any)[id];
+    if (oo == null || typeof oo !== "object") {
+      out[id] = bb != null && typeof bb === "object" ? { ...bb } : {};
+      continue;
+    }
+    if (bb == null || typeof bb !== "object") {
+      out[id] = { ...oo };
+      continue;
+    }
+    out[id] = { ...bb, ...oo };
+  }
+  return out;
+}
 import { isLeapAimActive, isTargetingAimActive, leapAimUsesSoftDeselect } from "@shared/aim-selection";
 
 import artifactDoc from "@/assets/images/artifact-doc.png";
@@ -851,7 +890,7 @@ function KeyDesignElementsSummary({
   );
 }
 
-export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange, onRequestOpenComponent, onRequestNavigateToStudentDemographics }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void, onRequestOpenComponent?: (nodeId: string) => void, onRequestNavigateToStudentDemographics?: () => void }) {
+export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange, onRequestOpenComponent, onRequestNavigateToStudentDemographics, deNavTarget, onDeNavTargetConsumed }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void, onRequestOpenComponent?: (nodeId: string) => void, onRequestNavigateToStudentDemographics?: () => void, deNavTarget?: import("./designed-experience-card-content").DESubView | null, onDeNavTargetConsumed?: () => void }) {
   const [description, setDescription] = useState("");
   const [keyDesignElements, setKeyDesignElements] = useState<KeyDesignElements>({ aims: [], practices: [], supports: [] });
   const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
@@ -922,6 +961,55 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     if (onOpenSubIdChange) onOpenSubIdChange(id);
     else setLocalOpenSubId(id);
   };
+
+  // Consume deep-link nav targets arriving from the center card's Edit button / row clicks.
+  useEffect(() => {
+    if (!deNavTarget) return;
+    switch (deNavTarget.view) {
+      case "outcomes":
+        setShowOutcomeSummary(true);
+        break;
+      case "outcomeDetail":
+        setSelectedOutcomeNav({ l2: deNavTarget.l2, l3: deNavTarget.l3 ?? null });
+        break;
+      case "leaps":
+        setShowLeapSummary(true);
+        break;
+      case "leapDetail":
+        setSelectedLeapLabel(deNavTarget.label);
+        break;
+      case "portrait":
+        setShowPortraitOfGraduateManage(true);
+        break;
+      case "portraitAttribute":
+        setPogNav({ mode: "detail", attributeId: deNavTarget.attributeId });
+        setShowPortraitOfGraduateManage(true);
+        break;
+      case "community":
+        setShowCommunityEcosystemManage(true);
+        break;
+      case "communityOutcome":
+        setCommunityEcosystemDetailId(deNavTarget.outcomeId);
+        break;
+      case "designElement":
+        openExpertView(deNavTarget.elementId);
+        break;
+      case "adults":
+        setAdultsFocusedSliceKey(null);
+        setShowAdultsView(true);
+        break;
+      case "adultRole":
+        setAdultsFocusedSliceKey(deNavTarget.roleId);
+        setShowAdultsView(true);
+        break;
+      case "adultSubManage":
+        setComponentAdultFocusSubId(deNavTarget.subId);
+        setShowComponentAdultManage(true);
+        break;
+    }
+    onDeNavTargetConsumed?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deNavTarget]);
 
   const componentData = useMergedComponent(nodeId);
   const { data: allComponents } = useQuery(componentQueries.all);
@@ -1101,7 +1189,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     setPortraitOfGraduatePlainText(
       typeof (de as any).portraitOfGraduatePlainText === "string" ? (de as any).portraitOfGraduatePlainText : "",
     );
-    setElementsExpertData((de as any)?.elementsExpertData ?? {});
+    setElementsExpertData(cloneElementsExpertData((de as any)?.elementsExpertData ?? {}));
     setPogReturnToDetailAttrId(null);
     setPogOutcomesFirstDraft({ selectedKeys: [], step: 1 });
     setPogNav({ mode: "hub" });
@@ -1272,7 +1360,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           practices: [...kde.practices],
           supports: [...kde.supports],
         },
-        elementsExpertData: { ...elementsExpertRef.current },
+        elementsExpertData: cloneElementsExpertData(elementsExpertRef.current),
       };
     };
 
@@ -1309,7 +1397,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
           practices: [...kdeRef.current.practices],
           supports: [...kdeRef.current.supports],
         },
-        parentElementsExpertData: { ...elementsExpertRef.current },
+        parentElementsExpertData: cloneElementsExpertData(elementsExpertRef.current),
       };
     }
 
@@ -1326,7 +1414,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         practices: [...kde.practices],
         supports: [...kde.supports],
       });
-      setElementsExpertData({ ...(sub.elementsExpertData ?? {}) });
+      setElementsExpertData(cloneElementsExpertData({ ...(sub.elementsExpertData ?? {}) }));
     }
 
     prevActiveSubIdRef.current = cur;
@@ -1378,6 +1466,12 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         aims: aimsWithResolvedLevels as any,
       };
 
+      const serverSubRow = (deCurrent.subcomponents || []).find((s: any) => s.id === activeSubId);
+      const mergedSubExpert = mergeElementsExpertData(
+        mergeElementsExpertData(serverSubRow?.elementsExpertData as ElementsExpertData | undefined, focus.elementsExpertData as ElementsExpertData | undefined),
+        elementsExpertData,
+      );
+
       const updatedSub: DESubcomponent = {
         ...focus,
         description,
@@ -1385,10 +1479,15 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         practices: keyDesignElementsWithLevels.practices,
         supports: keyDesignElementsWithLevels.supports,
         keyDesignElements: keyDesignElementsWithLevels,
-        elementsExpertData,
+        elementsExpertData: mergedSubExpert,
       };
 
       const newSubs = subcomponents.map((s) => (s.id === activeSubId ? updatedSub : s));
+
+      const parentExpertMerged = mergeElementsExpertData(
+        (deCurrent as any).elementsExpertData as ElementsExpertData | undefined,
+        stash?.parentElementsExpertData,
+      );
 
       const designedExperienceData: DesignedExperienceData = {
         ...deCurrent,
@@ -1400,7 +1499,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
         portraitOfGraduatePlainText: deCurrent.portraitOfGraduatePlainText,
         communityEcosystemOutcomes: deCurrent.communityEcosystemOutcomes,
         communityEcosystemPlainText: deCurrent.communityEcosystemPlainText,
-        elementsExpertData: stash?.parentElementsExpertData ?? deCurrent.elementsExpertData,
+        elementsExpertData: parentExpertMerged,
       };
 
       updateMutation.mutate({ nodeId, data: { designedExperienceData } });
@@ -1438,7 +1537,10 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       subcomponents,
       adultSubcomponents,
       portraitOfGraduate: isOverall ? portraitOfGraduate : (deRef.current as any)?.portraitOfGraduate,
-      elementsExpertData,
+      elementsExpertData: mergeElementsExpertData(
+        (deRef.current as any)?.elementsExpertData as ElementsExpertData | undefined,
+        elementsExpertData,
+      ),
     };
     if (isOverall) {
       designedExperienceData.communityEcosystemOutcomes = communityEcosystemOutcomes;

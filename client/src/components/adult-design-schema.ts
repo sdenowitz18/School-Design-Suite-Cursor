@@ -182,25 +182,21 @@ export function findAdultPrimary(primaryId: string): AdultPrimaryDef | undefined
   return undefined;
 }
 
-/** One detail block per key: `primaryId` or `primaryId::secondaryId`. */
+/**
+ * One detail block per top-level primary role, regardless of which secondaries were
+ * selected. Secondaries remain useful for Q1 role-refinement display but the Q2
+ * "define in more detail" section always operates at the primary level.
+ */
 export function adultSliceKeysFromSelections(
   selections: { primaryId: string; secondaryIds?: string[] }[] | null | undefined,
 ): string[] {
   if (!Array.isArray(selections)) return [];
-  const keys: string[] = [];
+  const seen = new Set<string>();
   for (const sel of selections) {
-    const p = findAdultPrimary(sel.primaryId);
-    if (!p) continue;
-    const secIds = sel.secondaryIds ?? [];
-    if (secIds.length === 0) {
-      keys.push(sel.primaryId);
-    } else {
-      for (const sid of secIds) {
-        keys.push(`${sel.primaryId}::${sid}`);
-      }
-    }
+    if (!findAdultPrimary(sel.primaryId)) continue;
+    seen.add(sel.primaryId);
   }
-  return keys;
+  return Array.from(seen);
 }
 
 /** Heading for a Q2 per-role block. */
@@ -240,7 +236,11 @@ export function adultSelectionIsKey(sel: {
   return !!sel.isKey;
 }
 
-/** One chip per leaf role tag (primary alone, or each secondary) with Key for summaries. */
+/**
+ * One chip per top-level primary role.
+ * Secondary selections are intentionally ignored — all display and detail
+ * is now at the primary level only.
+ */
 export function adultLeafChipsFromSelections(selections: {
   primaryId: string;
   secondaryIds?: string[];
@@ -248,27 +248,18 @@ export function adultLeafChipsFromSelections(selections: {
   secondaryKeys?: Record<string, boolean>;
 }[] | null | undefined): { key: string; label: string; isKey: boolean }[] {
   if (!Array.isArray(selections)) return [];
+  const seen = new Set<string>();
   const chips: { key: string; label: string; isKey: boolean }[] = [];
   for (const sel of selections) {
+    if (seen.has(sel.primaryId)) continue;
     const p = findAdultPrimary(sel.primaryId);
     if (!p) continue;
-    const secIds = sel.secondaryIds ?? [];
-    if (secIds.length === 0) {
-      chips.push({
-        key: sel.primaryId,
-        label: p.label,
-        isKey: !!sel.isKey,
-      });
-    } else {
-      for (const sid of secIds) {
-        const sl = p.secondaries?.find((s) => s.id === sid)?.label ?? sid;
-        chips.push({
-          key: `${sel.primaryId}::${sid}`,
-          label: sl,
-          isKey: !!(sel.secondaryKeys?.[sid]),
-        });
-      }
-    }
+    seen.add(sel.primaryId);
+    chips.push({
+      key: sel.primaryId,
+      label: p.label,
+      isKey: !!sel.isKey,
+    });
   }
   return chips;
 }

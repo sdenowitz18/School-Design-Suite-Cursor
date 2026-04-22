@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { cn } from "@/lib/utils";
 
 export default function OctagonCard({
@@ -9,6 +10,8 @@ export default function OctagonCard({
   bgClassName,
   centerVariant = "text",
   centerText,
+  dataPreviewContent,
+  onOpenDataPreviewFullView,
   leftStat,
   rightStat,
   footerLabel,
@@ -21,8 +24,12 @@ export default function OctagonCard({
   subtitle?: string;
   description?: string;
   bgClassName?: string;
-  centerVariant?: "text" | "pill";
+  centerVariant?: "text" | "pill" | "dataPreview";
   centerText?: string;
+  /** Rendered when centerVariant === "dataPreview". */
+  dataPreviewContent?: React.ReactNode;
+  /** Called when the user clicks the ring border around the data preview window. */
+  onOpenDataPreviewFullView?: () => void;
   leftStat?: { label: string; value: string; className?: string };
   rightStat?: { label: string; value: string; className?: string };
   footerLabel?: string;
@@ -44,7 +51,10 @@ export default function OctagonCard({
     >
       <div
         className={cn(
-          "w-full h-full flex flex-col items-center justify-between p-6 shadow-md transition-colors",
+          "w-full h-full flex flex-col items-center shadow-md transition-colors",
+          centerVariant === "dataPreview"
+            ? "justify-start px-4 pt-2 pb-2 gap-1"
+            : "justify-between p-6",
           bgClassName || "bg-white",
         )}
         style={{
@@ -52,55 +62,103 @@ export default function OctagonCard({
           border: "1px solid rgba(0,0,0,0.2)",
         }}
       >
-        <div className="text-center space-y-1 mt-2">
-          <div className="flex gap-1 justify-center mb-1" aria-hidden="true">
+        {/* ── Title area ── */}
+        <div className={cn(
+          "text-center w-full",
+          centerVariant === "dataPreview" ? "space-y-0 mt-0" : "space-y-1 mt-2",
+        )}>
+          <div className={cn(
+            "flex gap-1 justify-center",
+            centerVariant === "dataPreview" ? "mb-0.5" : "mb-1",
+          )} aria-hidden="true">
             {[...Array(6)].map((_, i) => (
               <div key={i} className="w-1 h-1 rounded-full bg-gray-400/50" />
             ))}
           </div>
-          <div className="font-bold text-gray-900 text-sm leading-tight px-2 line-clamp-2">{title}</div>
-          {subtitle ? (
+          <div className={cn(
+            "font-bold text-gray-900 leading-tight line-clamp-2",
+            centerVariant === "dataPreview" ? "text-xs px-1" : "text-sm px-2",
+          )}>{title}</div>
+          {subtitle && centerVariant !== "dataPreview" ? (
             <div className="text-[10px] text-gray-500 uppercase tracking-wider line-clamp-1">{subtitle}</div>
           ) : null}
         </div>
 
-        <div className="flex-1 w-full flex items-center justify-center">
-          {centerVariant === "pill" ? (
-            <div className="w-[80%] h-[40px] rounded-[50%] bg-blue-900/10 flex items-center justify-center px-3">
-              <span className="text-[9px] text-gray-500 text-center line-clamp-2">
-                {centerText || description || "—"}
-              </span>
-            </div>
-          ) : description ? (
-            <div className="w-[86%] text-[10px] text-gray-600 leading-relaxed line-clamp-4 text-center">
-              {description}
-            </div>
-          ) : (
-            <div className="w-[80%] h-[40px] rounded-[50%] bg-blue-900/10 flex items-center justify-center">
-              <span className="text-[9px] text-gray-400">No description</span>
-            </div>
-          )}
-        </div>
+        {/* ── Center area ── */}
+        {centerVariant === "dataPreview" ? (
+          <div
+            data-preview-ring
+            onClick={(e) => {
+              // Only fire if NOT coming from inside the interactive preview content
+              if ((e.target as HTMLElement).closest("[data-preview-interactive]")) return;
+              e.stopPropagation();
+              onOpenDataPreviewFullView?.();
+            }}
+            onPointerDown={(e) => {
+              if ((e.target as HTMLElement).closest("[data-preview-interactive]")) return;
+              e.stopPropagation();
+            }}
+            className={cn(
+              "flex-1 w-full overflow-hidden rounded-md bg-white/80 shadow-inner min-h-0",
+              "border-[3px] border-gray-400/50 transition-all",
+              onOpenDataPreviewFullView && "cursor-pointer hover:border-blue-500/60 hover:shadow-md",
+              "pointer-events-auto",
+            )}
+            title={onOpenDataPreviewFullView ? "Click ring to open full view" : undefined}
+          >
+            {dataPreviewContent}
+          </div>
+        ) : (
+          <div className="flex-1 w-full flex items-center justify-center">
+            {centerVariant === "pill" ? (
+              <div className="w-[80%] h-[40px] rounded-[50%] bg-blue-900/10 flex items-center justify-center px-3">
+                <span className="text-[9px] text-gray-500 text-center line-clamp-2">
+                  {centerText || description || "—"}
+                </span>
+              </div>
+            ) : description ? (
+              <div className="w-[86%] text-[10px] text-gray-600 leading-relaxed line-clamp-4 text-center">
+                {description}
+              </div>
+            ) : (
+              <div className="w-[80%] h-[40px] rounded-[50%] bg-blue-900/10 flex items-center justify-center">
+                <span className="text-[9px] text-gray-400">No description</span>
+              </div>
+            )}
+          </div>
+        )}
 
-        <div className="flex w-full justify-between items-end gap-2 mb-2">
+        {/* ── Bottom stats ── */}
+        <div className={cn(
+          "flex w-full justify-between items-end gap-1",
+          centerVariant === "dataPreview" ? "mt-0" : "mb-2",
+        )}>
           {showStats ? (
             <>
-              <div className="flex flex-col items-center flex-1">
-                <span className="text-[9px] text-blue-600 font-medium mb-0.5">{leftStat.label}</span>
+              <div className="flex flex-col items-center flex-1 min-w-0">
+                <span className={cn(
+                  "font-medium mb-0.5 truncate w-full text-center",
+                  centerVariant === "dataPreview" ? "text-[7px] text-blue-600" : "text-[9px] text-blue-600",
+                )}>{leftStat.label}</span>
                 <div
                   className={cn(
-                    "font-bold px-2 py-0.5 rounded text-sm w-full text-center shadow-sm border",
+                    "font-bold rounded w-full text-center shadow-sm border",
+                    centerVariant === "dataPreview" ? "text-[10px] px-1 py-px" : "text-sm px-2 py-0.5",
                     leftStat.className || "bg-yellow-300 text-yellow-900 border-yellow-400/30",
                   )}
                 >
                   {leftStat.value}
                 </div>
               </div>
-              <div className="flex flex-col items-center flex-1">
-                <span className="text-[9px] text-blue-600 font-medium mb-0.5">{rightStat.label}</span>
+              <div className="flex flex-col items-center flex-1 min-w-0">
+                <span className={cn(
+                  "font-medium mb-0.5 truncate w-full text-center",
+                  centerVariant === "dataPreview" ? "text-[7px] text-blue-600" : "text-[9px] text-blue-600",
+                )}>{rightStat.label}</span>
                 <div
                   className={cn(
-                    "font-bold px-2 py-0.5 rounded text-sm w-full text-center shadow-sm border",
+                    "font-bold rounded w-full text-center shadow-sm border",
+                    centerVariant === "dataPreview" ? "text-[10px] px-1 py-px" : "text-sm px-2 py-0.5",
                     rightStat.className || "bg-red-300 text-red-900 border-red-400/30",
                   )}
                 >
@@ -118,7 +176,9 @@ export default function OctagonCard({
           )}
         </div>
 
-        <div className="text-[9px] text-gray-500 font-medium -mt-1">{subtitle || ""}</div>
+        {centerVariant !== "dataPreview" && (
+          <div className="text-[9px] text-gray-500 font-medium -mt-1">{subtitle || ""}</div>
+        )}
       </div>
 
       <div

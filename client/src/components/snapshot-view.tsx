@@ -39,14 +39,6 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -100,43 +92,6 @@ const CompactChip = ({ label, onRemove }: { label: string; onRemove?: () => void
   </Badge>
 );
 
-const OUTCOME_SCHEMA = {
-  "STEM": {
-    "Mathematics": ["Algebra", "Geometry", "Calculus"],
-    "Natural sciences": ["Physics", "Chemistry", "Biology"],
-    "Digital & AI literacies": ["Computer science", "AI literacy", "Robotics"]
-  },
-  "Humanities": {
-    "English language arts": ["Reading", "Writing", "Literature"],
-    "Social studies & civics": ["US history", "World history", "Civics"],
-    "World languages": ["Mandarin", "French"],
-    "Performing & visual arts": ["Visual art", "Music", "Drama"]
-  },
-  "Cross-cutting": {
-    "Higher-order thinking skills": ["Critical thinking", "Systems thinking", "Creativity"],
-    "Learning strategies & habits": ["Goal-setting", "Note-taking", "Etc."],
-    "Collaboration & communication skills": ["Collaboration", "Communication", "Leadership & followership"]
-  },
-  "Well-being": {
-    "Social emotional capacities": ["Identity & purpose", "Mindsets & self-regulation", "Relationship skills"],
-    "Physical capacities": ["Athletics", "Healthy habits", "Etc."],
-    "Mental & physical health": ["Emotional well-being & mood", "Stress & resilience", "Anxiety/depressive symptoms"],
-    "Behavior, attendance, & engagement": ["Attendance", "Positive & negative behavioral incidents", "Participation"]
-  },
-  "Wayfinding": {
-    "Practical, professional, & continuing education capacities": ["Practical knowledge & life skills", "Professional knowledge & skills", "Continuing-education / post-secondary knowledge & exposure"],
-    "Postsecondary assets": ["Industry-recognized credentials", "Early college coursework", "Postsecondary plan"],
-    "Transitional milestones": ["Promotion / graduation", "Postsecondary enrollment", "Successful career transition"]
-  }
-};
-
-const OutcomePill = ({ label, onRemove }: { label: string; onRemove: () => void }) => (
-  <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-medium" data-testid={`pill-outcome-${label}`}>
-    <Target className="w-3 h-3" />
-    {label}
-    <X className="w-3 h-3 ml-1 opacity-50 cursor-pointer hover:opacity-100 hover:text-emerald-900" onClick={onRemove} />
-  </div>
-);
 
 interface SnapshotViewProps {
   nodeId?: string;
@@ -162,7 +117,6 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
   const [studentGroups, setStudentGroups] = useState<string[]>([]);
   const [keyExperiences, setKeyExperiences] = useState<KeyExperience[]>([]);
   const [expandedExperience, setExpandedExperience] = useState<string | null>(null);
-  const [primaryOutcomes, setPrimaryOutcomes] = useState<string[]>([]);
   const [embeddedComponents, setEmbeddedComponents] = useState<string[]>([]);
   const [hostCourses, setHostCourses] = useState<string[]>([]);
 
@@ -247,8 +201,6 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
           id: ke.id || generateKeId(),
         })));
       }
-      // One-way sync: Snapshot Primary Outcomes are the source of truth.
-      setPrimaryOutcomes(s.primaryOutcomes || []);
       setEmbeddedComponents(s.embeddedComponents || []);
       setHostCourses(s.hostCourses || []);
       setSelectionGating(s.selectionGating || "universal");
@@ -268,8 +220,42 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
     }
   }, [componentData]);
 
-  const normLabel = (s: string) => s.trim().toLowerCase();
-  const generateAimId = () => `snap_${Math.random().toString(36).slice(2, 10)}`;
+  // One-time migration: remove stale outcome aims that were injected by the old
+  // snapshot → DE sync (identifiable by their "snap_" id prefix), clear any residual
+  // isPrimary flags, and drop the now-deprecated primaryOutcomes field from snapshot data.
+  useEffect(() => {
+    if (!nodeId || !componentData) return;
+    const s: any = componentData.snapshotData || {};
+    const de: any = componentData.designedExperienceData || {};
+    const kde = de.keyDesignElements || {};
+    const aims: any[] = Array.isArray(kde.aims) ? kde.aims : [];
+
+    const oldPrimary: unknown[] = Array.isArray(s.primaryOutcomes) ? s.primaryOutcomes : [];
+    const hasSnapAims = aims.some((a: any) => typeof a.id === "string" && a.id.startsWith("snap_"));
+    const hasStalePrimary = aims.some((a: any) => a.type === "outcome" && a.isPrimary === true);
+
+    if (oldPrimary.length === 0 && !hasSnapAims && !hasStalePrimary) return; // nothing to migrate
+
+    // Remove aims created by the old sync (snap_ id prefix) and clear any stale isPrimary.
+    const cleanedAims = aims
+      .filter((a: any) => !(typeof a.id === "string" && a.id.startsWith("snap_")))
+      .map((a: any) => (a.type === "outcome" && a.isPrimary ? { ...a, isPrimary: undefined } : a));
+
+    // Build a clean snapshot without the deprecated field.
+    const { primaryOutcomes: _dropped, ...cleanedSnapshot } = s as any;
+
+    updateMutation.mutate({
+      nodeId,
+      data: {
+        snapshotData: cleanedSnapshot,
+        designedExperienceData: {
+          ...de,
+          keyDesignElements: { ...kde, aims: cleanedAims },
+        },
+      },
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId]); // intentionally only on mount / nodeId change — one-shot migration
 
   const saveSnapshot = useCallback(() => {
     if (!nodeId) return;
@@ -284,7 +270,6 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
       variants,
       studentGroups,
       keyExperiences,
-      primaryOutcomes,
       embeddedComponents,
       hostCourses,
       selectionGating,
@@ -305,48 +290,8 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
       componentType: (componentData as any)?.snapshotData?.componentType,
     };
 
-    // Keep Snapshot outcomes consistent with Designed Experience outcome aims.
-    const de: any = componentData?.designedExperienceData || {};
-    const kde = de.keyDesignElements || { aims: [], practices: [], supports: [] };
-    const aims: any[] = kde.aims || [];
-    const otherAims = aims.filter((a: any) => a.type !== "outcome");
-    const existingOutcomeAims = aims.filter((a: any) => a.type === "outcome");
-
-    const desiredOutcomeLabels = Array.from(
-      new Set((primaryOutcomes || []).map((x) => String(x || "").trim()).filter(Boolean)),
-    );
-    const desiredOutcomeKeys = new Set(desiredOutcomeLabels.map((l) => normLabel(l)));
-    // One-way, additive sync:
-    // - Ensure all Primary Outcomes exist as outcome aims in Designed Experience
-    // - Do NOT delete outcome aims that were added in Designed Experience
-    const nextOutcomeAims = existingOutcomeAims.map((a: any) => {
-      const key = normLabel(String(a?.label || ""));
-      const shouldBePrimary = desiredOutcomeKeys.has(key);
-      return {
-        ...a,
-        // Only outcomes selected as Primary in Snapshot are starred in Designed Experience.
-        isPrimary: shouldBePrimary ? true : undefined,
-        // Ensure newly-created Snapshot-driven aims get a reasonable default priority.
-        level: a?.level ?? "Medium",
-      };
-    });
-    for (const label of desiredOutcomeLabels) {
-      const exists = nextOutcomeAims.some((a: any) => normLabel(a.label) === normLabel(label));
-      if (!exists) {
-        nextOutcomeAims.push({ id: generateAimId(), type: "outcome", label, isPrimary: true, level: "Medium" });
-      }
-    }
-
-    const designedExperienceData = {
-      ...de,
-      keyDesignElements: {
-        ...kde,
-        aims: [...otherAims, ...nextOutcomeAims],
-      },
-    };
-
-    updateMutation.mutate({ nodeId, data: { snapshotData, designedExperienceData } });
-  }, [nodeId, description, level, isAP, formatOfTimeUse, specificType, participationModel, subcomponents, variants, studentGroups, keyExperiences, primaryOutcomes, embeddedComponents, hostCourses, selectionGating, gatingSpecifics, amountStudents, amountPercentage, amountContext, amountClassrooms, compositionType, compFRL, compIEP, compELL, compFemale, sequenceDescription, curriculumDescription, assessmentDescription, componentData]);
+    updateMutation.mutate({ nodeId, data: { snapshotData } });
+  }, [nodeId, description, level, isAP, formatOfTimeUse, specificType, participationModel, subcomponents, variants, studentGroups, keyExperiences, embeddedComponents, hostCourses, selectionGating, gatingSpecifics, amountStudents, amountPercentage, amountContext, amountClassrooms, compositionType, compFRL, compIEP, compELL, compFemale, sequenceDescription, curriculumDescription, assessmentDescription, componentData]);
 
   useEffect(() => {
     if (!nodeId || !componentData) return;
@@ -354,7 +299,7 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
       saveSnapshot();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [description, level, isAP, formatOfTimeUse, specificType, participationModel, subcomponents, variants, studentGroups, keyExperiences, primaryOutcomes, embeddedComponents, hostCourses, selectionGating, gatingSpecifics, amountStudents, amountPercentage, amountContext, amountClassrooms, compositionType, compFRL, compIEP, compELL, compFemale, sequenceDescription, curriculumDescription, assessmentDescription]);
+  }, [description, level, isAP, formatOfTimeUse, specificType, participationModel, subcomponents, variants, studentGroups, keyExperiences, embeddedComponents, hostCourses, selectionGating, gatingSpecifics, amountStudents, amountPercentage, amountContext, amountClassrooms, compositionType, compFRL, compIEP, compELL, compFemale, sequenceDescription, curriculumDescription, assessmentDescription]);
 
   const SCHOOL_AVERAGES = {
      frl: 45,
@@ -371,18 +316,6 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
 
   const removeItem = (list: string[], setList: (l: string[]) => void, itemToRemove: string) => {
     setList(list.filter(item => item !== itemToRemove));
-  };
-
-  const addPrimaryOutcome = (outcome: string) => {
-    const next = String(outcome || "").trim();
-    if (!next) return;
-    setPrimaryOutcomes((prev) => (prev.includes(next) ? prev : [...prev, next]));
-  };
-
-  const removePrimaryOutcome = (outcome: string) => {
-    const next = String(outcome || "").trim();
-    if (!next) return;
-    setPrimaryOutcomes((prev) => prev.filter((x) => x !== next));
   };
 
   const templateType = level === "Other" ? "C" : level === "Course" ? "A" : "B";
@@ -560,75 +493,28 @@ export default function SnapshotView({ nodeId, title, color }: SnapshotViewProps
                 </>
               )}
 
-              <Separator orientation="vertical" className="h-4 hidden md:block" />
-              
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mr-1">Outcomes:</span>
-                {primaryOutcomes.map(outcome => (
-                  <OutcomePill 
-                    key={outcome} 
-                    label={outcome} 
-                    onRemove={() => removePrimaryOutcome(outcome)} 
-                  />
-                ))}
-                
-                <Sheet>
-                  <SheetTrigger asChild>
-                     <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 border border-dashed border-gray-300 rounded-full px-2 py-0.5 hover:border-gray-400 transition-colors" data-testid="button-add-outcome">
-                        <Plus className="w-3 h-3" /> Add
-                     </button>
-                  </SheetTrigger>
-                  <SheetContent className="overflow-y-auto">
-                    <SheetHeader>
-                      <SheetTitle>Select Outcomes</SheetTitle>
-                      <SheetDescription>Choose outcomes for this component.</SheetDescription>
-                    </SheetHeader>
-                    <div className="mt-4 space-y-6">
-                      <Input placeholder="Search outcomes..." className="mb-4" data-testid="input-search-outcomes" />
-                      
-                      {Object.entries(OUTCOME_SCHEMA).map(([category, subcategories]) => (
-                        <div key={category} className="space-y-3">
-                          <h4 className="text-sm font-bold text-gray-900 border-b pb-1">{category}</h4>
-                          <div className="space-y-4 pl-2">
-                             {Object.entries(subcategories).map(([subcategory, outcomes]) => (
-                               <div key={subcategory} className="space-y-2">
-                                  <h5 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{subcategory}</h5>
-                                  <div className="grid grid-cols-1 gap-1">
-                                    {(outcomes as string[]).map(outcome => {
-                                      const isSelected = primaryOutcomes.includes(outcome);
-                                      return (
-                                        <div 
-                                          key={outcome} 
-                                          className={cn(
-                                            "flex items-center justify-between p-2 rounded cursor-pointer border transition-colors text-xs",
-                                            isSelected 
-                                              ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
-                                              : "hover:bg-gray-50 border-transparent hover:border-gray-100 text-gray-700"
-                                          )}
-                                          onClick={() => {
-                                            if (isSelected) {
-                                              removePrimaryOutcome(outcome);
-                                            } else {
-                                              addPrimaryOutcome(outcome);
-                                            }
-                                          }}
-                                          data-testid={`outcome-option-${outcome}`}
-                                        >
-                                          <span>{outcome}</span>
-                                          {isSelected ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Plus className="w-3.5 h-3.5 text-gray-300" />}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                               </div>
-                             ))}
-                          </div>
-                        </div>
+              {(() => {
+                const deAims: any[] = (componentData as any)?.designedExperienceData?.keyDesignElements?.aims ?? [];
+                const primaryAims = deAims.filter((a: any) => a.type === "outcome" && a.isPrimary === true);
+                if (primaryAims.length === 0) return null;
+                return (
+                  <>
+                    <Separator orientation="vertical" className="h-4 hidden md:block" />
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mr-1">Outcomes:</span>
+                      {primaryAims.map((a: any) => (
+                        <Badge
+                          key={a.id}
+                          variant="secondary"
+                          className="text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        >
+                          {a.label}
+                        </Badge>
                       ))}
                     </div>
-                  </SheetContent>
-                </Sheet>
-              </div>
+                  </>
+                );
+              })()}
            </div>
          </div>
       </div>

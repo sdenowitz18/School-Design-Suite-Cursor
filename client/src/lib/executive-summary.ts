@@ -60,7 +60,6 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
   const participation = clean(snap.participationModel) || clean(snap.selectionGating) || "—";
   overviewLines.push(`Level: ${level} • Type: ${type} • Participation: ${participation}`);
 
-  const primaryOutcomes = list(snap.primaryOutcomes);
   const subcomponents = list(snap.subcomponents);
   const variants = list(snap.variants);
   const keyExperiences = Array.isArray(snap.keyExperiences)
@@ -69,7 +68,6 @@ export function buildExecutiveSummary(component: any | null | undefined): Execut
         .filter(Boolean)
     : [];
 
-  if (primaryOutcomes.length) overviewLines.push(`Primary outcomes: ${joinTruncated(primaryOutcomes, 6)}`);
   if (subcomponents.length) overviewLines.push(`Subcomponents: ${joinTruncated(subcomponents, 6)}`);
   if (variants.length) overviewLines.push(`Variants: ${joinTruncated(variants, 5)}`);
   if (keyExperiences.length) overviewLines.push(`Key experiences: ${joinTruncated(keyExperiences, 5)}`);
@@ -213,7 +211,6 @@ export function buildExecutiveSummaryText(component: any | null | undefined): st
   const type = clean(snap.componentType) || "—";
   const participation = clean(snap.participationModel) || clean(snap.selectionGating) || "—";
 
-  const primaryOutcomes = list(snap.primaryOutcomes);
   const subcomponents = list(snap.subcomponents);
   const variants = list(snap.variants);
 
@@ -269,7 +266,6 @@ export function buildExecutiveSummaryText(component: any | null | undefined): st
     "Overview",
     `${title} is a ${level !== "—" ? level : ""}${level !== "—" && type !== "—" ? " " : ""}${type !== "—" ? type : "component"} with ${participation !== "—" ? participation : "an unspecified"} participation model.`.replace(/\s+/g, " ").trim(),
     overviewDesc ? overviewDesc : "",
-    primaryOutcomes.length ? `Primary outcomes include ${joinTruncated(primaryOutcomes, 6)}.` : "",
     subcomponents.length ? `It includes ${subcomponents.length} subcomponents (e.g., ${joinTruncated(subcomponents, 4)}).` : "",
     variants.length ? `Variants: ${joinTruncated(variants, 5)}.` : "",
   ]

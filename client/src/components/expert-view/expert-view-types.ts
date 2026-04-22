@@ -58,6 +58,12 @@ export interface BucketDef {
    * share a single selection state.
    */
   syncedBucketId?: string;
+  /**
+   * When true, display A1 items in the center card as "Primary (Secondary1, Secondary2)"
+   * instead of the default which shows secondary labels as separate bullets.
+   * Used for buckets like CI "Broader set of community contributors" and Ops "Hardware / tech devices".
+   */
+  groupedSecondaryDisplay?: boolean;
 }
 
 export type ElementSection = 'practices' | 'tools';

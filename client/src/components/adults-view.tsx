@@ -149,6 +149,7 @@ function AdultSliceSection({
                   value={detail.demographicsA1 ?? emptyA1()}
                   onChange={(v) => onChangeDetail({ demographicsA1: v })}
                   componentType="center"
+                  listMode
                 />
               </div>
             </CollapsibleContent>
@@ -215,6 +216,7 @@ function AdultSliceSection({
                   value={detail.background ?? emptyA1()}
                   onChange={(v) => onChangeDetail({ background: v })}
                   componentType="center"
+                  listMode
                 />
               </div>
             </CollapsibleContent>
@@ -526,6 +528,20 @@ export function AdultsEditor({
     },
     [nodeId, comp, updateMutation, subProfileContext],
   );
+
+  // One-time migration: remove stale secondary-level sliceDetail keys (those containing '::').
+  // These were created by an older schema that stored data at e.g. "educators::educators_for_core_courses".
+  // We now only keep data at the primary level (e.g. "educators").
+  useEffect(() => {
+    const staleKeys = Object.keys(serverProfile.sliceDetail ?? {}).filter((k) => k.includes("::"));
+    if (staleKeys.length === 0) return;
+    const cleaned: Record<string, AdultSliceDetail> = {};
+    for (const [k, v] of Object.entries(serverProfile.sliceDetail ?? {})) {
+      if (!k.includes("::")) cleaned[k] = v;
+    }
+    writeProfile({ sliceDetail: cleaned });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId, subProfileContext?.subId]);
 
   const setQ1PlainText = useCallback(
     (text: string) => writeProfile({ q1PlainText: text }),

@@ -18,7 +18,7 @@ export interface CommunityReviewsSummary {
 
 // ─── Mock data (single school) ─────────────────────────────────────────────────
 
-const MOCK: CommunityReviewsSummary = {
+export const COMMUNITY_REVIEWS_MOCK: CommunityReviewsSummary = {
   averageRating: 4.4,
   reviews: [
     {
@@ -105,7 +105,7 @@ export interface CommunityReviewsViewProps {
 }
 
 export function CommunityReviewsView({ data }: CommunityReviewsViewProps) {
-  const summary = data ?? MOCK;
+  const summary = data ?? COMMUNITY_REVIEWS_MOCK;
   const count = summary.reviews.length;
   const avg = summary.averageRating;
 

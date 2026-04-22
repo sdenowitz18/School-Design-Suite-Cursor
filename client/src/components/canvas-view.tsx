@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -7,6 +7,14 @@ import { Bot, Library, X } from "lucide-react";
 import { LearnerModuleLibraryProvider, useLearnerModuleLibrary } from "@/contexts/learner-module-library-context";
 import LearnerModuleLibraryStrip from "@/components/learner-module-library-strip";
 import { LML_STRIP_HEIGHT_CLAMP } from "@/lib/learner-module-library-layout";
+import {
+  DesignItemDropModal,
+  type DesignItemDragPayload,
+  type DropConfirmOpts,
+  DESIGN_ITEM_DRAG_TYPE,
+  decodeDesignItemPayload,
+  type SubcomponentOption,
+} from "./design-item-drop-modal";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -23,18 +31,31 @@ import {
 import ComponentWorkingPanel from "./component-working-panel";
 import ComponentWorkingSpaceOverlay from "./component-working-space-overlay";
 import OctagonCard from "./octagon-card";
+import {
+  RingDataPreviewWindow,
+  type DataWindowKey,
+} from "./ring-data-preview-window";
+import { RingFullView, type RingNode } from "./ring-full-view";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
+import {
+  JourneyOverviewCardContent,
+  type JourneyOverviewCardRoute,
+  type JourneyOverviewPreview,
+} from "./journey-overview-card-content";
+import {
+  DesignedExperienceCardContent,
+  EMPTY_DESIGNED_EXPERIENCE_PREVIEW,
+  type DesignedExperienceCardRoute,
+  type DesignedExperiencePreview,
+  type HighlightProps,
+} from "./designed-experience-card-content";
+import { buildDesignedExperiencePreview } from "@/lib/designed-experience-preview";
 import { shouldIgnoreOutsideInteraction } from "@/lib/learner-module-library-dismiss-guard";
-
-type ContextOverviewL3Section =
-  | "contextOverview.communityOverview"
-  | "contextOverview.policyConsiderations"
-  | "contextOverview.historyOfChangeEfforts"
-  | "contextOverview.otherContext";
-
-type StakeholderVerifySection =
-  | "stakeholder.students"
-  | "stakeholder.administrationDistrict"
-  | "stakeholder.administrationSchool";
+import { CenterFullView, type CenterFullViewSlot } from "./center-full-view";
 
 interface CanvasNode {
   id: string;
@@ -44,24 +65,44 @@ interface CanvasNode {
   x: number;
   y: number;
   color: string;
-  overviewContextPreview?: {
-    schoolName?: string;
-    studentCount?: string;
-    mission?: string;
-    contextOverviewSectionStatus?: Partial<
-      Record<ContextOverviewL3Section, { hasText: boolean; verified: boolean }>
-    >;
-    stakeholderSectionStatus?: Partial<
-      Record<StakeholderVerifySection, { hasText: boolean; verified: boolean }>
-    >;
-  };
+  overviewContextPreview?: JourneyOverviewPreview;
+  designedExperiencePreview?: DesignedExperiencePreview;
   stats: {
-    left: number;
-    right: number;
+    left: string;
+    right: string;
     leftLabel: string;
     rightLabel: string;
   }
 }
+
+const EMPTY_STAKEHOLDER = { populationSize: "", additionalContext: "", keyRepresentatives: "" };
+const EMPTY_JOURNEY_PREVIEW: JourneyOverviewPreview = {
+  schoolName: "",
+  studentCount: "",
+  mission: "",
+  contextOverview: {
+    communityOverview: { text: "", verified: false },
+    policyConsiderations: { text: "", verified: false },
+    historyOfChangeEfforts: { text: "", verified: false },
+    otherContext: { text: "", verified: false },
+  },
+  studentDemographics: { currentAsOf: null, verified: false, hasData: false },
+  publicAcademic: {
+    collegePrep: { currentAsOf: null, verified: false, hasData: false },
+    testScores: { currentAsOf: null, verified: false, hasData: false },
+    raceEthnicity: { currentAsOf: null, verified: false, hasData: false },
+    lowIncomeStudents: { currentAsOf: null, verified: false, hasData: false },
+    studentsWithDisabilities: { currentAsOf: null, verified: false, hasData: false },
+  },
+  stakeholderMap: {
+    students: { ...EMPTY_STAKEHOLDER, verified: false },
+    families: { ...EMPTY_STAKEHOLDER },
+    educatorsStaff: { ...EMPTY_STAKEHOLDER },
+    administrationDistrict: { ...EMPTY_STAKEHOLDER, verified: false },
+    administrationSchool: { ...EMPTY_STAKEHOLDER, verified: false },
+    otherCommunityLeaders: { ...EMPTY_STAKEHOLDER },
+  },
+};
 
 /** Center school node when the API is still loading, failed, or returned no rows yet (before seed+refetch). */
 const SHELL_OVERALL_CANVAS_NODE: CanvasNode = {
@@ -72,58 +113,101 @@ const SHELL_OVERALL_CANVAS_NODE: CanvasNode = {
   x: 600,
   y: 300,
   color: "bg-white",
-  stats: { left: 0, right: 0, leftLabel: "Experiences", rightLabel: "Outcomes" },
+  stats: { left: "—", right: "—", leftLabel: "Learning & Adv.", rightLabel: "Wellbeing" },
 };
 
-function nonEmptyStr(v: unknown): boolean {
-  return String(v ?? "").trim().length > 0;
+function chartPreview(data: any): { currentAsOf: string | null; verified: boolean; hasData: boolean } {
+  if (!data || typeof data !== "object") {
+    return { currentAsOf: null, verified: false, hasData: false };
+  }
+  const currentAsOf = typeof data.currentAsOf === "string" && data.currentAsOf.trim() ? data.currentAsOf : null;
+  const verified = !!data?.verification?.current?.verified;
+  return { currentAsOf, verified, hasData: true };
 }
 
-export function componentToCanvasNode(comp: any): CanvasNode {
+function stakeholderPreview(item: any, tracksVerification: boolean): {
+  populationSize: string;
+  additionalContext: string;
+  keyRepresentatives: string;
+  verified?: boolean;
+} {
+  const populationSize = String(item?.populationSize || "");
+  const additionalContext = String(item?.additionalContext || "");
+  const keyRepresentatives = String(item?.keyRepresentatives || "");
+  if (!tracksVerification) {
+    return { populationSize, additionalContext, keyRepresentatives };
+  }
+  return { populationSize, additionalContext, keyRepresentatives, verified: !!item?.verified };
+}
+
+export function componentToCanvasNode(comp: any, allComponents?: any[]): CanvasNode {
   const snap = comp.snapshotData || {};
   const ocd: any = (snap as any).overviewContextData || {};
   const studentCount = ocd?.studentCount ?? ocd?.students ?? undefined;
   const mission = ocd?.mission ?? "";
   const cov = ocd?.contextOverview || {};
   const covVer = cov.verification || {};
-  const contextOverviewSectionStatus: Partial<
-    Record<ContextOverviewL3Section, { hasText: boolean; verified: boolean }>
-  > = {
-    "contextOverview.communityOverview": {
-      hasText: nonEmptyStr(cov.communityOverviewText),
-      verified: !!covVer.communityOverview?.verified,
-    },
-    "contextOverview.policyConsiderations": {
-      hasText: nonEmptyStr(cov.policyConsiderationsText),
-      verified: !!covVer.policyConsiderations?.verified,
-    },
-    "contextOverview.historyOfChangeEfforts": {
-      hasText: nonEmptyStr(cov.historyOfChangeText),
-      verified: !!covVer.historyOfChange?.verified,
-    },
-    "contextOverview.otherContext": {
-      hasText: nonEmptyStr(cov.otherContextText),
-      verified: !!covVer.otherContext?.verified,
-    },
-  };
   const sm = ocd?.stakeholderMap || {};
-  function stakeholderRowStatus(key: "students" | "administrationDistrict" | "administrationSchool") {
-    const item = sm[key] || {};
-    return {
-      hasText:
-        nonEmptyStr(item.populationSize) ||
-        nonEmptyStr(item.keyRepresentatives) ||
-        nonEmptyStr(item.additionalContext),
-      verified: !!item.verified,
-    };
-  }
-  const stakeholderSectionStatus: Partial<
-    Record<StakeholderVerifySection, { hasText: boolean; verified: boolean }>
-  > = {
-    "stakeholder.students": stakeholderRowStatus("students"),
-    "stakeholder.administrationDistrict": stakeholderRowStatus("administrationDistrict"),
-    "stakeholder.administrationSchool": stakeholderRowStatus("administrationSchool"),
-  };
+  const sd = ocd?.studentDemographics;
+
+  const overviewContextPreview: JourneyOverviewPreview | undefined =
+    comp.nodeId === "overall"
+      ? {
+          schoolName: String(ocd?.schoolName || comp.title || ""),
+          studentCount: studentCount !== undefined && studentCount !== null ? String(studentCount) : "",
+          mission: String(mission || ""),
+          contextOverview: {
+            communityOverview: {
+              text: String(cov.communityOverviewText || ""),
+              verified: !!covVer.communityOverview?.verified,
+            },
+            policyConsiderations: {
+              text: String(cov.policyConsiderationsText || ""),
+              verified: !!covVer.policyConsiderations?.verified,
+            },
+            historyOfChangeEfforts: {
+              text: String(cov.historyOfChangeText || ""),
+              verified: !!covVer.historyOfChange?.verified,
+            },
+            otherContext: {
+              text: String(cov.otherContextText || ""),
+              verified: !!covVer.otherContext?.verified,
+            },
+          },
+          studentDemographics: {
+            currentAsOf: typeof sd?.currentAsOf === "string" && sd.currentAsOf.trim() ? sd.currentAsOf : null,
+            verified: !!sd?.verification?.current?.verified,
+            hasData: !!sd,
+          },
+          publicAcademic: {
+            collegePrep: chartPreview(ocd?.collegePrep),
+            testScores: chartPreview(ocd?.testScores),
+            raceEthnicity: chartPreview(ocd?.raceEthnicity),
+            lowIncomeStudents: chartPreview(ocd?.lowIncomeStudents),
+            studentsWithDisabilities: chartPreview(ocd?.studentsWithDisabilities),
+          },
+          stakeholderMap: {
+            students: stakeholderPreview(sm.students, true),
+            families: stakeholderPreview(sm.families, false),
+            educatorsStaff: stakeholderPreview(sm.educatorsStaff, false),
+            administrationDistrict: stakeholderPreview(sm.administrationDistrict, true),
+            administrationSchool: stakeholderPreview(sm.administrationSchool, true),
+            otherCommunityLeaders: stakeholderPreview(sm.otherCommunityLeaders, false),
+          },
+        }
+      : undefined;
+
+  const designedExperiencePreview: DesignedExperiencePreview | undefined =
+    comp.nodeId === "overall" && Array.isArray(allComponents)
+      ? buildDesignedExperiencePreview(allComponents, {
+          studentDemographics: {
+            currentAsOf: typeof sd?.currentAsOf === "string" && sd.currentAsOf.trim() ? sd.currentAsOf : null,
+            verified: !!sd?.verification?.current?.verified,
+            hasData: !!sd,
+          },
+        })
+      : undefined;
+
   return {
     id: comp.id,
     nodeId: comp.nodeId,
@@ -132,22 +216,21 @@ export function componentToCanvasNode(comp: any): CanvasNode {
     x: comp.canvasX,
     y: comp.canvasY,
     color: comp.color,
-    overviewContextPreview:
-      comp.nodeId === "overall"
-        ? {
-            schoolName: String(ocd?.schoolName || comp.title || ""),
-            studentCount: studentCount !== undefined && studentCount !== null ? String(studentCount) : "",
-            mission: String(mission || ""),
-            contextOverviewSectionStatus,
-            stakeholderSectionStatus,
-          }
-        : undefined,
-    stats: {
-      left: (snap.subcomponents || []).length,
-      right: (snap.primaryOutcomes || []).length,
-      leftLabel: "Experiences",
-      rightLabel: "Outcomes",
-    },
+    overviewContextPreview,
+    designedExperiencePreview,
+    stats: (() => {
+      const hd: any = (comp as any).healthData || {};
+      const laRaw = hd.learningAdvancementOutcomeScoreData?.finalOutcomeScore ?? null;
+      const wcRaw = hd.wellbeingConductOutcomeScoreData?.finalOutcomeScore ?? null;
+      const laScore = typeof laRaw === "number" ? Math.round(laRaw) : null;
+      const wcScore = typeof wcRaw === "number" ? Math.round(wcRaw) : null;
+      return {
+        left: laScore !== null ? String(laScore) : "—",
+        right: wcScore !== null ? String(wcScore) : "—",
+        leftLabel: "Learning & Adv.",
+        rightLabel: "Wellbeing",
+      };
+    })(),
   };
 }
 
@@ -177,7 +260,7 @@ type OverallNavTarget =
         | "stakeholder.otherCommunityLeaders";
     };
 
-type OverallCardRoute = OverallNavTarget;
+type OverallCardRoute = JourneyOverviewCardRoute;
 
 /** Matches `transform scale-90` on the canvas stage (tailwind scale-90 = 0.9). */
 const CANVAS_STAGE_SCALE = 0.9;
@@ -187,18 +270,36 @@ const DATA_BLUEPRINT_NODE = "data-blueprint-node";
 
 function DraggableRingOctagon({
   node,
+  rawComp,
   canvasStageScale,
-  onOpenPanel,
+  onOpenFullView,
+  onOpenWorkingPanel,
+  onOpenDataPreviewFullView,
   onCommitCanvasPosition,
   onDeleteNode,
+  isHighlighted = false,
+  selectedDataWindow,
+  onDataWindowChange,
+  onDesignItemDrop,
 }: {
   node: CanvasNode;
+  rawComp?: any;
   canvasStageScale: number;
-  onOpenPanel: () => void;
+  /** Single click (no drag): opens the split-screen full view. */
+  onOpenFullView: () => void;
+  /** Double click: opens the working panel sheet. */
+  onOpenWorkingPanel: () => void;
+  /** Click on the ring border of the data preview window. */
+  onOpenDataPreviewFullView: (w: DataWindowKey) => void;
   onCommitCanvasPosition: (nodeId: string, x: number, y: number) => void;
   onDeleteNode: (nodeId: string) => void;
+  isHighlighted?: boolean;
+  selectedDataWindow: DataWindowKey;
+  onDataWindowChange: (w: DataWindowKey) => void;
+  onDesignItemDrop?: (payload: DesignItemDragPayload) => void;
 }) {
   const [draggingPos, setDraggingPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDesignDropTarget, setIsDesignDropTarget] = useState(false);
   const sessionRef = useRef<{
     pointerId: number;
     originX: number;
@@ -207,6 +308,7 @@ function DraggableRingOctagon({
     startClientY: number;
     moved: boolean;
   } | null>(null);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const displayX = draggingPos?.x ?? node.x;
   const displayY = draggingPos?.y ?? node.y;
@@ -229,7 +331,12 @@ function DraggableRingOctagon({
     if (moved) {
       onCommitCanvasPosition(node.nodeId, nx, ny);
     } else {
-      onOpenPanel();
+      // Delay single-click action; cancel if a double-click fires within 280ms.
+      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = setTimeout(() => {
+        clickTimerRef.current = null;
+        onOpenFullView();
+      }, 280);
     }
   };
 
@@ -244,6 +351,7 @@ function DraggableRingOctagon({
       data-testid={`node-${node.nodeId}`}
       onPointerDown={(e) => {
         if ((e.target as HTMLElement).closest("[data-octagon-delete]")) return;
+        if ((e.target as HTMLElement).closest("[data-preview-interactive]")) return;
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         sessionRef.current = {
           pointerId: e.pointerId,
@@ -277,6 +385,42 @@ function DraggableRingOctagon({
         sessionRef.current = null;
         setDraggingPos(null);
       }}
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest("[data-octagon-delete]")) return;
+        if ((e.target as HTMLElement).closest("[data-preview-interactive]")) return;
+        // Cancel the pending single-click timer and open the working panel instead.
+        if (clickTimerRef.current) {
+          clearTimeout(clickTimerRef.current);
+          clickTimerRef.current = null;
+        }
+        onOpenWorkingPanel();
+      }}
+      onDragEnter={(e) => {
+        if (!e.dataTransfer.types.includes(DESIGN_ITEM_DRAG_TYPE)) return;
+        e.preventDefault();
+        setIsDesignDropTarget(true);
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(DESIGN_ITEM_DRAG_TYPE)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setIsDesignDropTarget(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+          setIsDesignDropTarget(false);
+        }
+      }}
+      onDrop={(e) => {
+        setIsDesignDropTarget(false);
+        const raw = e.dataTransfer.getData(DESIGN_ITEM_DRAG_TYPE);
+        if (!raw) return;
+        const payload = decodeDesignItemPayload(raw);
+        if (!payload || !onDesignItemDrop) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onDesignItemDrop(payload);
+      }}
     >
       <button
         type="button"
@@ -297,14 +441,49 @@ function DraggableRingOctagon({
       >
         <X className="h-3.5 w-3.5" />
       </button>
+      {isHighlighted && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            inset: -6,
+            clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)",
+            backgroundColor: "#3b82f6",
+          }}
+          aria-hidden="true"
+        />
+      )}
+      {isDesignDropTarget && (
+        <div
+          className="absolute pointer-events-none z-30"
+          style={{
+            inset: -6,
+            clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)",
+            backgroundColor: "rgba(16,185,129,0.35)",
+          }}
+          aria-hidden="true"
+        />
+      )}
       <OctagonCard
         title={node.title}
         subtitle={node.subtitle}
-        centerVariant="pill"
-        centerText={node.stats.left > 0 ? `${node.stats.left} subcomponents` : "No subcomponents"}
+        centerVariant="dataPreview"
+        dataPreviewContent={
+          rawComp ? (
+            <RingDataPreviewWindow
+              comp={rawComp}
+              selectedWindow={selectedDataWindow}
+              onWindowChange={onDataWindowChange}
+            />
+          ) : undefined
+        }
+        onOpenDataPreviewFullView={
+          rawComp
+            ? () => onOpenDataPreviewFullView(selectedDataWindow)
+            : undefined
+        }
         bgClassName={node.color}
-        leftStat={{ label: node.stats.leftLabel, value: String(node.stats.left) }}
-        rightStat={{ label: node.stats.rightLabel, value: String(node.stats.right) }}
+        leftStat={{ label: node.stats.leftLabel, value: node.stats.left }}
+        rightStat={{ label: node.stats.rightLabel, value: node.stats.right }}
         className="pointer-events-none"
       />
     </motion.div>
@@ -313,39 +492,67 @@ function DraggableRingOctagon({
 
 const OctagonNode = ({
   node,
+  rawComp,
   onClick,
+  onOpenFullView,
+  onOpenDataPreviewFullView,
   overallCenterMode,
   onSetOverallCenterMode,
   onNavigateOverall,
   onOpenOverallTab,
+  onSetDeNavTarget,
+  onOpenRingComponent,
   overallCardRoute,
   onSetOverallCardRoute,
+  designedCardRoute,
+  onSetDesignedCardRoute,
+  ringHighlightSourceKey,
+  onPinRingHighlight,
+  isHighlighted = false,
   persistLayout = false,
   canvasStageScale = CANVAS_STAGE_SCALE,
   onCommitCanvasPosition,
   onDeleteNode,
+  selectedDataWindow,
+  onDataWindowChange,
+  onDesignItemDrop,
+  onOpenCenterFullView,
 }: {
   node: CanvasNode;
+  rawComp?: any;
   onClick: () => void;
+  /** Single-click → open split-screen full view. */
+  onOpenFullView?: (nodeId: string) => void;
+  /** Ring-border click → open enlarged data preview window. */
+  onOpenDataPreviewFullView?: (nodeId: string, w: DataWindowKey) => void;
   overallCenterMode: OverallCenterMode;
   onSetOverallCenterMode: (mode: OverallCenterMode) => void;
   onNavigateOverall: (target: OverallNavTarget) => void;
   onOpenOverallTab: (tab: "overview-and-context" | "designed-experience" | "status-and-health") => void;
+  onSetDeNavTarget?: (target: import("./designed-experience-card-content").DESubView) => void;
+  onOpenRingComponent: (nodeId: string) => void;
   overallCardRoute: OverallCardRoute;
   onSetOverallCardRoute: (route: OverallCardRoute) => void;
+  designedCardRoute: DesignedExperienceCardRoute;
+  onSetDesignedCardRoute: (route: DesignedExperienceCardRoute) => void;
+  ringHighlightSourceKey: string | null;
+  onPinRingHighlight: (sourceKey: string, nodeIds: string[]) => void;
+  isHighlighted?: boolean;
   persistLayout?: boolean;
   canvasStageScale?: number;
   onCommitCanvasPosition?: (nodeId: string, x: number, y: number) => void;
   onDeleteNode?: (nodeId: string) => void;
+  selectedDataWindow?: DataWindowKey;
+  onDataWindowChange?: (w: DataWindowKey) => void;
+  onDesignItemDrop?: (payload: DesignItemDragPayload) => void;
+  /** Open center full view with the given slot (designed or overview). */
+  onOpenCenterFullView?: (slot: CenterFullViewSlot) => void;
 }) => {
   const isOverall = node.nodeId === "overall";
 
   if (isOverall) {
      const mode = overallCenterMode;
-     const preview = node.overviewContextPreview || {};
-     const missionSnippet = (preview.mission || "").trim();
-     const missionShort =
-       missionSnippet.length > 70 ? `${missionSnippet.slice(0, 70).trim()}…` : missionSnippet;
+     const preview = node.overviewContextPreview ?? EMPTY_JOURNEY_PREVIEW;
 
      const modeStyleFor = (m: OverallCenterMode) =>
        m === "overview"
@@ -359,39 +566,6 @@ const OctagonNode = ({
 
      const route = overallCardRoute || { level: "L1" };
      const setRoute = onSetOverallCardRoute;
-
-     const titleForRoute = () => {
-       if (route.level === "L1") return "Journey & Overview";
-       if (route.level === "L2") {
-         return route.section === "mission"
-           ? "Mission"
-           : route.section === "contextOverview"
-             ? "Context & Overview"
-             : route.section === "enrollment"
-               ? "Enrollment & Composition"
-               : route.section === "publicAcademic"
-                 ? "Public Academic Profile"
-                 : route.section === "communityReviews"
-                   ? "Community Reviews"
-                   : "Stakeholder Map";
-       }
-       const s = route.section;
-       if (s.startsWith("contextOverview.")) return "Context & Overview";
-       if (s.startsWith("enrollment.")) return "Enrollment & Composition";
-       if (s.startsWith("publicAcademic.")) return "Public Academic Profile";
-      if (s.startsWith("stakeholder.")) return "Stakeholder Map";
-      return "Journey & Overview";
-    };
-
-     const showBack = route.level !== "L1";
-
-     const drillToL2 = (section: OverallNavTarget extends any ? any : never) => {
-       setRoute({ level: "L2", section } as any);
-     };
-
-     const drillToL3 = (section: any) => {
-       setRoute({ level: "L3", section } as any);
-     };
 
      return (
         <div
@@ -458,44 +632,47 @@ const OctagonNode = ({
                 )}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSetOverallCenterMode("overview");
+                  if (mode === "status") {
+                    onSetOverallCenterMode("overview");
+                  } else if (mode === "designed" && onOpenCenterFullView) {
+                    onOpenCenterFullView({ kind: "designed", route: designedCardRoute });
+                  } else if (mode === "overview" && onOpenCenterFullView) {
+                    onOpenCenterFullView({ kind: "overview", route });
+                  }
                 }}
               >
             <div className="flex flex-col w-full h-full justify-between">
-              <div className="space-y-2">
-                {mode === "overview" ? (
+              {mode === "overview" ? (
+                <JourneyOverviewCardContent
+                  route={route}
+                  onSetRoute={setRoute}
+                  onNavigateOverall={onNavigateOverall}
+                  preview={preview}
+                  avatarPillClassName={modeStyles.pill}
+                />
+              ) : mode === "designed" ? (
+                <DesignedExperienceCardContent
+                  route={designedCardRoute}
+                  onSetRoute={onSetDesignedCardRoute}
+                  onNavigateOverall={(target) => {
+                    if ("kind" in target && target.kind === "openDesignedTab") {
+                      onOpenOverallTab("designed-experience");
+                      if (target.deView) onSetDeNavTarget?.(target.deView);
+                    } else {
+                      // Reuse the J&O working-space deep-linker for cross-links into Journey & Overview.
+                      onNavigateOverall(target as OverallNavTarget);
+                    }
+                  }}
+                  onOpenRingComponent={onOpenRingComponent}
+                  preview={node.designedExperiencePreview ?? EMPTY_DESIGNED_EXPERIENCE_PREVIEW}
+                  schoolName={preview.schoolName || node.title}
+                  avatarPillClassName={modeStyles.pill}
+                  highlight={{ activeSourceKey: ringHighlightSourceKey, onPin: onPinRingHighlight }}
+                />
+              ) : (
+                <div className="space-y-2">
                   <div className="relative text-center space-y-1">
-                    <div className="flex items-center justify-between">
-                      <button
-                        type="button"
-                        className={cn(
-                          "text-xs font-semibold text-gray-500 hover:text-gray-800 flex items-center gap-1",
-                          !showBack && "opacity-0 pointer-events-none",
-                        )}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setRoute({ level: "L1" });
-                        }}
-                        data-testid="overall-card-back"
-                      >
-                        Back
-                      </button>
-                      <div className="text-base font-extrabold text-gray-900">{titleForRoute()}</div>
-                      <div className="w-12 flex justify-end">
-                        <div className={cn("shrink-0 w-7 h-7 rounded-lg border flex items-center justify-center", modeStyles.pill)}>
-                          <Bot className="w-3.5 h-3.5" />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-[11px] text-gray-500">
-                      {preview.studentCount ? `${preview.studentCount} student school` : "— student school"}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="relative text-center space-y-1">
-                    <div className="text-base font-extrabold text-gray-900">
-                      {mode === "designed" ? "Designed Experience" : "Performance & Status"}
-                    </div>
+                    <div className="text-base font-extrabold text-gray-900">Performance & Status</div>
                     <div className="text-[11px] text-gray-500">{preview.schoolName || node.title}</div>
                     <div className="absolute right-0 top-0">
                       <div className={cn("shrink-0 w-7 h-7 rounded-lg border flex items-center justify-center", modeStyles.pill)}>
@@ -503,276 +680,12 @@ const OctagonNode = ({
                       </div>
                     </div>
                   </div>
-                )}
-
-                {mode === "overview" ? (
-                  <div className="bg-white/70 border border-gray-200 rounded-lg overflow-hidden flex-1 min-h-0">
-                    <div className="max-h-[150px] overflow-y-auto">
-                      {route.level === "L1" && (
-                        <>
-                          {[
-                            { key: "mission", label: "Mission", section: "mission" as const },
-                            { key: "context", label: "Context & Overview", section: "contextOverview" as const },
-                            { key: "enrollment", label: "Enrollment & Composition", section: "enrollment" as const },
-                            { key: "profile", label: "Public Academic Profile", section: "publicAcademic" as const },
-                            { key: "reviews", label: "Community Reviews", section: "communityReviews" as const },
-                            { key: "stakeholders", label: "Stakeholder Map", section: "stakeholderMap" as const },
-                          ].map((row, idx) => (
-                            <ContextMenu key={row.key}>
-                              <ContextMenuTrigger asChild>
-                                <div
-                                  className={cn(
-                                    "px-3 py-2 flex items-center justify-center hover:bg-gray-50/70",
-                                    idx !== 0 && "border-t border-gray-100",
-                                  )}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    drillToL2(row.section);
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                  data-testid={`overall-l1-${row.key}`}
-                                >
-                                  <div className="text-[13px] font-semibold text-purple-700">{row.label}</div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem
-                                  onSelect={(e) => {
-                                    e.preventDefault();
-                                    onNavigateOverall({ level: "L2", section: row.section } as any);
-                                  }}
-                                >
-                                  Navigate
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          ))}
-                        </>
-                      )}
-
-                      {route.level === "L2" && route.section === "mission" && (
-                        <ContextMenu>
-                          <ContextMenuTrigger asChild>
-                            <div className="p-4 text-sm text-gray-700 min-h-[120px] whitespace-pre-wrap">
-                              {missionShort || ""}
-                            </div>
-                          </ContextMenuTrigger>
-                          <ContextMenuContent>
-                            <ContextMenuItem
-                              onSelect={(e) => {
-                                e.preventDefault();
-                                onNavigateOverall({ level: "L2", section: "mission" });
-                              }}
-                            >
-                              Navigate
-                            </ContextMenuItem>
-                          </ContextMenuContent>
-                        </ContextMenu>
-                      )}
-
-                      {route.level === "L2" && route.section === "contextOverview" && (
-                        <>
-                          {[
-                            { key: "community", label: "Community overview", section: "contextOverview.communityOverview" as const },
-                            { key: "policy", label: "Policy considerations", section: "contextOverview.policyConsiderations" as const },
-                            { key: "history", label: "History of change efforts", section: "contextOverview.historyOfChangeEfforts" as const },
-                            { key: "other", label: "Other context", section: "contextOverview.otherContext" as const },
-                          ].map((row, idx) => {
-                            const ctxSt = preview.contextOverviewSectionStatus?.[row.section];
-                            const showUnverified = !!(ctxSt?.hasText && !ctxSt?.verified);
-                            return (
-                              <ContextMenu key={row.key}>
-                                <ContextMenuTrigger asChild>
-                                  <div
-                                    className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      drillToL3(row.section);
-                                    }}
-                                    role="button"
-                                    tabIndex={0}
-                                  >
-                                    <div className="flex items-center justify-center gap-2 flex-wrap w-full px-1">
-                                      <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
-                                      {showUnverified ? (
-                                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
-                                          Not verified
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                </ContextMenuTrigger>
-                                <ContextMenuContent>
-                                  <ContextMenuItem
-                                    onSelect={(e) => {
-                                      e.preventDefault();
-                                      onNavigateOverall({ level: "L3", section: row.section } as any);
-                                    }}
-                                  >
-                                    Navigate
-                                  </ContextMenuItem>
-                                </ContextMenuContent>
-                              </ContextMenu>
-                            );
-                          })}
-                        </>
-                      )}
-
-                      {route.level === "L2" && route.section === "enrollment" && (
-                        <>
-                          {[
-                            { key: "demo", label: "Student demographics", section: "enrollment.studentDemographics" as const },
-                            { key: "comp", label: "Enrollment & composition", section: "enrollment.enrollmentComposition" as const },
-                          ].map((row, idx) => (
-                            <ContextMenu key={row.key}>
-                              <ContextMenuTrigger asChild>
-                                <div
-                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    drillToL3(row.section);
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem
-                                  onSelect={(e) => {
-                                    e.preventDefault();
-                                    onNavigateOverall({ level: "L3", section: row.section } as any);
-                                  }}
-                                >
-                                  Navigate
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          ))}
-                        </>
-                      )}
-
-                      {route.level === "L2" && route.section === "publicAcademic" && (
-                        <>
-                          {[
-                            { key: "prep", label: "College Prep", section: "publicAcademic.collegePrep" as const },
-                            { key: "test", label: "Test Scores", section: "publicAcademic.testScores" as const },
-                            { key: "race", label: "Race & Ethnicity", section: "publicAcademic.raceEthnicity" as const },
-                            { key: "low", label: "Low Income Students", section: "publicAcademic.lowIncomeStudents" as const },
-                            { key: "dis", label: "Students with Disabilities", section: "publicAcademic.studentsWithDisabilities" as const },
-                          ].map((row, idx) => (
-                            <ContextMenu key={row.key}>
-                              <ContextMenuTrigger asChild>
-                                <div
-                                  className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    drillToL3(row.section);
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem
-                                  onSelect={(e) => {
-                                    e.preventDefault();
-                                    onNavigateOverall({ level: "L3", section: row.section } as any);
-                                  }}
-                                >
-                                  Navigate
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          ))}
-                        </>
-                      )}
-
-                      {route.level === "L2" && route.section === "communityReviews" && (
-                        <ContextMenu>
-                          <ContextMenuTrigger asChild>
-                            <div className="p-4 text-sm text-gray-500 min-h-[120px]">Populated with GreatSchools data</div>
-                          </ContextMenuTrigger>
-                          <ContextMenuContent>
-                            <ContextMenuItem
-                              onSelect={(e) => {
-                                e.preventDefault();
-                                onNavigateOverall({ level: "L2", section: "communityReviews" });
-                              }}
-                            >
-                              Navigate
-                            </ContextMenuItem>
-                          </ContextMenuContent>
-                        </ContextMenu>
-                      )}
-
-                      {route.level === "L2" && route.section === "stakeholderMap" && (
-                        <>
-                          {[
-                            { key: "students", label: "Students", section: "stakeholder.students" as const },
-                            { key: "families", label: "Families", section: "stakeholder.families" as const },
-                            { key: "staff", label: "Educators / Staff", section: "stakeholder.educatorsStaff" as const },
-                            { key: "adminDistrict", label: "Administration (District)", section: "stakeholder.administrationDistrict" as const },
-                            { key: "adminSchool", label: "Administration (School)", section: "stakeholder.administrationSchool" as const },
-                            { key: "other", label: "Other Community Leaders", section: "stakeholder.otherCommunityLeaders" as const },
-                          ].map((row, idx) => {
-                            const stSt = preview.stakeholderSectionStatus?.[row.section as StakeholderVerifySection];
-                            const showUnverified = !!(stSt?.hasText && !stSt?.verified);
-                            return (
-                              <ContextMenu key={row.key}>
-                                <ContextMenuTrigger asChild>
-                                  <div
-                                    className={cn("px-3 py-2 flex items-center justify-center hover:bg-gray-50/70", idx !== 0 && "border-t border-gray-100")}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      drillToL3(row.section);
-                                    }}
-                                    role="button"
-                                    tabIndex={0}
-                                  >
-                                    <div className="flex items-center justify-center gap-2 flex-wrap w-full px-1">
-                                      <div className="text-[12px] font-semibold text-purple-700">{row.label}</div>
-                                      {showUnverified ? (
-                                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
-                                          Not verified
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                </ContextMenuTrigger>
-                                <ContextMenuContent>
-                                  <ContextMenuItem
-                                    onSelect={(e) => {
-                                      e.preventDefault();
-                                      onNavigateOverall({ level: "L3", section: row.section } as any);
-                                    }}
-                                  >
-                                    Navigate
-                                  </ContextMenuItem>
-                                </ContextMenuContent>
-                              </ContextMenu>
-                            );
-                          })}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ) : mode === "designed" ? (
-                  <div className="bg-white/70 border border-gray-200 rounded-lg p-3">
-                    <div className="text-xs font-bold text-gray-800">Jump into Designed Experience</div>
-                    <div className="text-[11px] text-gray-500 mt-0.5">Key aims, practices & supports for the whole school.</div>
-                  </div>
-                ) : (
                   <div className="bg-white/70 border border-gray-200 rounded-lg p-3">
                     <div className="text-xs font-bold text-gray-800">Jump into Status & Health</div>
                     <div className="text-[11px] text-gray-500 mt-0.5">View performance, design, implementation, and conditions summaries.</div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
             </div>
               </motion.div>
@@ -836,10 +749,17 @@ const OctagonNode = ({
     return (
       <DraggableRingOctagon
         node={node}
+        rawComp={rawComp}
         canvasStageScale={canvasStageScale}
-        onOpenPanel={onClick}
+        onOpenFullView={() => onOpenFullView?.(node.nodeId)}
+        onOpenWorkingPanel={onClick}
+        onOpenDataPreviewFullView={(w) => onOpenDataPreviewFullView?.(node.nodeId, w)}
         onCommitCanvasPosition={onCommitCanvasPosition}
         onDeleteNode={onDeleteNode}
+        isHighlighted={isHighlighted}
+        selectedDataWindow={selectedDataWindow ?? "keyDrivers"}
+        onDataWindowChange={onDataWindowChange ?? (() => {})}
+        onDesignItemDrop={onDesignItemDrop}
       />
     );
   }
@@ -854,14 +774,38 @@ const OctagonNode = ({
       {...{ [DATA_BLUEPRINT_NODE]: "" }}
       data-testid={`node-${node.nodeId}`}
     >
+      {isHighlighted && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            inset: -6,
+            clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)",
+            backgroundColor: "#3b82f6",
+          }}
+          aria-hidden="true"
+        />
+      )}
       <OctagonCard
         title={node.title}
         subtitle={node.subtitle}
-        centerVariant="pill"
-        centerText={node.stats.left > 0 ? `${node.stats.left} subcomponents` : "No subcomponents"}
+        centerVariant="dataPreview"
+        dataPreviewContent={
+          rawComp ? (
+            <RingDataPreviewWindow
+              comp={rawComp}
+              selectedWindow={selectedDataWindow ?? "keyDrivers"}
+              onWindowChange={onDataWindowChange ?? (() => {})}
+            />
+          ) : undefined
+        }
+        onOpenDataPreviewFullView={
+          rawComp
+            ? () => onOpenDataPreviewFullView?.(node.nodeId, selectedDataWindow ?? "keyDrivers")
+            : undefined
+        }
         bgClassName={node.color}
-        leftStat={{ label: node.stats.leftLabel, value: String(node.stats.left) }}
-        rightStat={{ label: node.stats.rightLabel, value: String(node.stats.right) }}
+        leftStat={{ label: node.stats.leftLabel, value: node.stats.left }}
+        rightStat={{ label: node.stats.rightLabel, value: node.stats.right }}
         onClick={onClick}
       />
     </motion.div>
@@ -877,6 +821,35 @@ function CanvasViewInner() {
   const [overallCenterMode, setOverallCenterMode] = useState<OverallCenterMode>("overview");
   const [overallNavTarget, setOverallNavTarget] = useState<OverallNavTarget | null>(null);
   const [overallCardRoute, setOverallCardRoute] = useState<OverallCardRoute>({ level: "L1" });
+  const [designedCardRoute, setDesignedCardRoute] = useState<DesignedExperienceCardRoute>({ level: "L1" });
+  const [ringHighlight, setRingHighlight] = useState<{ sourceKey: string; nodeIds: Set<string> } | null>(null);
+  const [deNavTarget, setDeNavTarget] = useState<import("./designed-experience-card-content").DESubView | null>(null);
+  const [selectedDataWindow, setSelectedDataWindow] = useState<DataWindowKey>("keyDrivers");
+  const [ringFullViewState, setRingFullViewState] = useState<{
+    nodeId: string;
+    rawComp: any;
+    bgClassName: string;
+    mode: "component" | "dataWindow";
+  } | null>(null);
+  const [centerFullViewRoute, setCenterFullViewRoute] =
+    useState<CenterFullViewSlot | null>(null);
+  const [fullViewWidthPct, setFullViewWidthPct] = useState(44);
+
+  // ── Design-item drag-and-drop onto ring components ─────────────────────────
+  const [dropConfirm, setDropConfirm] = useState<{
+    payload: DesignItemDragPayload;
+    targetNodeId: string;
+    targetName: string;
+    rawComp: any;
+  } | null>(null);
+  const queryClient = useQueryClient();
+  const dividerDragRef = useRef<{ startX: number; startPct: number } | null>(null);
+
+  const pinHighlight = useCallback((sourceKey: string, nodeIds: string[]) => {
+    setRingHighlight((prev) =>
+      prev?.sourceKey === sourceKey ? null : { sourceKey, nodeIds: new Set(nodeIds) },
+    );
+  }, []);
 
   const { open: libraryOpen, toggleLibrary, moduleLibraryAudience } = useLearnerModuleLibrary();
   const [blueprintDropActive, setBlueprintDropActive] = useState(false);
@@ -890,6 +863,154 @@ function CanvasViewInner() {
   const deleteMutation = useDeleteComponent();
   const autoSeedAttempted = useRef(false);
 
+  const handleDropConfirm = useCallback(
+    (targetSubId: string | null, opts: DropConfirmOpts) => {
+      if (!dropConfirm) return;
+      const { payload, targetNodeId } = dropConfirm;
+
+      const cached: any =
+        queryClient.getQueryData(["components", targetNodeId]) ??
+        (Array.isArray(componentsRaw)
+          ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId)
+          : undefined);
+
+      const de: any = { ...(cached?.designedExperienceData ?? {}) };
+      const idCounter = { n: Date.now() };
+      const genId = () => `de_${idCounter.n++}_drop`;
+
+      if (payload.kind === "outcome" || payload.kind === "leap") {
+        const priority = "priority" in opts ? opts.priority : "Medium";
+        const overrideLevel = priority === "High" ? "H" : priority === "Low" ? "L" : "M";
+
+        // For outcomes, parse the structured key ("L2::L3" or just "L2") so we save
+        // the aim in the same shape the manage-outcomes page uses:
+        //   { type: "outcome", label: <L2>, subSelections: [<L3>], subPriorities: { [L3]: overrideLevel } }
+        // This is required for buildHexIndex / expandOutcomeAims to map the aim to a category
+        // and increment hex counts correctly.
+        let aimLabel = payload.label;
+        let subSelections: string[] | undefined;
+        let subPriorities: Record<string, string> | undefined;
+        if (payload.kind === "outcome" && "key" in payload) {
+          const key = String((payload as any).key ?? "");
+          const sep = key.indexOf("::");
+          if (sep >= 0) {
+            aimLabel = key.slice(0, sep);           // L2 label (e.g. "Natural Sciences")
+            const l3 = key.slice(sep + 2);          // L3 label (e.g. "Chemistry Knowledge and Skills")
+            subSelections = [l3];
+            subPriorities = { [l3]: overrideLevel };
+          } else if (key) {
+            aimLabel = key;                          // Pure L2 drop
+          }
+        }
+
+        const newAim: any = {
+          id: genId(),
+          type: payload.kind === "outcome" ? "outcome" : "leap",
+          label: aimLabel,
+          level: priority,
+          levelMode: "override",
+          overrideLevel,
+          ...(subSelections ? { subSelections, subPriorities, isPrimary: false } : {}),
+        };
+
+        // Duplicate guard: for L3 outcomes check the L2 aim already contains that L3 subSelection.
+        const l3Check = subSelections?.[0]?.toLowerCase();
+        const isDuplicate = (existingAims: any[]) =>
+          existingAims.some((a: any) => {
+            if (a.type !== newAim.type) return false;
+            if (String(a.label).toLowerCase() !== String(aimLabel).toLowerCase()) return false;
+            if (!l3Check) return !a.subSelections || a.subSelections.length === 0;
+            return Array.isArray(a.subSelections) &&
+              a.subSelections.some((s: any) => String(s).toLowerCase() === l3Check);
+          });
+
+        if (targetSubId) {
+          const subs: any[] = Array.isArray(de.subcomponents) ? [...de.subcomponents] : [];
+          const adultSubs: any[] = Array.isArray(de.adultSubcomponents) ? [...de.adultSubcomponents] : [];
+          const subIdx = subs.findIndex((s: any) => s.id === targetSubId);
+          const aSubIdx = adultSubs.findIndex((s: any) => s.id === targetSubId);
+          if (subIdx >= 0) {
+            const sub = { ...subs[subIdx] };
+            const existingAims: any[] = Array.isArray(sub.aims) ? sub.aims : [];
+            if (!isDuplicate(existingAims)) {
+              sub.aims = [...existingAims, newAim];
+              if (sub.keyDesignElements) sub.keyDesignElements = { ...sub.keyDesignElements, aims: sub.aims };
+            }
+            subs[subIdx] = sub;
+            de.subcomponents = subs;
+          } else if (aSubIdx >= 0) {
+            const sub = { ...adultSubs[aSubIdx] };
+            const existingAims: any[] = Array.isArray(sub.aims) ? sub.aims : [];
+            if (!isDuplicate(existingAims)) {
+              sub.aims = [...existingAims, newAim];
+              if (sub.keyDesignElements) sub.keyDesignElements = { ...sub.keyDesignElements, aims: sub.aims };
+            }
+            adultSubs[aSubIdx] = sub;
+            de.adultSubcomponents = adultSubs;
+          }
+        } else {
+          const kde: any = { ...(de.keyDesignElements ?? { aims: [], practices: [], supports: [] }) };
+          const existingAims: any[] = Array.isArray(kde.aims) ? kde.aims : [];
+          if (!isDuplicate(existingAims)) {
+            kde.aims = [...existingAims, newAim];
+            de.keyDesignElements = kde;
+          }
+        }
+      } else if (payload.kind === "designElement") {
+        const markAsKey = "markAsKey" in opts ? opts.markAsKey : false;
+        const { elementId, bucketKey: bk, tagId, archetype } = payload;
+
+        const patchExpert = (expertData: any): any => {
+          const updated = { ...(expertData ?? {}) };
+          const elData = { ...(updated[elementId] ?? {}) };
+          const bv: any = { ...(elData[bk] ?? {}) };
+          if (archetype === "A1") {
+            const a1 = { ...(bv.archetypeA1 ?? {}) };
+            const sels: any[] = Array.isArray(a1.selections) ? [...a1.selections] : [];
+            const alreadyIn = sels.some((s: any) => s.tagId === tagId);
+            if (!alreadyIn) {
+              a1.selections = [...sels, { tagId, isKey: markAsKey }];
+              bv.archetypeA1 = a1;
+            } else if (markAsKey) {
+              a1.selections = sels.map((s: any) => s.tagId === tagId ? { ...s, isKey: true } : s);
+              bv.archetypeA1 = a1;
+            }
+          } else {
+            const a2: any = { ...(bv.archetypeA2 ?? {}) };
+            if (!a2.selectedId) {
+              a2.selectedId = tagId;
+              if (markAsKey) a2.isKey = true;
+              bv.archetypeA2 = a2;
+            }
+          }
+          elData[bk] = bv;
+          updated[elementId] = elData;
+          return updated;
+        };
+
+        if (targetSubId) {
+          const subs: any[] = Array.isArray(de.subcomponents) ? [...de.subcomponents] : [];
+          const adultSubs: any[] = Array.isArray(de.adultSubcomponents) ? [...de.adultSubcomponents] : [];
+          const subIdx = subs.findIndex((s: any) => s.id === targetSubId);
+          const aSubIdx = adultSubs.findIndex((s: any) => s.id === targetSubId);
+          if (subIdx >= 0) {
+            subs[subIdx] = { ...subs[subIdx], elementsExpertData: patchExpert(subs[subIdx].elementsExpertData) };
+            de.subcomponents = subs;
+          } else if (aSubIdx >= 0) {
+            adultSubs[aSubIdx] = { ...adultSubs[aSubIdx], elementsExpertData: patchExpert(adultSubs[aSubIdx].elementsExpertData) };
+            de.adultSubcomponents = adultSubs;
+          }
+        } else {
+          de.elementsExpertData = patchExpert(de.elementsExpertData);
+        }
+      }
+
+      updateMutation.mutate({ nodeId: targetNodeId, data: { designedExperienceData: de } });
+      setDropConfirm(null);
+    },
+    [dropConfirm, componentsRaw, queryClient, updateMutation],
+  );
+
   /** Use last good list whenever present — don't require isSuccess (refetch errors would hide real nodes). */
   const componentsList = Array.isArray(componentsRaw) ? componentsRaw : [];
   const hasComponentRows = componentsList.length > 0;
@@ -897,7 +1018,7 @@ function CanvasViewInner() {
   const persistRingLayout = hasComponentRows;
 
   const nodes: CanvasNode[] = hasComponentRows
-    ? componentsList.map(componentToCanvasNode)
+    ? componentsList.map((c) => componentToCanvasNode(c, componentsList))
     : [SHELL_OVERALL_CANVAS_NODE];
 
   const derivedNodes: CanvasNode[] = useMemo(() => {
@@ -933,6 +1054,20 @@ function CanvasViewInner() {
     if (activeTab === "designed-experience") setOverallCenterMode("designed");
     if (activeTab === "status-and-health") setOverallCenterMode("status");
   }, [activeTab, selectedNode?.nodeId]);
+
+  // Clear ring highlight on any navigation change.
+  useEffect(() => {
+    setRingHighlight(null);
+  }, [designedCardRoute, overallCardRoute, overallCenterMode, activeTab, isExpandedWorkingSpace]);
+
+  // Clear ring highlight on Esc key.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRingHighlight(null);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   useEffect(() => {
     document.documentElement.style.setProperty("--lml-strip-offset", libraryOpen ? LML_STRIP_HEIGHT_CLAMP : "0px");
@@ -1005,10 +1140,23 @@ function CanvasViewInner() {
     }
   };
 
+  // Build the list of ring nodes for full-view navigation (all non-overall components)
+  const ringNodeList: RingNode[] = React.useMemo(() => {
+    if (!Array.isArray(componentsRaw)) return [];
+    return (componentsRaw as any[])
+      .filter((c) => c?.nodeId !== "overall" && c?.nodeId != null)
+      .map((c) => {
+        const canvasNode = derivedNodes.find((n) => n.nodeId === String(c.nodeId));
+        return { nodeId: String(c.nodeId), rawComp: c, bgClassName: canvasNode?.color ?? "bg-gray-100" };
+      });
+  }, [componentsRaw, derivedNodes]);
+
   return (
     <div className="w-full h-screen bg-[#F8F9FA] flex flex-col overflow-hidden font-sans">
       <LearnerModuleLibraryStrip />
-      <div className="relative flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+      {/* ── Left: Canvas ── */}
+      <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden">
       <div className="absolute top-4 left-0 right-0 px-6 flex justify-between items-center z-10">
          <div className="flex items-center gap-2">
            <button
@@ -1048,6 +1196,9 @@ function CanvasViewInner() {
           blueprintDropActive && "ring-4 ring-emerald-500 ring-offset-2 ring-offset-[#F8F9FA]",
         )}
         onPointerDownCapture={(e) => {
+          if (!(e.target as HTMLElement).closest(`[${DATA_BLUEPRINT_NODE}]`)) {
+            setRingHighlight(null);
+          }
           if (e.button !== 0) return;
           if ((e.target as HTMLElement).closest(`[${DATA_BLUEPRINT_NODE}]`)) return;
           const host = e.currentTarget as HTMLElement;
@@ -1119,15 +1270,52 @@ function CanvasViewInner() {
             <OctagonNode
               key={node.nodeId}
               node={node}
+              rawComp={
+                node.nodeId !== "overall"
+                  ? (Array.isArray(componentsRaw)
+                      ? componentsRaw.find((c: any) => String(c?.nodeId) === node.nodeId)
+                      : undefined)
+                  : undefined
+              }
               onClick={() => {
-                // For center card, clicks drill down within the card. Working space is opened via right-click Navigate.
+                // Double-click → open working panel. Closes full view if open.
                 if (node.nodeId === "overall") return;
+                setRingFullViewState(null);
                 setSelectedNode(node);
+              }}
+              onOpenFullView={(nodeId) => {
+                if (nodeId === "overall") return;
+                const raw = Array.isArray(componentsRaw)
+                  ? componentsRaw.find((c: any) => String(c?.nodeId) === nodeId)
+                  : undefined;
+                const canvasNode = derivedNodes.find((n) => n.nodeId === nodeId);
+                if (raw && canvasNode) {
+                  // Close the working panel before opening full view.
+                  setSelectedNode(null);
+                  setOpenSubId(null);
+                  setIsExpandedWorkingSpace(false);
+                  setRingFullViewState({ nodeId, rawComp: raw, bgClassName: canvasNode.color, mode: "component" });
+                }
+              }}
+              onOpenDataPreviewFullView={(nodeId, _w) => {
+                if (nodeId === "overall") return;
+                const raw = Array.isArray(componentsRaw)
+                  ? componentsRaw.find((c: any) => String(c?.nodeId) === nodeId)
+                  : undefined;
+                const canvasNode = derivedNodes.find((n) => n.nodeId === nodeId);
+                if (raw && canvasNode) {
+                  // Close the working panel before opening full view.
+                  setSelectedNode(null);
+                  setOpenSubId(null);
+                  setIsExpandedWorkingSpace(false);
+                  setRingFullViewState({ nodeId, rawComp: raw, bgClassName: canvasNode.color, mode: "dataWindow" });
+                }
               }}
               overallCenterMode={overallCenterMode}
               onSetOverallCenterMode={setOverallCenterMode}
               onNavigateOverall={(target) => {
                 const overallNode = derivedNodes.find((n) => n.nodeId === "overall") || node;
+                setRingFullViewState(null);
                 setSelectedNode(overallNode);
                 setOpenSubId(null);
                 setActiveTab("overview-and-context");
@@ -1135,12 +1323,30 @@ function CanvasViewInner() {
               }}
               onOpenOverallTab={(tab) => {
                 const overallNode = derivedNodes.find((n) => n.nodeId === "overall") || node;
+                setRingFullViewState(null);
                 setSelectedNode(overallNode);
                 setOpenSubId(null);
                 setActiveTab(tab);
               }}
+              onSetDeNavTarget={setDeNavTarget}
               overallCardRoute={overallCardRoute}
               onSetOverallCardRoute={setOverallCardRoute}
+              designedCardRoute={designedCardRoute}
+              onSetDesignedCardRoute={setDesignedCardRoute}
+              ringHighlightSourceKey={ringHighlight?.sourceKey ?? null}
+              onPinRingHighlight={pinHighlight}
+              isHighlighted={ringHighlight?.nodeIds.has(node.nodeId) ?? false}
+              onOpenRingComponent={(targetNodeId) => {
+                const raw = Array.isArray(componentsRaw)
+                  ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId)
+                  : undefined;
+                if (raw) {
+                  setRingFullViewState(null);
+                  setSelectedNode(componentToCanvasNode(raw, componentsList));
+                  setActiveTab("snapshot");
+                  setOpenSubId(null);
+                }
+              }}
               persistLayout={persistRingLayout && node.nodeId !== "overall"}
               canvasStageScale={CANVAS_STAGE_SCALE}
               onCommitCanvasPosition={(nodeId, x, y) => {
@@ -1153,6 +1359,23 @@ function CanvasViewInner() {
                   },
                 });
               }}
+              selectedDataWindow={selectedDataWindow}
+              onDataWindowChange={setSelectedDataWindow}
+              onDesignItemDrop={node.nodeId !== "overall" ? (payload) => {
+                const rawComp = Array.isArray(componentsRaw)
+                  ? componentsRaw.find((c: any) => String(c?.nodeId) === node.nodeId)
+                  : undefined;
+                setDropConfirm({
+                  payload,
+                  targetNodeId: node.nodeId,
+                  targetName: node.title,
+                  rawComp,
+                });
+              } : undefined}
+              onOpenCenterFullView={node.nodeId === "overall" ? (slot) => {
+                setCenterFullViewRoute(slot);
+                setRingFullViewState(null);
+              } : undefined}
             />
           ))}
         </div>
@@ -1248,6 +1471,8 @@ function CanvasViewInner() {
             onOpenSubIdChange={setOpenSubId}
             overallNavTarget={overallNavTarget}
             onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
+            deNavTarget={deNavTarget}
+            onDeNavTargetConsumed={() => setDeNavTarget(null)}
             onClose={() => {
               setSelectedNode(null);
               setOpenSubId(null);
@@ -1258,7 +1483,7 @@ function CanvasViewInner() {
             onRequestOpenComponent={(targetNodeId) => {
               const raw = Array.isArray(componentsRaw) ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId) : undefined;
               if (raw) {
-                setSelectedNode(componentToCanvasNode(raw));
+                setSelectedNode(componentToCanvasNode(raw, componentsList));
                 setActiveTab("snapshot");
                 setOpenSubId(null);
               }
@@ -1286,10 +1511,12 @@ function CanvasViewInner() {
         onOpenSubIdChange={setOpenSubId}
         overallNavTarget={overallNavTarget}
         onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
+        deNavTarget={deNavTarget}
+        onDeNavTargetConsumed={() => setDeNavTarget(null)}
         onRequestOpenComponent={(targetNodeId) => {
           const raw = Array.isArray(componentsRaw) ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId) : undefined;
           if (raw) {
-            setSelectedNode(componentToCanvasNode(raw));
+            setSelectedNode(componentToCanvasNode(raw, componentsList));
             setActiveTab("snapshot");
             setOpenSubId(null);
           }
@@ -1300,7 +1527,195 @@ function CanvasViewInner() {
           setOverallNavTarget({ level: "L3", section: "enrollment.studentDemographics" });
         }}
       />
-      </div>
+
+      </div>{/* end canvas left panel */}
+
+      {/* ── Right: Full View panel (true side-by-side) ── */}
+      {ringFullViewState && (
+        <>
+          {/* Draggable divider */}
+          <div
+            className="w-1.5 shrink-0 cursor-col-resize bg-gray-200 hover:bg-blue-400 active:bg-blue-500 transition-colors select-none touch-none z-20"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const containerW = (e.currentTarget.parentElement as HTMLElement | null)?.offsetWidth ?? window.innerWidth;
+              dividerDragRef.current = { startX: e.clientX, startPct: fullViewWidthPct };
+              (dividerDragRef.current as any)._containerW = containerW;
+            }}
+            onPointerMove={(e) => {
+              const d = dividerDragRef.current;
+              if (!d) return;
+              const containerW = (d as any)._containerW ?? window.innerWidth;
+              const deltaPct = ((d.startX - e.clientX) / containerW) * 100;
+              const next = Math.min(80, Math.max(20, d.startPct + deltaPct));
+              setFullViewWidthPct(next);
+            }}
+            onPointerUp={(e) => {
+              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+              dividerDragRef.current = null;
+            }}
+            onPointerCancel={(e) => {
+              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+              dividerDragRef.current = null;
+            }}
+            title="Drag to resize"
+          />
+          {/* Full view panel */}
+          <div
+            className="shrink-0 min-h-0 overflow-hidden shadow-[-4px_0_16px_rgba(0,0,0,0.08)]"
+            style={{ width: `${fullViewWidthPct}%` }}
+          >
+            <RingFullView
+              comp={ringFullViewState.rawComp}
+              bgClassName={ringFullViewState.bgClassName}
+              mode={ringFullViewState.mode}
+              selectedDataWindow={selectedDataWindow}
+              onDataWindowChange={setSelectedDataWindow}
+              ringNodes={ringNodeList}
+              onNavigate={(node) => {
+                setRingFullViewState((prev) =>
+                  prev ? { ...prev, nodeId: node.nodeId, rawComp: node.rawComp, bgClassName: node.bgClassName } : null,
+                );
+              }}
+              onClose={() => setRingFullViewState(null)}
+              onSwitchToDataWindow={(w) => {
+                setSelectedDataWindow(w);
+                setRingFullViewState((prev) => prev ? { ...prev, mode: "dataWindow" } : null);
+              }}
+              onSwitchToComponent={() => {
+                setRingFullViewState((prev) => prev ? { ...prev, mode: "component" } : null);
+              }}
+              onOpenEdit={() => {
+                const state = ringFullViewState;
+                if (!state) return;
+                const targetNode = derivedNodes.find((n) => n.nodeId === state.nodeId);
+                if (!targetNode) return;
+                // Header pencil: always open main component at Journey & Overview.
+                setRingFullViewState(null);
+                setSelectedNode(targetNode);
+                setActiveTab("snapshot");
+                setOpenSubId(null);
+                setInitialSubId(null);
+                setDeNavTarget(null);
+                setIsExpandedWorkingSpace(false);
+              }}
+              onOpenScopedEdit={(payload) => {
+                const state = ringFullViewState;
+                if (!state) return;
+                const targetNode = derivedNodes.find((n) => n.nodeId === state.nodeId);
+                if (!targetNode) return;
+                setRingFullViewState(null);
+                setSelectedNode(targetNode);
+                setActiveTab(payload.tab);
+                setOpenSubId(payload.openSubId ?? null);
+                setInitialSubId(payload.initialSubId ?? null);
+                setDeNavTarget(payload.deNav ?? null);
+                setIsExpandedWorkingSpace(false);
+              }}
+            />
+          </div>
+        </>
+      )}
+      {/* ── Right: Center Full View panel ── */}
+      {centerFullViewRoute && !ringFullViewState && (
+        <>
+          {/* Draggable divider */}
+          <div
+            className="w-1.5 shrink-0 cursor-col-resize bg-gray-200 hover:bg-blue-400 active:bg-blue-500 transition-colors select-none touch-none z-20"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const containerW = (e.currentTarget.parentElement as HTMLElement | null)?.offsetWidth ?? window.innerWidth;
+              dividerDragRef.current = { startX: e.clientX, startPct: fullViewWidthPct };
+              (dividerDragRef.current as any)._containerW = containerW;
+            }}
+            onPointerMove={(e) => {
+              const d = dividerDragRef.current;
+              if (!d) return;
+              const containerW = (d as any)._containerW ?? window.innerWidth;
+              const deltaPct = ((d.startX - e.clientX) / containerW) * 100;
+              const next = Math.min(80, Math.max(20, d.startPct + deltaPct));
+              setFullViewWidthPct(next);
+            }}
+            onPointerUp={(e) => {
+              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+              dividerDragRef.current = null;
+            }}
+            onPointerCancel={(e) => {
+              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+              dividerDragRef.current = null;
+            }}
+            title="Drag to resize"
+          />
+          {/* Center full view panel */}
+          <div
+            className="shrink-0 min-h-0 overflow-hidden shadow-[-4px_0_16px_rgba(0,0,0,0.08)]"
+            style={{ width: `${fullViewWidthPct}%` }}
+          >
+            {(() => {
+              const overallRaw = Array.isArray(componentsRaw)
+                ? (componentsRaw as any[]).find((c) => c?.nodeId === "overall")
+                : undefined;
+              const ringRaw = Array.isArray(componentsRaw)
+                ? (componentsRaw as any[]).filter((c) => c?.nodeId !== "overall" && c?.nodeId != null)
+                : [];
+              const overallNode = derivedNodes.find((n) => n.nodeId === "overall");
+              const dePreview = overallNode?.designedExperiencePreview ?? EMPTY_DESIGNED_EXPERIENCE_PREVIEW;
+              const joPreview = overallNode?.overviewContextPreview;
+              return (
+                <CenterFullView
+                  slot={centerFullViewRoute!}
+                  onNavigate={(s) => setCenterFullViewRoute(s)}
+                  onClose={() => setCenterFullViewRoute(null)}
+                  dePreview={dePreview}
+                  joPreview={joPreview}
+                  rawOverallComp={overallRaw}
+                  ringComps={ringRaw}
+                  ringHighlightSourceKey={ringHighlight?.sourceKey ?? null}
+                  onPinRingHighlight={pinHighlight}
+                  onOpenWorkingSpace={(target) => {
+                    setCenterFullViewRoute(null);
+                    setIsExpandedWorkingSpace(false);
+                    setActiveTab("designed-experience");
+                    setDeNavTarget(target);
+                    const overallNode2 = derivedNodes.find((n) => n.nodeId === "overall");
+                    if (overallNode2) setSelectedNode(overallNode2);
+                  }}
+                  onOpenJOWorkingSpace={(target) => {
+                    setCenterFullViewRoute(null);
+                    setIsExpandedWorkingSpace(false);
+                    const overallNode2 = derivedNodes.find((n) => n.nodeId === "overall");
+                    if (overallNode2) setSelectedNode(overallNode2);
+                    setRingFullViewState(null);
+                    setOpenSubId(null);
+                    setActiveTab("overview-and-context");
+                    setOverallNavTarget(target);
+                  }}
+                />
+              );
+            })()}
+          </div>
+        </>
+      )}
+
+      </div>{/* end flex row */}
+
+      {/* Design-item drop confirmation modal */}
+      {dropConfirm && (() => {
+        const de: any = dropConfirm.rawComp?.designedExperienceData ?? {};
+        const subs: SubcomponentOption[] = [
+          ...((de.subcomponents ?? []) as any[]).map((s: any) => ({ id: s.id, name: s.name || "Learner experience", kind: "learner" as const })),
+          ...((de.adultSubcomponents ?? []) as any[]).map((s: any) => ({ id: s.id, name: s.name || "Adult experience", kind: "adult" as const })),
+        ];
+        return (
+          <DesignItemDropModal
+            payload={dropConfirm.payload}
+            targetName={dropConfirm.targetName}
+            subcomponents={subs}
+            onConfirm={handleDropConfirm}
+            onCancel={() => setDropConfirm(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

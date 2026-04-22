@@ -38,6 +38,8 @@ export default function ComponentWorkingPanel({
   onOpenSubIdChange,
   overallNavTarget,
   onOverallNavTargetConsumed,
+  deNavTarget,
+  onDeNavTargetConsumed,
   onClose,
   onExpand,
   showExpandButton = false,
@@ -54,6 +56,8 @@ export default function ComponentWorkingPanel({
   onOpenSubIdChange: (id: string | null) => void;
   overallNavTarget: any | null;
   onOverallNavTargetConsumed: () => void;
+  deNavTarget?: import("./designed-experience-card-content").DESubView | null;
+  onDeNavTargetConsumed?: () => void;
   onClose: () => void;
   onExpand?: () => void;
   showExpandButton?: boolean;
@@ -233,6 +237,8 @@ export default function ComponentWorkingPanel({
                   onOpenSubIdChange={onOpenSubIdChange}
                   onRequestOpenComponent={onRequestOpenComponent}
                   onRequestNavigateToStudentDemographics={onRequestNavigateToStudentDemographics}
+                  deNavTarget={deNavTarget}
+                  onDeNavTargetConsumed={onDeNavTargetConsumed}
                 />
               );
             }
