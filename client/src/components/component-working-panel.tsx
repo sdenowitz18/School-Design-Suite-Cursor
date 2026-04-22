@@ -165,7 +165,13 @@ export default function ComponentWorkingPanel({
 
         <div className="flex items-center gap-2">
           {showExpandButton && onExpand && (
-            <Button variant="ghost" size="icon" onClick={onExpand} data-testid="button-expand-panel">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onExpand}
+              title="Expand workspace (full screen + tools)"
+              data-testid="button-expand-panel"
+            >
               <Maximize2 className="w-4 h-4 text-gray-500" />
             </Button>
           )}

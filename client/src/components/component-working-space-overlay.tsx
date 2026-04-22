@@ -245,11 +245,12 @@ export default function ComponentWorkingSpaceOverlay({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        hideClose
         overlayClassName={cn(
-          "fixed z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "fixed z-[110] bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
           "left-0 right-0 top-[var(--lml-strip-offset,0px)] bottom-0 !inset-auto",
         )}
-        className="fixed left-0 top-[var(--lml-strip-offset,0px)] translate-x-0 translate-y-0 w-screen h-[calc(100vh-var(--lml-strip-offset,0px))] max-h-[calc(100vh-var(--lml-strip-offset,0px))] max-w-none rounded-none p-0 gap-0 border-0 bg-white z-[60] overflow-hidden flex flex-col data-[state=open]:animate-none data-[state=closed]:animate-none"
+        className="fixed left-0 top-[var(--lml-strip-offset,0px)] translate-x-0 translate-y-0 w-screen h-[calc(100vh-var(--lml-strip-offset,0px))] max-h-[calc(100vh-var(--lml-strip-offset,0px))] max-w-none rounded-none p-0 gap-0 border-0 bg-white z-[120] overflow-hidden flex flex-col data-[state=open]:animate-none data-[state=closed]:animate-none"
         data-testid="component-working-space-overlay"
         onPointerDownOutside={(e) => {
           if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();

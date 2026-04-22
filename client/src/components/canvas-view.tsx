@@ -2,7 +2,6 @@ import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Bot, Library, X } from "lucide-react";
 import { LearnerModuleLibraryProvider, useLearnerModuleLibrary } from "@/contexts/learner-module-library-context";
 import LearnerModuleLibraryStrip from "@/components/learner-module-library-strip";
@@ -35,7 +34,7 @@ import {
   RingDataPreviewWindow,
   type DataWindowKey,
 } from "./ring-data-preview-window";
-import { RingFullView, type RingNode, type DrillTarget, type DimensionKey, scopedEditPayloadForDataWindow } from "./ring-full-view";
+import { RingFullView, type RingNode, type DrillTarget, type DimensionKey, type RingScopedEditPayload, scopedEditPayloadForDataWindow } from "./ring-full-view";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -54,7 +53,6 @@ import {
   type HighlightProps,
 } from "./designed-experience-card-content";
 import { buildDesignedExperiencePreview } from "@/lib/designed-experience-preview";
-import { shouldIgnoreOutsideInteraction } from "@/lib/learner-module-library-dismiss-guard";
 import { CenterFullView, type CenterFullViewSlot } from "./center-full-view";
 
 interface CanvasNode {
@@ -295,13 +293,14 @@ function DraggableRingOctagon({
   onDrill,
   onDimensionClick,
   onDoubleClickDataPreviewEdit,
+  onDoubleClickItemEdit,
 }: {
   node: CanvasNode;
   rawComp?: any;
   canvasStageScale: number;
   /** Single click (no drag): opens the split-screen full view. */
   onOpenFullView: () => void;
-  /** Double click: opens the working panel sheet. */
+  /** Double click: opens the working panel (right split, same shell as full view). */
   onOpenWorkingPanel: () => void;
   /** Click on the ring border of the data preview window. */
   onOpenDataPreviewFullView: (w: DataWindowKey) => void;
@@ -315,6 +314,8 @@ function DraggableRingOctagon({
   onDimensionClick?: (key: DimensionKey) => void;
   /** Double-click compact preview body → working panel scoped to current data window. */
   onDoubleClickDataPreviewEdit?: (nodeId: string) => void;
+  /** Double-click a specific list item → working panel scoped to that item's edit page. */
+  onDoubleClickItemEdit?: (nodeId: string, payload: RingScopedEditPayload) => void;
 }) {
   const [draggingPos, setDraggingPos] = useState<{ x: number; y: number } | null>(null);
   const [isDesignDropTarget, setIsDesignDropTarget] = useState(false);
@@ -495,6 +496,25 @@ function DraggableRingOctagon({
               onWindowChange={onDataWindowChange}
               onOpenFullView={rawComp ? () => onOpenDataPreviewFullView(selectedDataWindow) : undefined}
               onDrill={onDrill}
+              onDoubleClickItem={onDoubleClickItemEdit ? (e) => {
+                let payload: RingScopedEditPayload | null = null;
+                if (e.kind === "leap") {
+                  payload = { tab: "designed-experience", deNav: { view: "leapDetail", label: e.label }, openSubId: null, initialSubId: null };
+                } else if (e.kind === "outcome") {
+                  payload = { tab: "designed-experience", deNav: { view: "outcomeDetail", l2: e.label }, openSubId: null, initialSubId: null };
+                } else if (e.kind === "subcomponent") {
+                  const allSubs: any[] = rawComp?.designedExperienceData?.subcomponents ?? [];
+                  const adultSubs: any[] = rawComp?.designedExperienceData?.adultSubcomponents ?? [];
+                  const found = [...allSubs, ...adultSubs].find((s: any) => s.name === e.name);
+                  const isAdult = adultSubs.some((s: any) => s.name === e.name);
+                  payload = isAdult
+                    ? { tab: "designed-experience", deNav: { view: "adultSubManage", subId: found?.id ?? "" }, openSubId: null, initialSubId: null }
+                    : { tab: "designed-experience", deNav: null, openSubId: found?.id ?? null, initialSubId: found?.id ?? null };
+                } else if (e.kind === "practice" || e.kind === "tool") {
+                  payload = { tab: "designed-experience", deNav: { view: "designElement", elementId: e.item.elementId }, openSubId: e.item.bucketCompositeKey, initialSubId: e.item.bucketCompositeKey };
+                }
+                if (payload) onDoubleClickItemEdit(node.nodeId, payload);
+              } : undefined}
               onDimensionClick={onDimensionClick}
               onDoubleClickToEdit={
                 onDoubleClickDataPreviewEdit ? () => onDoubleClickDataPreviewEdit(node.nodeId) : undefined
@@ -548,6 +568,7 @@ const OctagonNode = ({
   onDrill,
   onDimensionClick,
   onDoubleClickDataPreviewEdit,
+  onDoubleClickItemEdit,
 }: {
   node: CanvasNode;
   rawComp?: any;
@@ -584,6 +605,8 @@ const OctagonNode = ({
   onDimensionClick?: (nodeId: string, key: DimensionKey) => void;
   /** Double-click preview body → working panel scoped to current global data window. */
   onDoubleClickDataPreviewEdit?: (nodeId: string) => void;
+  /** Double-click a specific list item → working panel scoped to that item's edit page. */
+  onDoubleClickItemEdit?: (nodeId: string, payload: RingScopedEditPayload) => void;
 }) => {
   const isOverall = node.nodeId === "overall";
 
@@ -800,6 +823,7 @@ const OctagonNode = ({
         onDrill={onDrill ? (t) => onDrill(node.nodeId, t) : undefined}
         onDimensionClick={onDimensionClick ? (key) => onDimensionClick(node.nodeId, key) : undefined}
         onDoubleClickDataPreviewEdit={onDoubleClickDataPreviewEdit}
+        onDoubleClickItemEdit={onDoubleClickItemEdit}
       />
     );
   }
@@ -837,6 +861,25 @@ const OctagonNode = ({
               onWindowChange={onDataWindowChange ?? (() => {})}
               onOpenFullView={rawComp ? () => onOpenDataPreviewFullView?.(node.nodeId, selectedDataWindow ?? "keyDrivers") : undefined}
               onDimensionClick={onDimensionClick ? (key) => onDimensionClick(node.nodeId, key) : undefined}
+              onDoubleClickItem={onDoubleClickItemEdit ? (e) => {
+                let payload: RingScopedEditPayload | null = null;
+                if (e.kind === "leap") {
+                  payload = { tab: "designed-experience", deNav: { view: "leapDetail", label: e.label }, openSubId: null, initialSubId: null };
+                } else if (e.kind === "outcome") {
+                  payload = { tab: "designed-experience", deNav: { view: "outcomeDetail", l2: e.label }, openSubId: null, initialSubId: null };
+                } else if (e.kind === "subcomponent") {
+                  const allSubs: any[] = rawComp?.designedExperienceData?.subcomponents ?? [];
+                  const adultSubs: any[] = rawComp?.designedExperienceData?.adultSubcomponents ?? [];
+                  const found = [...allSubs, ...adultSubs].find((s: any) => s.name === e.name);
+                  const isAdult = adultSubs.some((s: any) => s.name === e.name);
+                  payload = isAdult
+                    ? { tab: "designed-experience", deNav: { view: "adultSubManage", subId: found?.id ?? "" }, openSubId: null, initialSubId: null }
+                    : { tab: "designed-experience", deNav: null, openSubId: found?.id ?? null, initialSubId: found?.id ?? null };
+                } else if (e.kind === "practice" || e.kind === "tool") {
+                  payload = { tab: "designed-experience", deNav: { view: "designElement", elementId: e.item.elementId }, openSubId: e.item.bucketCompositeKey, initialSubId: e.item.bucketCompositeKey };
+                }
+                if (payload) onDoubleClickItemEdit(node.nodeId, payload);
+              } : undefined}
               onDoubleClickToEdit={
                 onDoubleClickDataPreviewEdit ? () => onDoubleClickDataPreviewEdit(node.nodeId) : undefined
               }
@@ -858,6 +901,54 @@ const OctagonNode = ({
     </motion.div>
   );
 };
+
+/** Shared drag handle between canvas and ring / center / working right panes. */
+function RightPaneResizeDivider({
+  dividerDragRef,
+  fullViewWidthPct,
+  setFullViewWidthPct,
+}: {
+  dividerDragRef: React.MutableRefObject<{ startX: number; startPct: number } | null>;
+  fullViewWidthPct: number;
+  setFullViewWidthPct: React.Dispatch<React.SetStateAction<number>>;
+}) {
+  return (
+    <div
+      className="w-1.5 shrink-0 cursor-col-resize bg-gray-200 hover:bg-blue-400 active:bg-blue-500 transition-colors select-none touch-none z-20"
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const containerW = (e.currentTarget.parentElement as HTMLElement | null)?.offsetWidth ?? window.innerWidth;
+        dividerDragRef.current = { startX: e.clientX, startPct: fullViewWidthPct };
+        (dividerDragRef.current as { _containerW?: number })._containerW = containerW;
+      }}
+      onPointerMove={(e) => {
+        const d = dividerDragRef.current;
+        if (!d) return;
+        const containerW = (d as { _containerW?: number })._containerW ?? window.innerWidth;
+        const deltaPct = ((d.startX - e.clientX) / containerW) * 100;
+        const next = Math.min(80, Math.max(20, d.startPct + deltaPct));
+        setFullViewWidthPct(next);
+      }}
+      onPointerUp={(e) => {
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+        dividerDragRef.current = null;
+      }}
+      onPointerCancel={(e) => {
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+        dividerDragRef.current = null;
+      }}
+      title="Drag to resize"
+    />
+  );
+}
 
 function CanvasViewInner() {
   const [selectedNode, setSelectedNode] = useState<CanvasNode | null>(null);
@@ -1405,6 +1496,19 @@ function CanvasViewInner() {
                 setDeNavTarget(payload.deNav ?? null);
                 setIsExpandedWorkingSpace(false);
               }}
+              onDoubleClickItemEdit={(nodeId, payload) => {
+                if (nodeId === "overall") return;
+                const targetNode = derivedNodes.find((n) => n.nodeId === nodeId);
+                if (!targetNode) return;
+                setRingFullViewState(null);
+                setSelectedNode(targetNode);
+                setActiveTab(payload.tab);
+                setOpenSubId(payload.openSubId ?? null);
+                setInitialSubId(payload.initialSubId ?? null);
+                setDeNavTarget(payload.deNav ?? null);
+                setShPage(payload.shPage ?? null);
+                setIsExpandedWorkingSpace(false);
+              }}
               overallCenterMode={overallCenterMode}
               onSetOverallCenterMode={setOverallCenterMode}
               onNavigateOverall={(target) => {
@@ -1467,8 +1571,16 @@ function CanvasViewInner() {
                 });
               } : undefined}
               onOpenCenterFullView={node.nodeId === "overall" ? (slot) => {
-                setCenterFullViewRoute(slot);
+                // Close ring split and working panel — same exclusivity as ring full view.
                 setRingFullViewState(null);
+                setSelectedNode(null);
+                setOpenSubId(null);
+                setInitialSubId(null);
+                setIsExpandedWorkingSpace(false);
+                setDeNavTarget(null);
+                setOverallNavTarget(null);
+                setShPage(null);
+                setCenterFullViewRoute(slot);
               } : undefined}
             />
           ))}
@@ -1495,104 +1607,6 @@ function CanvasViewInner() {
         </button>
       </div>
 
-      <Sheet
-        open={!!selectedNode && !isExpandedWorkingSpace}
-        modal={false}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedNode(null);
-            setOpenSubId(null);
-            setIsExpandedWorkingSpace(false);
-          }
-        }}
-      >
-        <SheetContent
-          overlayPointerEventsNone
-          className={cn(
-            "w-full sm:max-w-[800px] p-0 border-l border-gray-200 shadow-2xl flex flex-col bg-white !inset-y-auto !right-0 !bottom-0 !top-[var(--lml-strip-offset,0px)] !h-[calc(100vh-var(--lml-strip-offset,0px))] !max-h-[calc(100vh-var(--lml-strip-offset,0px))]",
-          )}
-          side="right"
-          onPointerDownOutside={(e) => {
-            if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
-          }}
-          onInteractOutside={(e) => {
-            if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
-          }}
-          onFocusOutside={(e) => {
-            if (shouldIgnoreOutsideInteraction(e)) e.preventDefault();
-          }}
-        >
-          <div
-            className={cn(
-              "relative flex h-full min-h-0 flex-col transition-[box-shadow,background-color]",
-              sheetPanelDropActive && selectedNode?.nodeId && "ring-4 ring-inset ring-sky-500 bg-sky-50/30",
-            )}
-            onDragEnter={(e) => {
-              if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
-              e.preventDefault();
-              setSheetPanelDropActive(true);
-            }}
-            onDragOver={(e) => {
-              if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-              setSheetPanelDropActive(true);
-            }}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node)) setSheetPanelDropActive(false);
-            }}
-            onDrop={onSheetPanelDrop}
-          >
-            {sheetPanelDropActive && selectedNode?.nodeId ? (
-              <div className="pointer-events-none absolute inset-x-0 top-14 z-10 flex justify-center px-4">
-                <div className="rounded-full border border-sky-300 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-sky-900 shadow-md">
-                  {selectedNode.nodeId === "overall"
-                    ? `Drop to add ${moduleLibraryAudience === "adult" ? "adult" : "learner"} experience component to the blueprint`
-                    : moduleLibraryAudience === "adult"
-                      ? `Drop to add adult subcomponent to “${selectedNode.title}”`
-                      : `Drop to add learner subcomponent to “${selectedNode.title}”`}
-                </div>
-              </div>
-            ) : null}
-          <ComponentWorkingPanel
-            selectedNode={selectedNode ? { nodeId: selectedNode.nodeId, title: selectedNode.title, color: selectedNode.color } : null}
-            componentsRaw={componentsRaw}
-            activeTab={activeTab}
-            onActiveTabChange={(tab) => { setActiveTab(tab); if (tab !== "status-and-health") setShPage(null); }}
-            initialSubId={initialSubId}
-            onInitialSubIdConsumed={() => setInitialSubId(null)}
-            openSubId={openSubId}
-            onOpenSubIdChange={setOpenSubId}
-            overallNavTarget={overallNavTarget}
-            onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
-            deNavTarget={deNavTarget}
-            onDeNavTargetConsumed={() => setDeNavTarget(null)}
-            shPage={shPage}
-            onClose={() => {
-              setSelectedNode(null);
-              setOpenSubId(null);
-              setIsExpandedWorkingSpace(false);
-            }}
-            onExpand={() => setIsExpandedWorkingSpace(true)}
-            showExpandButton
-            onRequestOpenComponent={(targetNodeId) => {
-              const raw = Array.isArray(componentsRaw) ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId) : undefined;
-              if (raw) {
-                setSelectedNode(componentToCanvasNode(raw, componentsList));
-                setActiveTab("snapshot");
-                setOpenSubId(null);
-              }
-            }}
-            onRequestNavigateToStudentDemographics={() => {
-              setOpenSubId(null);
-              setActiveTab("overview-and-context");
-              setOverallNavTarget({ level: "L3", section: "enrollment.studentDemographics" });
-            }}
-          />
-          </div>
-        </SheetContent>
-      </Sheet>
-
       <ComponentWorkingSpaceOverlay
         open={!!selectedNode && isExpandedWorkingSpace}
         onOpenChange={(open) => setIsExpandedWorkingSpace(open)}
@@ -1611,6 +1625,8 @@ function CanvasViewInner() {
         onRequestOpenComponent={(targetNodeId) => {
           const raw = Array.isArray(componentsRaw) ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId) : undefined;
           if (raw) {
+            setRingFullViewState(null);
+            setCenterFullViewRoute(null);
             setSelectedNode(componentToCanvasNode(raw, componentsList));
             setActiveTab("snapshot");
             setOpenSubId(null);
@@ -1625,35 +1641,99 @@ function CanvasViewInner() {
 
       </div>{/* end canvas left panel */}
 
+      {/* ── Right: Working panel (same split + resize as full view) ── */}
+      {selectedNode && !isExpandedWorkingSpace && !ringFullViewState && !centerFullViewRoute && (
+        <>
+          <RightPaneResizeDivider
+            dividerDragRef={dividerDragRef}
+            fullViewWidthPct={fullViewWidthPct}
+            setFullViewWidthPct={setFullViewWidthPct}
+          />
+          <div
+            className="shrink-0 min-h-0 flex flex-col overflow-hidden bg-[#F8F9FA] shadow-[-4px_0_16px_rgba(0,0,0,0.08)]"
+            style={{ width: `${fullViewWidthPct}%` }}
+          >
+            <div
+              className={cn(
+                "relative flex h-full min-h-0 flex-1 flex-col transition-[box-shadow,background-color]",
+                sheetPanelDropActive && selectedNode?.nodeId && "ring-4 ring-inset ring-sky-500 bg-sky-50/30",
+              )}
+              onDragEnter={(e) => {
+                if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
+                e.preventDefault();
+                setSheetPanelDropActive(true);
+              }}
+              onDragOver={(e) => {
+                if (!dataTransferHasLearnerModule(e.dataTransfer) || !selectedNode?.nodeId) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+                setSheetPanelDropActive(true);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setSheetPanelDropActive(false);
+              }}
+              onDrop={onSheetPanelDrop}
+            >
+              {sheetPanelDropActive && selectedNode?.nodeId ? (
+                <div className="pointer-events-none absolute inset-x-0 top-14 z-10 flex justify-center px-4">
+                  <div className="rounded-full border border-sky-300 bg-white/95 px-4 py-2 text-center text-xs font-semibold text-sky-900 shadow-md">
+                    {selectedNode.nodeId === "overall"
+                      ? `Drop to add ${moduleLibraryAudience === "adult" ? "adult" : "learner"} experience component to the blueprint`
+                      : moduleLibraryAudience === "adult"
+                        ? `Drop to add adult subcomponent to “${selectedNode.title}”`
+                        : `Drop to add learner subcomponent to “${selectedNode.title}”`}
+                  </div>
+                </div>
+              ) : null}
+              <ComponentWorkingPanel
+                selectedNode={selectedNode ? { nodeId: selectedNode.nodeId, title: selectedNode.title, color: selectedNode.color } : null}
+                componentsRaw={componentsRaw}
+                activeTab={activeTab}
+                onActiveTabChange={(tab) => { setActiveTab(tab); if (tab !== "status-and-health") setShPage(null); }}
+                initialSubId={initialSubId}
+                onInitialSubIdConsumed={() => setInitialSubId(null)}
+                openSubId={openSubId}
+                onOpenSubIdChange={setOpenSubId}
+                overallNavTarget={overallNavTarget}
+                onOverallNavTargetConsumed={() => setOverallNavTarget(null)}
+                deNavTarget={deNavTarget}
+                onDeNavTargetConsumed={() => setDeNavTarget(null)}
+                shPage={shPage}
+                onClose={() => {
+                  setSelectedNode(null);
+                  setOpenSubId(null);
+                  setIsExpandedWorkingSpace(false);
+                }}
+                onExpand={() => setIsExpandedWorkingSpace(true)}
+                showExpandButton
+                onRequestOpenComponent={(targetNodeId) => {
+                  const raw = Array.isArray(componentsRaw) ? componentsRaw.find((c: any) => String(c?.nodeId) === targetNodeId) : undefined;
+                  if (raw) {
+                    setRingFullViewState(null);
+                    setCenterFullViewRoute(null);
+                    setSelectedNode(componentToCanvasNode(raw, componentsList));
+                    setActiveTab("snapshot");
+                    setOpenSubId(null);
+                  }
+                }}
+                onRequestNavigateToStudentDemographics={() => {
+                  setOpenSubId(null);
+                  setActiveTab("overview-and-context");
+                  setOverallNavTarget({ level: "L3", section: "enrollment.studentDemographics" });
+                }}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
       {/* ── Right: Full View panel (true side-by-side) ── */}
       {ringFullViewState && (
         <>
-          {/* Draggable divider */}
-          <div
-            className="w-1.5 shrink-0 cursor-col-resize bg-gray-200 hover:bg-blue-400 active:bg-blue-500 transition-colors select-none touch-none z-20"
-            onPointerDown={(e) => {
-              e.currentTarget.setPointerCapture(e.pointerId);
-              const containerW = (e.currentTarget.parentElement as HTMLElement | null)?.offsetWidth ?? window.innerWidth;
-              dividerDragRef.current = { startX: e.clientX, startPct: fullViewWidthPct };
-              (dividerDragRef.current as any)._containerW = containerW;
-            }}
-            onPointerMove={(e) => {
-              const d = dividerDragRef.current;
-              if (!d) return;
-              const containerW = (d as any)._containerW ?? window.innerWidth;
-              const deltaPct = ((d.startX - e.clientX) / containerW) * 100;
-              const next = Math.min(80, Math.max(20, d.startPct + deltaPct));
-              setFullViewWidthPct(next);
-            }}
-            onPointerUp={(e) => {
-              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-              dividerDragRef.current = null;
-            }}
-            onPointerCancel={(e) => {
-              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-              dividerDragRef.current = null;
-            }}
-            title="Drag to resize"
+          <RightPaneResizeDivider
+            dividerDragRef={dividerDragRef}
+            fullViewWidthPct={fullViewWidthPct}
+            setFullViewWidthPct={setFullViewWidthPct}
           />
           {/* Full view panel */}
           <div
@@ -1666,7 +1746,10 @@ function CanvasViewInner() {
               mode={ringFullViewState.mode}
               initialDrillTarget={ringFullViewState.initialDrillTarget}
               selectedDataWindow={selectedDataWindow}
-              onDataWindowChange={setSelectedDataWindow}
+              onDataWindowChange={(w) => {
+                setSelectedDataWindow(w);
+                setRingFullViewState((prev) => prev ? { ...prev, initialDrillTarget: null } : null);
+              }}
               ringNodes={ringNodeList}
               onNavigate={(node) => {
                 setRingFullViewState((prev) =>
@@ -1687,6 +1770,10 @@ function CanvasViewInner() {
                     ? { ...prev, mode: "dataWindow", initialDrillTarget: { kind: "dimension", dimensionKey } }
                     : null
                 );
+              }}
+              onSwitchToDataWindowWithDrill={(w, drillTarget) => {
+                setSelectedDataWindow(w);
+                setRingFullViewState((prev) => prev ? { ...prev, mode: "dataWindow", initialDrillTarget: drillTarget } : null);
               }}
               onOpenEdit={() => {
                 const state = ringFullViewState;
@@ -1723,32 +1810,10 @@ function CanvasViewInner() {
       {/* ── Right: Center Full View panel ── */}
       {centerFullViewRoute && !ringFullViewState && (
         <>
-          {/* Draggable divider */}
-          <div
-            className="w-1.5 shrink-0 cursor-col-resize bg-gray-200 hover:bg-blue-400 active:bg-blue-500 transition-colors select-none touch-none z-20"
-            onPointerDown={(e) => {
-              e.currentTarget.setPointerCapture(e.pointerId);
-              const containerW = (e.currentTarget.parentElement as HTMLElement | null)?.offsetWidth ?? window.innerWidth;
-              dividerDragRef.current = { startX: e.clientX, startPct: fullViewWidthPct };
-              (dividerDragRef.current as any)._containerW = containerW;
-            }}
-            onPointerMove={(e) => {
-              const d = dividerDragRef.current;
-              if (!d) return;
-              const containerW = (d as any)._containerW ?? window.innerWidth;
-              const deltaPct = ((d.startX - e.clientX) / containerW) * 100;
-              const next = Math.min(80, Math.max(20, d.startPct + deltaPct));
-              setFullViewWidthPct(next);
-            }}
-            onPointerUp={(e) => {
-              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-              dividerDragRef.current = null;
-            }}
-            onPointerCancel={(e) => {
-              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-              dividerDragRef.current = null;
-            }}
-            title="Drag to resize"
+          <RightPaneResizeDivider
+            dividerDragRef={dividerDragRef}
+            fullViewWidthPct={fullViewWidthPct}
+            setFullViewWidthPct={setFullViewWidthPct}
           />
           {/* Center full view panel */}
           <div

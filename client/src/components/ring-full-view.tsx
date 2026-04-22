@@ -26,6 +26,7 @@ import {
   buildSnapshotSources,
   buildPracticeDossier,
   getAllPracticeItems,
+  mergeScheduleDurationFrequency,
   type PracticeDossier,
   type PracticeItem,
   type KDNodeKey,
@@ -208,6 +209,8 @@ export interface RingFullViewProps {
   initialDrillTarget?: DrillTarget | null;
   /** Called when user clicks a dimension from Mode A — parent switches to Mode B + seeds drill. */
   onSwitchToDimension?: (key: DimensionKey) => void;
+  /** Called when a line-item in a Mode-A card is clicked — parent switches to Mode B with a drill pre-set. */
+  onSwitchToDataWindowWithDrill?: (w: DataWindowKey, drill: DrillTarget) => void;
 }
 
 // ─── Extended data helpers ────────────────────────────────────────────────────
@@ -688,13 +691,25 @@ function PracticeToolDrillView({
                 <p className="text-sm text-gray-700">{dossier.bucketTitle}</p>
               </div>
             )}
-            {dossier.attributions.length > 0 && (
+            {/* Component-level notes (from root component attribution, if any) */}
+            {(() => {
+              const compAttr = dossier.attributions.find((a) => a.isComponent);
+              if (!compAttr?.notes?.trim()) return null;
+              return (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Notes</p>
+                  <p className="text-sm text-gray-600 leading-relaxed">{compAttr.notes.trim()}</p>
+                </div>
+              );
+            })()}
+            {/* Subcomponent attributions */}
+            {dossier.attributions.some((a) => !a.isComponent) && (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                  Used in this component
+                  Subcomponents it applies to
                 </p>
                 <div className="space-y-2">
-                  {(dossier.attributions ?? []).map((attr, i) => (
+                  {dossier.attributions.filter((a) => !a.isComponent).map((attr, i) => (
                     <div
                       key={i}
                       className="border border-gray-100 rounded-lg px-3 py-2 bg-gray-50/50"
@@ -1791,55 +1806,102 @@ function CardKeyDrivers({ comp, onDimensionClick }: { comp: any; onDimensionClic
   );
 }
 
-function CardLeaps({ comp }: { comp: any }) {
+function CardLeaps({ comp, onDrill, onDoubleClickEdit }: { comp: any; onDrill?: (t: DrillTarget) => void; onDoubleClickEdit?: (p: RingScopedEditPayload) => void }) {
   const leaps = aggregateLeaps(comp);
   if (!leaps.length) return <p className="text-[9px] text-gray-400 italic">No leaps defined</p>;
   return (
     <ul className="space-y-px">
       {leaps.map((l) => (
-        <li key={l.label} className="flex items-start gap-1 text-[9px] text-gray-800 leading-tight">
+        <li key={l.label} className="flex items-start gap-1 text-[9px] leading-tight">
           <span className="shrink-0 text-gray-400">•</span>
-          <span className="min-w-0">
-            {l.label}{" "}
-            <span className="text-gray-500 font-medium">({l.priority})</span>
-          </span>
+          {onDrill ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDrill({ kind: "leap", label: l.label }); }}
+              onDoubleClick={(e) => { e.stopPropagation(); onDoubleClickEdit?.({ tab: "designed-experience", deNav: { view: "leapDetail", label: l.label }, openSubId: null, initialSubId: null }); }}
+              className="min-w-0 text-left text-blue-700 hover:underline transition-colors"
+              title="Click to view · Double-click to edit"
+            >
+              {l.label}{" "}
+              <span className="text-gray-500 font-medium">({l.priority})</span>
+            </button>
+          ) : (
+            <span className="min-w-0 text-gray-800">
+              {l.label}{" "}
+              <span className="text-gray-500 font-medium">({l.priority})</span>
+            </span>
+          )}
         </li>
       ))}
     </ul>
   );
 }
 
-function CardOutcomes({ comp }: { comp: any }) {
+function CardOutcomes({ comp, onDrill, onDoubleClickEdit }: { comp: any; onDrill?: (t: DrillTarget) => void; onDoubleClickEdit?: (p: RingScopedEditPayload) => void }) {
   const outcomes = aggregateOutcomes(comp);
   if (!outcomes.length) return <p className="text-[9px] text-gray-400 italic">No outcomes defined</p>;
   return (
     <ul className="space-y-px">
       {outcomes.map((o) => (
-        <li key={o.label} className="flex items-start gap-1 text-[9px] text-gray-800 leading-tight">
+        <li key={o.label} className="flex items-start gap-1 text-[9px] leading-tight">
           <span className="shrink-0 text-gray-400">•</span>
-          <span className="min-w-0">
-            {o.isPrimary && <span className="text-blue-600 mr-0.5">★</span>}
-            {o.label}{" "}
-            <span className="text-gray-500 font-medium">({o.priority})</span>
-          </span>
+          {onDrill ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDrill({ kind: "outcome", label: o.label }); }}
+              onDoubleClick={(e) => { e.stopPropagation(); onDoubleClickEdit?.({ tab: "designed-experience", deNav: { view: "outcomeDetail", l2: o.label }, openSubId: null, initialSubId: null }); }}
+              className="min-w-0 text-left text-blue-700 hover:underline transition-colors"
+              title="Click to view · Double-click to edit"
+            >
+              {o.isPrimary && <span className="text-amber-500 mr-0.5">★</span>}
+              {o.label}{" "}
+              <span className="text-gray-500 font-medium">({o.priority})</span>
+            </button>
+          ) : (
+            <span className="min-w-0 text-gray-800">
+              {o.isPrimary && <span className="text-amber-500 mr-0.5">★</span>}
+              {o.label}{" "}
+              <span className="text-gray-500 font-medium">({o.priority})</span>
+            </span>
+          )}
         </li>
       ))}
     </ul>
   );
 }
 
-function CardSubcomponents({ comp }: { comp: any }) {
+function CardSubcomponents({ comp, onDrill, onDoubleClickEdit }: { comp: any; onDrill?: (t: DrillTarget) => void; onDoubleClickEdit?: (p: RingScopedEditPayload) => void }) {
   const subs = getSubcomponents(comp);
   if (!subs.length) return <p className="text-[9px] text-gray-400 italic">No subcomponents</p>;
   return (
     <ul className="space-y-px">
       {subs.map((s, i) => (
-        <li key={i} className="flex items-start gap-1 text-[9px] text-gray-800 leading-tight">
+        <li key={i} className="flex items-start gap-1 text-[9px] leading-tight">
           <span className="shrink-0 text-gray-400">•</span>
-          <span className="min-w-0">
-            {s.isAdult && <span className="text-purple-600 font-semibold mr-0.5">(A)</span>}
-            {s.name}
-          </span>
+          {onDrill ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDrill({ kind: "subcomponent", name: s.name }); }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (!onDoubleClickEdit) return;
+                const payload: RingScopedEditPayload = s.isAdult
+                  ? { tab: "designed-experience", deNav: { view: "adultSubManage", subId: s.id }, openSubId: null, initialSubId: null }
+                  : { tab: "designed-experience", deNav: null, openSubId: s.id, initialSubId: s.id };
+                onDoubleClickEdit(payload);
+              }}
+              className="min-w-0 text-left text-blue-700 hover:underline transition-colors"
+              title="Click to view · Double-click to edit"
+            >
+              {s.isAdult && <span className="text-purple-600 font-semibold mr-0.5">(A)</span>}
+              {s.name}
+            </button>
+          ) : (
+            <span className="min-w-0 text-gray-800">
+              {s.isAdult && <span className="text-purple-600 font-semibold mr-0.5">(A)</span>}
+              {s.name}
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -1868,32 +1930,64 @@ function CardSnapshot({ comp }: { comp: any }) {
   );
 }
 
-function CardPractices({ comp }: { comp: any }) {
-  const items = getPracticesKeyItems(comp);
-  if (!items.length) return <p className="text-[9px] text-gray-400 italic">No key practices marked</p>;
+function CardPractices({ comp, onDrill, onDoubleClickEdit }: { comp: any; onDrill?: (t: DrillTarget) => void; onDoubleClickEdit?: (p: RingScopedEditPayload) => void }) {
+  const allItems = useMemo(() => getAllPracticeItems(comp, "practices"), [comp]);
+  const keyItems = useMemo(() => mergeScheduleDurationFrequency(allItems.filter((i) => i.isKey)), [allItems]);
+  if (!keyItems.length) return <p className="text-[9px] text-gray-400 italic">No key practices marked</p>;
   return (
     <ul className="space-y-px">
-      {items.map((item, i) => (
-        <li key={i} className="flex items-start gap-1 text-[9px] text-gray-800 leading-tight">
-          <span className="shrink-0 text-gray-400">•</span>
-          <span className="min-w-0">{item}</span>
-        </li>
-      ))}
+      {keyItems.map((item, i) => {
+        const displayLabel = item.isLongText ? `… ${item.bucketTitle}` : item.label;
+        return (
+          <li key={i} className="flex items-start gap-1 text-[9px] leading-tight">
+            <span className="shrink-0 text-gray-400">•</span>
+            {onDrill ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onDrill({ kind: "practice", item }); }}
+                onDoubleClick={(e) => { e.stopPropagation(); onDoubleClickEdit?.({ tab: "designed-experience", deNav: { view: "designElement", elementId: item.elementId }, openSubId: item.bucketCompositeKey, initialSubId: item.bucketCompositeKey }); }}
+                className="min-w-0 text-left text-blue-700 hover:underline transition-colors"
+                title="Click to view · Double-click to edit"
+              >
+                {displayLabel}
+              </button>
+            ) : (
+              <span className="min-w-0 text-gray-800">{displayLabel}</span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
-function CardTools({ comp }: { comp: any }) {
-  const items = getToolsKeyItems(comp);
-  if (!items.length) return <p className="text-[9px] text-gray-400 italic">No key tools marked</p>;
+function CardTools({ comp, onDrill, onDoubleClickEdit }: { comp: any; onDrill?: (t: DrillTarget) => void; onDoubleClickEdit?: (p: RingScopedEditPayload) => void }) {
+  const allItems = useMemo(() => getAllPracticeItems(comp, "tools"), [comp]);
+  const keyItems = allItems.filter((i) => i.isKey);
+  if (!keyItems.length) return <p className="text-[9px] text-gray-400 italic">No key tools marked</p>;
   return (
     <ul className="space-y-px">
-      {items.map((item, i) => (
-        <li key={i} className="flex items-start gap-1 text-[9px] text-gray-800 leading-tight">
-          <span className="shrink-0 text-gray-400">•</span>
-          <span className="min-w-0">{item}</span>
-        </li>
-      ))}
+      {keyItems.map((item, i) => {
+        const displayLabel = item.isLongText ? `… ${item.bucketTitle}` : item.label;
+        return (
+          <li key={i} className="flex items-start gap-1 text-[9px] leading-tight">
+            <span className="shrink-0 text-gray-400">•</span>
+            {onDrill ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onDrill({ kind: "tool", item }); }}
+                onDoubleClick={(e) => { e.stopPropagation(); onDoubleClickEdit?.({ tab: "designed-experience", deNav: { view: "designElement", elementId: item.elementId }, openSubId: item.bucketCompositeKey, initialSubId: item.bucketCompositeKey }); }}
+                className="min-w-0 text-left text-blue-700 hover:underline transition-colors"
+                title="Click to view · Double-click to edit"
+              >
+                {displayLabel}
+              </button>
+            ) : (
+              <span className="min-w-0 text-gray-800">{displayLabel}</span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -1906,19 +2000,23 @@ function DataWindowCardContent({
   windowKey,
   comp,
   onDimensionClick,
+  onDrill,
+  onDoubleClickEdit,
 }: {
   windowKey: DataWindowKey;
   comp: any;
   onDimensionClick?: (dim: KDNodeKey) => void;
+  onDrill?: (t: DrillTarget) => void;
+  onDoubleClickEdit?: (p: RingScopedEditPayload) => void;
 }) {
   switch (windowKey) {
     case "keyDrivers":    return <CardKeyDrivers comp={comp} onDimensionClick={onDimensionClick} />;
-    case "leaps":         return <CardLeaps comp={comp} />;
-    case "outcomes":      return <CardOutcomes comp={comp} />;
-    case "subcomponents": return <CardSubcomponents comp={comp} />;
+    case "leaps":         return <CardLeaps comp={comp} onDrill={onDrill} onDoubleClickEdit={onDoubleClickEdit} />;
+    case "outcomes":      return <CardOutcomes comp={comp} onDrill={onDrill} onDoubleClickEdit={onDoubleClickEdit} />;
+    case "subcomponents": return <CardSubcomponents comp={comp} onDrill={onDrill} onDoubleClickEdit={onDoubleClickEdit} />;
     case "snapshot":      return <CardSnapshot comp={comp} />;
-    case "practices":     return <CardPractices comp={comp} />;
-    case "tools":         return <CardTools comp={comp} />;
+    case "practices":     return <CardPractices comp={comp} onDrill={onDrill} onDoubleClickEdit={onDoubleClickEdit} />;
+    case "tools":         return <CardTools comp={comp} onDrill={onDrill} onDoubleClickEdit={onDoubleClickEdit} />;
     default:              return <CardComingSoon />;
   }
 }
@@ -2014,6 +2112,9 @@ function OctagonWindowTile({
   comp,
   onExpand,
   onDimensionClick,
+  onDrill,
+  onDoubleClickEdit,
+  onHeaderDoubleClick,
   className,
 }: {
   windowKey: DataWindowKey;
@@ -2021,26 +2122,30 @@ function OctagonWindowTile({
   comp: any;
   onExpand: () => void;
   onDimensionClick?: (dim: KDNodeKey) => void;
+  onDrill?: (t: DrillTarget) => void;
+  onDoubleClickEdit?: (p: RingScopedEditPayload) => void;
+  onHeaderDoubleClick?: () => void;
   className?: string;
 }) {
   return (
     <div className={cn("flex flex-col gap-[2px] h-full min-h-0", className)}>
-      {/* Label above the card — clicking expands to Mode B */}
+      {/* Label above the card — single click expands to Mode B; double-click opens manage page */}
       <button
         type="button"
         onClick={onExpand}
+        onDoubleClick={(e) => { e.stopPropagation(); onHeaderDoubleClick?.(); }}
         className="shrink-0 text-[9px] font-semibold text-gray-600 text-left hover:text-blue-700 transition-colors truncate leading-tight"
-        title={`Expand ${label}`}
+        title={onHeaderDoubleClick ? `Expand ${label} · Double-click to manage` : `Expand ${label}`}
       >
         {label}
       </button>
-      {/* Card body — scrollable, fills its row */}
+      {/* Card body — clicking the background expands to Mode B; individual items intercept before bubble */}
       <div
         className="flex-1 min-h-0 bg-white/85 rounded border border-gray-300/50 overflow-y-auto cursor-pointer hover:border-blue-400/60 hover:bg-white transition-colors"
         onClick={windowKey === "keyDrivers" ? undefined : onExpand}
         style={{ padding: "4px 5px" }}
       >
-        <DataWindowCardContent windowKey={windowKey} comp={comp} onDimensionClick={onDimensionClick} />
+        <DataWindowCardContent windowKey={windowKey} comp={comp} onDimensionClick={onDimensionClick} onDrill={onDrill} onDoubleClickEdit={onDoubleClickEdit} />
       </div>
     </div>
   );
@@ -2112,8 +2217,10 @@ function ComponentFullView({
   onNavigate,
   onClose,
   onOpenEdit,
+  onOpenScopedEdit,
   onSwitchToDataWindow,
   onSwitchToDimension,
+  onSwitchToDataWindowWithDrill,
 }: Omit<RingFullViewProps, "mode">) {
   const title: string = comp?.snapshotData?.name || comp?.title || "Component";
   const subtitle: string = comp?.snapshotData?.subtitle || comp?.subtitle || "";
@@ -2139,6 +2246,21 @@ function ComponentFullView({
     onDataWindowChange(w);
     onSwitchToDataWindow(w);
   }
+
+  function drillFromCard(w: DataWindowKey, target: DrillTarget) {
+    onDataWindowChange(w);
+    onSwitchToDataWindowWithDrill?.(w, target);
+  }
+
+  // Header double-click payloads: open the manage page for each section
+  const headerDoubleClickPayload: Partial<Record<DataWindowKey, RingScopedEditPayload>> = {
+    leaps:         { tab: "designed-experience", deNav: { view: "leaps" }, openSubId: null, initialSubId: null },
+    outcomes:      { tab: "designed-experience", deNav: { view: "outcomes" }, openSubId: null, initialSubId: null },
+    subcomponents: { tab: "designed-experience", deNav: null, openSubId: null, initialSubId: null },
+    practices:     { tab: "designed-experience", deNav: { view: "designElement", elementId: "practices" }, openSubId: null, initialSubId: null },
+    tools:         { tab: "designed-experience", deNav: { view: "designElement", elementId: "tools" }, openSubId: null, initialSubId: null },
+    snapshot:      { tab: "designed-experience", deNav: null, openSubId: null, initialSubId: null },
+  };
 
   return (
     <div className="h-full flex flex-col bg-[#F8F9FA] overflow-hidden">
@@ -2228,6 +2350,15 @@ function ComponentFullView({
                     onDimensionClick={k === "keyDrivers" && onSwitchToDimension
                       ? (dim) => onSwitchToDimension(dim as DimensionKey)
                       : undefined}
+                    onDrill={onSwitchToDataWindowWithDrill
+                      ? (target) => drillFromCard(k, target)
+                      : undefined}
+                    onDoubleClickEdit={onOpenScopedEdit
+                      ? (p) => onOpenScopedEdit(p)
+                      : undefined}
+                    onHeaderDoubleClick={headerDoubleClickPayload[k]
+                      ? () => onOpenScopedEdit(headerDoubleClickPayload[k]!)
+                      : undefined}
                   />
                 ))}
               </div>
@@ -2310,6 +2441,27 @@ function DataWindowFullView({
     setDrillTarget({ kind: "dimension", dimensionKey: key });
   }, []);
 
+  // Translate a compact drill event into a working-space edit payload for double-click-to-edit
+  const handleDoubleClickItem = useCallback((e: import("./ring-data-preview-window").CompactDrillEvent) => {
+    let payload: RingScopedEditPayload;
+    if (e.kind === "leap") {
+      payload = { tab: "designed-experience", deNav: { view: "leapDetail", label: e.label }, openSubId: null, initialSubId: null };
+    } else if (e.kind === "outcome") {
+      payload = { tab: "designed-experience", deNav: { view: "outcomeDetail", l2: e.label }, openSubId: null, initialSubId: null };
+    } else if (e.kind === "subcomponent") {
+      const subs = getSubcomponents(comp);
+      const found = subs.find((s) => s.name === e.name);
+      payload = found?.isAdult
+        ? { tab: "designed-experience", deNav: { view: "adultSubManage", subId: found.id }, openSubId: null, initialSubId: null }
+        : { tab: "designed-experience", deNav: null, openSubId: found?.id ?? null, initialSubId: found?.id ?? null };
+    } else if (e.kind === "practice" || e.kind === "tool") {
+      payload = { tab: "designed-experience", deNav: { view: "designElement", elementId: e.item.elementId }, openSubId: e.item.bucketCompositeKey, initialSubId: e.item.bucketCompositeKey };
+    } else {
+      return;
+    }
+    onOpenScopedEdit(payload);
+  }, [comp, onOpenScopedEdit]);
+
   const handleDrillBack = useCallback(() => {
     setDrillTarget(null);
   }, []);
@@ -2367,6 +2519,7 @@ function DataWindowFullView({
                   selectedWindow={selectedDataWindow}
                   onWindowChange={(w) => { setDrillTarget(null); onDataWindowChange(w); }}
                   onDrill={handleDrill}
+                  onDoubleClickItem={handleDoubleClickItem}
                   onDimensionClick={handleDimensionClick}
                   onDoubleClickToEdit={() => onOpenScopedEdit(scopedGetterRef.current())}
                 />

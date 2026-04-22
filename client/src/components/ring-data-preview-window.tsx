@@ -113,48 +113,56 @@ export function aggregateOutcomes(
     }
   };
 
-  const addAims = (aims: any[]) => {
+  // isRoot=true means isPrimary should be inherited; subcomponent primaries are local and should not
+  // propagate as stars in the component-level view.
+  const addAims = (aims: any[], isRoot: boolean) => {
     for (const a of aims) {
       if (a?.type !== "outcome" || !isTargetingAimActive(a)) continue;
       const subs: string[] = Array.isArray(a.subSelections) ? a.subSelections.filter(Boolean) : [];
       if (subs.length === 0) {
         // Whole L2 selected
-        mergeLabel(a.label, aimPriority(a), !!a.isPrimary);
+        mergeLabel(a.label, aimPriority(a), isRoot && !!a.isPrimary);
       } else {
-        // Specific L3 selections
+        // Specific L3 selections — subPrimaries are only respected at root level
         const subPriorities: Record<string, string> = a.subPriorities ?? {};
+        const subPrimaries: Record<string, boolean> = a.subPrimaries ?? {};
         for (const l3 of subs) {
           const raw = subPriorities[l3];
           const p: Priority = raw === "H" ? "H" : raw === "L" ? "L" : "M";
-          mergeLabel(l3, p, !!a.isPrimary);
+          mergeLabel(l3, p, isRoot && !!subPrimaries[l3]);
         }
       }
     }
   };
 
   const de = comp?.designedExperienceData || {};
-  addAims(de.keyDesignElements?.aims || []);
+  addAims(de.keyDesignElements?.aims || [], true);
   for (const sub of [...(de.subcomponents || []), ...(de.adultSubcomponents || [])]) {
-    addAims(sub.keyDesignElements?.aims || sub.aims || []);
+    addAims(sub.keyDesignElements?.aims || sub.aims || [], false);
   }
 
-  return Array.from(map.entries()).map(([label, { priority, isPrimary }]) => ({
-    label,
-    priority,
-    isPrimary,
-  }));
+  const PRIORITY_SORT: Record<Priority, number> = { H: 0, M: 1, L: 2 };
+  return Array.from(map.entries())
+    .map(([label, { priority, isPrimary }]) => ({ label, priority, isPrimary }))
+    .sort((a, b) => {
+      // Primary items first, then by priority
+      if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+      return PRIORITY_SORT[a.priority] - PRIORITY_SORT[b.priority];
+    });
 }
 
 export function getSubcomponents(
   comp: any,
-): Array<{ name: string; description: string; isAdult: boolean }> {
+): Array<{ id: string; name: string; description: string; isAdult: boolean }> {
   const de = comp?.designedExperienceData || {};
   const learner = (de.subcomponents || []).map((s: any) => ({
+    id: s.id || "",
     name: s.name || "",
     description: s.description || "",
     isAdult: false,
   }));
   const adult = (de.adultSubcomponents || []).map((s: any) => ({
+    id: s.id || "",
     name: s.name || "",
     description: s.description || "",
     isAdult: true,
@@ -262,7 +270,7 @@ function getTeacherNames(comp: any): string {
   return parts.join(", ");
 }
 
-/** Primary outcome labels (max 2 in UI) — L2 `isPrimary` and/or L3 `subPrimaries`. */
+/** Primary outcome labels — up to 2, oldest-first (matching the working space's own enforcement). */
 function getPrimaryOutcomes(comp: any): string {
   const aims: any[] = comp?.designedExperienceData?.keyDesignElements?.aims || [];
   const items: { label: string; ts: number }[] = [];
@@ -280,7 +288,7 @@ function getPrimaryOutcomes(comp: any): string {
     }
   }
   items.sort((x, y) => x.ts - y.ts);
-  return items.map((i) => i.label).filter(Boolean).join(" & ");
+  return items.slice(0, 2).map((i) => i.label).filter(Boolean).join(" & ");
 }
 
 const BK_SCHEDULE_CLASSROOMS_STUDENTS = "schedule-q1__number-of-classrooms-and-students";
@@ -617,6 +625,7 @@ export interface PracticeAttribution {
   isAdult: boolean;
   isKey: boolean;
   notes: string; // TagSelection.notes for A1; notes field for others
+  isComponent: boolean; // true when this attribution is from the root component (not a subcomponent)
 }
 
 /** Full dossier for one practice/tool label within a ring component tree. */
@@ -654,16 +663,18 @@ export function buildPracticeDossier(
   const de = comp?.designedExperienceData ?? {};
   const compName = comp?.snapshotData?.name || comp?.title || "Component";
 
-  const sources: Array<{ name: string; isAdult: boolean; expertData: any }> = [
-    { name: compName, isAdult: false, expertData: de.elementsExpertData ?? {} },
+  const sources: Array<{ name: string; isAdult: boolean; isComponent: boolean; expertData: any }> = [
+    { name: compName, isAdult: false, isComponent: true, expertData: de.elementsExpertData ?? {} },
     ...(de.subcomponents ?? []).map((s: any) => ({
       name: s.name || "Subcomponent",
       isAdult: false,
+      isComponent: false,
       expertData: s.elementsExpertData ?? {},
     })),
     ...(de.adultSubcomponents ?? []).map((s: any) => ({
       name: s.name || "Adult Subcomponent",
       isAdult: true,
+      isComponent: false,
       expertData: s.elementsExpertData ?? {},
     })),
   ];
@@ -686,18 +697,18 @@ export function buildPracticeDossier(
             ? `${primaryLabel} (${secondaries.map((s: any) => primaryTag?.secondaries?.find((x: any) => x.id === s.tagId)?.label ?? s.tagId).join(", ")})`
             : primaryLabel;
           if (combined.trim().toLowerCase() === normLabel) {
-            attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sel.isKey, notes: sel.notes || "" });
+            attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sel.isKey, notes: sel.notes || "", isComponent: src.isComponent });
           }
         } else if (secondaries.length > 0) {
           for (const sec of secondaries) {
             const secLabel = primaryTag?.secondaries?.find((s: any) => s.id === sec.tagId)?.label ?? sec.tagId;
             if (secLabel.trim().toLowerCase() === normLabel) {
-              attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sec.isKey, notes: (sec as any).notes || "" });
+              attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sec.isKey, notes: (sec as any).notes || "", isComponent: src.isComponent });
             }
           }
         } else {
           if (primaryLabel.trim().toLowerCase() === normLabel) {
-            attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sel.isKey, notes: sel.notes || "" });
+            attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: sel.isKey, notes: sel.notes || "", isComponent: src.isComponent });
           }
         }
       }
@@ -706,7 +717,7 @@ export function buildPracticeDossier(
       for (const item of allItems) {
         if (item.label.trim().toLowerCase() === normLabel) {
           const notes = bv.archetypeA3?.description || bv.archetypeA4?.notes || bv.archetypeA5?.text || "";
-          attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: item.isKey, notes });
+          attributions.push({ sourceName: src.name, isAdult: src.isAdult, isKey: item.isKey, notes, isComponent: src.isComponent });
         }
       }
     }
@@ -1034,9 +1045,11 @@ export type CompactDrillEvent =
 function BulletButton({
   children,
   onClick,
+  onDoubleClick,
 }: {
   children: React.ReactNode;
   onClick: () => void;
+  onDoubleClick?: () => void;
 }) {
   return (
     <li className="flex items-start gap-1 text-[9px] leading-tight">
@@ -1044,7 +1057,9 @@ function BulletButton({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); onClick(); }}
+        onDoubleClick={onDoubleClick ? (e) => { e.stopPropagation(); onDoubleClick(); } : undefined}
         className="min-w-0 text-left text-gray-800 hover:text-blue-700 hover:underline transition-colors"
+        title={onDoubleClick ? "Click to view · Double-click to edit" : undefined}
       >
         {children}
       </button>
@@ -1052,14 +1067,17 @@ function BulletButton({
   );
 }
 
-function LeapsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
+function LeapsContent({ comp, onDrill, onDoubleClickItem }: { comp: any; onDrill?: (e: CompactDrillEvent) => void; onDoubleClickItem?: (e: CompactDrillEvent) => void }) {
   const leaps = aggregateLeaps(comp);
   if (leaps.length === 0) return <EmptyState text="No leaps defined" />;
   return (
     <ul className="space-y-0.5">
       {leaps.map((leap) =>
         onDrill ? (
-          <BulletButton key={leap.label} onClick={() => onDrill({ kind: "leap", label: leap.label })}>
+          <BulletButton key={leap.label}
+            onClick={() => onDrill({ kind: "leap", label: leap.label })}
+            onDoubleClick={onDoubleClickItem ? () => onDoubleClickItem({ kind: "leap", label: leap.label }) : undefined}
+          >
             {leap.label}{" "}
             <span className="text-gray-500">({leap.priority})</span>
           </BulletButton>
@@ -1074,22 +1092,25 @@ function LeapsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrill
   );
 }
 
-function OutcomesContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
+function OutcomesContent({ comp, onDrill, onDoubleClickItem }: { comp: any; onDrill?: (e: CompactDrillEvent) => void; onDoubleClickItem?: (e: CompactDrillEvent) => void }) {
   const outcomes = aggregateOutcomes(comp);
   if (outcomes.length === 0) return <EmptyState text="No outcomes defined" />;
   return (
     <ul className="space-y-0.5">
       {outcomes.map((o) =>
         onDrill ? (
-          <BulletButton key={o.label} onClick={() => onDrill({ kind: "outcome", label: o.label })}>
-            {o.label}
-            {o.isPrimary && <span className="text-blue-600"> ★</span>}{" "}
+          <BulletButton key={o.label}
+            onClick={() => onDrill({ kind: "outcome", label: o.label })}
+            onDoubleClick={onDoubleClickItem ? () => onDoubleClickItem({ kind: "outcome", label: o.label }) : undefined}
+          >
+            {o.isPrimary && <span className="text-amber-500"> ★</span>}
+            {o.label}{" "}
             <span className="text-gray-500">({o.priority})</span>
           </BulletButton>
         ) : (
           <BulletRow key={o.label}>
-            {o.label}
-            {o.isPrimary && <span className="text-blue-600"> ★</span>}{" "}
+            {o.isPrimary && <span className="text-amber-500"> ★</span>}
+            {o.label}{" "}
             <span className="text-gray-500">({o.priority})</span>
           </BulletRow>
         )
@@ -1098,14 +1119,17 @@ function OutcomesContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDr
   );
 }
 
-function SubcomponentsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
+function SubcomponentsContent({ comp, onDrill, onDoubleClickItem }: { comp: any; onDrill?: (e: CompactDrillEvent) => void; onDoubleClickItem?: (e: CompactDrillEvent) => void }) {
   const subs = getSubcomponents(comp);
   if (subs.length === 0) return <EmptyState text="No subcomponents" />;
   return (
     <ul className="space-y-0.5">
       {subs.map((sub, i) =>
         onDrill ? (
-          <BulletButton key={i} onClick={() => onDrill({ kind: "subcomponent", name: sub.name })}>
+          <BulletButton key={i}
+            onClick={() => onDrill({ kind: "subcomponent", name: sub.name })}
+            onDoubleClick={onDoubleClickItem ? () => onDoubleClickItem({ kind: "subcomponent", name: sub.name }) : undefined}
+          >
             {sub.isAdult && <span className="text-gray-500">(A) </span>}
             {sub.name}
           </BulletButton>
@@ -1146,7 +1170,7 @@ function SnapshotContent({ comp }: { comp: any }) {
  * Duration key: "schedule-q1__duration", Frequency key: "schedule-q1__frequency".
  * Returns a new array with those two items replaced by one combined item.
  */
-function mergeScheduleDurationFrequency(items: PracticeItem[]): PracticeItem[] {
+export function mergeScheduleDurationFrequency(items: PracticeItem[]): PracticeItem[] {
   const DUR_KEY = "schedule-q1__duration";
   const FREQ_KEY = "schedule-q1__frequency";
   const durIdx = items.findIndex((i) => i.bucketCompositeKey === DUR_KEY);
@@ -1188,7 +1212,7 @@ function mergeScheduleDurationFrequency(items: PracticeItem[]): PracticeItem[] {
   return result;
 }
 
-function PracticesContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
+function PracticesContent({ comp, onDrill, onDoubleClickItem }: { comp: any; onDrill?: (e: CompactDrillEvent) => void; onDoubleClickItem?: (e: CompactDrillEvent) => void }) {
   const allItems = useMemo(() => getAllPracticeItems(comp, "practices"), [comp]);
   const keyItems = useMemo(
     () => mergeScheduleDurationFrequency(allItems.filter((i) => i.isKey)),
@@ -1200,7 +1224,10 @@ function PracticesContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactD
       {keyItems.map((item, i) => {
         const displayLabel = item.isLongText ? `… ${item.bucketTitle}` : item.label;
         return onDrill ? (
-          <BulletButton key={i} onClick={() => onDrill({ kind: "practice", item })}>
+          <BulletButton key={i}
+            onClick={() => onDrill({ kind: "practice", item })}
+            onDoubleClick={onDoubleClickItem ? () => onDoubleClickItem({ kind: "practice", item }) : undefined}
+          >
             {displayLabel}
           </BulletButton>
         ) : (
@@ -1211,7 +1238,7 @@ function PracticesContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactD
   );
 }
 
-function ToolsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrillEvent) => void }) {
+function ToolsContent({ comp, onDrill, onDoubleClickItem }: { comp: any; onDrill?: (e: CompactDrillEvent) => void; onDoubleClickItem?: (e: CompactDrillEvent) => void }) {
   const allItems = useMemo(() => getAllPracticeItems(comp, "tools"), [comp]);
   const keyItems = allItems.filter((i) => i.isKey);
   if (keyItems.length === 0) return <EmptyState text="No key tools marked yet" />;
@@ -1220,7 +1247,10 @@ function ToolsContent({ comp, onDrill }: { comp: any; onDrill?: (e: CompactDrill
       {keyItems.map((item, i) => {
         const displayLabel = item.isLongText ? `… ${item.bucketTitle}` : item.label;
         return onDrill ? (
-          <BulletButton key={i} onClick={() => onDrill({ kind: "tool", item })}>
+          <BulletButton key={i}
+            onClick={() => onDrill({ kind: "tool", item })}
+            onDoubleClick={onDoubleClickItem ? () => onDoubleClickItem({ kind: "tool", item }) : undefined}
+          >
             {displayLabel}
           </BulletButton>
         ) : (
@@ -1241,6 +1271,8 @@ export interface RingDataPreviewWindowProps {
   onOpenFullView?: () => void;
   /** When provided, list items become clickable and fire drill-down events. */
   onDrill?: (e: CompactDrillEvent) => void;
+  /** When provided, double-clicking a list item fires this to open the working panel edit page for it. */
+  onDoubleClickItem?: (e: CompactDrillEvent) => void;
   /** When provided, clicking a Key Drivers node fires a dimension-detail event. */
   onDimensionClick?: (dim: KDNodeKey) => void;
   /** Double-click on the scrollable body (not on buttons) opens the working panel scoped to this window. */
@@ -1253,6 +1285,7 @@ export function RingDataPreviewWindow({
   onWindowChange,
   onOpenFullView,
   onDrill,
+  onDoubleClickItem,
   onDimensionClick,
   onDoubleClickToEdit,
 }: RingDataPreviewWindowProps) {
@@ -1373,11 +1406,11 @@ export function RingDataPreviewWindow({
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1 min-h-0">
         {selectedWindow === "keyDrivers" && <KeyDriversContent comp={comp} onDimensionClick={onDimensionClick} />}
-        {selectedWindow === "leaps" && <LeapsContent comp={comp} onDrill={onDrill} />}
-        {selectedWindow === "outcomes" && <OutcomesContent comp={comp} onDrill={onDrill} />}
-        {selectedWindow === "subcomponents" && <SubcomponentsContent comp={comp} onDrill={onDrill} />}
-        {selectedWindow === "practices" && <PracticesContent comp={comp} onDrill={onDrill} />}
-        {selectedWindow === "tools" && <ToolsContent comp={comp} onDrill={onDrill} />}
+        {selectedWindow === "leaps" && <LeapsContent comp={comp} onDrill={onDrill} onDoubleClickItem={onDoubleClickItem} />}
+        {selectedWindow === "outcomes" && <OutcomesContent comp={comp} onDrill={onDrill} onDoubleClickItem={onDoubleClickItem} />}
+        {selectedWindow === "subcomponents" && <SubcomponentsContent comp={comp} onDrill={onDrill} onDoubleClickItem={onDoubleClickItem} />}
+        {selectedWindow === "practices" && <PracticesContent comp={comp} onDrill={onDrill} onDoubleClickItem={onDoubleClickItem} />}
+        {selectedWindow === "tools" && <ToolsContent comp={comp} onDrill={onDrill} onDoubleClickItem={onDoubleClickItem} />}
         {selectedWindow === "snapshot" && <SnapshotContent comp={comp} />}
         {selectedWindow === "embedded" && <ComingSoonContent />}
       </div>

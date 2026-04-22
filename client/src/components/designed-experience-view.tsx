@@ -219,17 +219,18 @@ function aimPriorityAbbrev(aim: any): "H" | "M" | "L" | null {
 }
 
 /** One DE chip per L3 when narrowed; one chip for L2-whole (`subSelections` empty). */
-function deExpandedOutcomeChips(aims: Tag[]): { aim: Tag; l3?: string; chipLabel: string; reactKey: string }[] {
-  const rows: { aim: Tag; l3?: string; chipLabel: string; reactKey: string }[] = [];
+function deExpandedOutcomeChips(aims: Tag[]): { aim: Tag; l3?: string; chipLabel: string; reactKey: string; isPrimary: boolean }[] {
+  const rows: { aim: Tag; l3?: string; chipLabel: string; reactKey: string; isPrimary: boolean }[] = [];
   for (const a of aims) {
     if (a.type !== "outcome" || !isTargetingAimActive(a as any)) continue;
     const subs = Array.isArray((a as any).subSelections) ? (a as any).subSelections.filter(Boolean) : [];
     if (subs.length === 0) {
-      rows.push({ aim: a, chipLabel: a.label, reactKey: `${a.id}:l2` });
+      rows.push({ aim: a, chipLabel: a.label, reactKey: `${a.id}:l2`, isPrimary: !!(a as any).isPrimary });
     } else {
+      const subPrimaries: Record<string, boolean> = (a as any).subPrimaries ?? {};
       for (const l3 of subs) {
         const k = (l3 || "").trim().toLowerCase();
-        rows.push({ aim: a, l3, chipLabel: l3, reactKey: `${a.id}:${k}` });
+        rows.push({ aim: a, l3, chipLabel: l3, reactKey: `${a.id}:${k}`, isPrimary: !!subPrimaries[l3] });
       }
     }
   }
@@ -2449,7 +2450,12 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                       <button
                         key={row.reactKey}
                         type="button"
-                        className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors inline-flex items-center gap-1 max-w-full min-w-0"
+                        className={cn(
+                          "text-[11px] font-medium px-2 py-0.5 rounded-full border transition-colors inline-flex items-center gap-1 max-w-full min-w-0",
+                          row.isPrimary
+                            ? "bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100 font-semibold"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100",
+                        )}
                         onClick={() =>
                           setSelectedOutcomeNav({
                             l2: row.aim.label,
@@ -2457,6 +2463,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                           })
                         }
                       >
+                        {row.isPrimary && <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500 shrink-0" />}
                         <span className="truncate min-w-0">{row.chipLabel}</span>
                         {priLetter ? (
                           <span
