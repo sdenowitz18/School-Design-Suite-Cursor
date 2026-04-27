@@ -109,6 +109,7 @@ export default function ComponentAdultExperienceView({
       aims: [],
       practices: [],
       supports: [],
+      experienceAudience: "adult" as const,
     };
     persistSubs([...localSubs, sub]);
     setScratchName("");

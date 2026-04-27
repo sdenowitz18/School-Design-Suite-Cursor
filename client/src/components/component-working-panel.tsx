@@ -81,7 +81,9 @@ export default function ComponentWorkingPanel({
 
   const comp = (componentData as any) ?? listComponent;
   const subs: any[] = comp?.designedExperienceData?.subcomponents || [];
-  const activeSub = openSubId ? subs.find((s: any) => s.id === openSubId) : null;
+  const adultSubs: any[] = comp?.designedExperienceData?.adultSubcomponents || [];
+  const allSubs = [...subs, ...adultSubs];
+  const activeSub = openSubId ? allSubs.find((s: any) => s.id === openSubId) : null;
   const dropdownTitle = activeSub ? activeSub.name : selectedNode?.title;
   const isOverallSelected = selectedNode?.nodeId === "overall";
 
@@ -145,13 +147,38 @@ export default function ComponentWorkingPanel({
                       key={sub.id}
                       className="cursor-pointer py-2 text-gray-600 hover:text-gray-900"
                       onClick={() => {
-                        onActiveTabChange("designed-experience");
+                        onActiveTabChange("snapshot");
                         onOpenSubIdChange(sub.id);
                       }}
                       data-testid={`switch-to-sub-${sub.id}`}
                     >
                       <div className="w-6 h-6 mr-2 flex items-center justify-center">
                         <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                      </div>
+                      <span>{sub.name}</span>
+                      {openSubId === sub.id && <Check className="w-4 h-4 ml-auto text-blue-600" />}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              {adultSubs.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-gray-500 font-normal uppercase tracking-wider px-2 py-1.5">
+                    Adult Subcomponents
+                  </DropdownMenuLabel>
+                  {adultSubs.map((sub: any) => (
+                    <DropdownMenuItem
+                      key={sub.id}
+                      className="cursor-pointer py-2 text-gray-600 hover:text-gray-900"
+                      onClick={() => {
+                        onActiveTabChange("snapshot");
+                        onOpenSubIdChange(sub.id);
+                      }}
+                      data-testid={`switch-to-adult-sub-${sub.id}`}
+                    >
+                      <div className="w-6 h-6 mr-2 flex items-center justify-center">
+                        <div className="w-1.5 h-1.5 rounded-full bg-violet-300" />
                       </div>
                       <span>{sub.name}</span>
                       {openSubId === sub.id && <Check className="w-4 h-4 ml-auto text-blue-600" />}
@@ -242,6 +269,10 @@ export default function ComponentWorkingPanel({
                   onOpenSubIdChange={onOpenSubIdChange}
                   onRequestOpenComponent={onRequestOpenComponent}
                   onRequestNavigateToStudentDemographics={onRequestNavigateToStudentDemographics}
+                  onNavigateToSubSnapshot={(subId) => {
+                    onOpenSubIdChange(subId);
+                    onActiveTabChange("snapshot");
+                  }}
                   deNavTarget={deNavTarget}
                   onDeNavTargetConsumed={onDeNavTargetConsumed}
                 />

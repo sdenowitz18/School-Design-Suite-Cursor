@@ -169,6 +169,8 @@ export interface DESubcomponent {
   elementsExpertData?: ElementsExpertData;
   learnersProfile?: any;
   adultsProfile?: any;
+  experienceAudience?: "learner" | "adult";
+  snapshotData?: any;
 }
 
 export interface DesignedExperienceData {
@@ -891,7 +893,7 @@ function KeyDesignElementsSummary({
   );
 }
 
-export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange, onRequestOpenComponent, onRequestNavigateToStudentDemographics, deNavTarget, onDeNavTargetConsumed }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void, onRequestOpenComponent?: (nodeId: string) => void, onRequestNavigateToStudentDemographics?: () => void, deNavTarget?: import("./designed-experience-card-content").DESubView | null, onDeNavTargetConsumed?: () => void }) {
+export default function DesignedExperienceView({ nodeId, title, initialSubId, onSubIdConsumed, openSubId, onOpenSubIdChange, onRequestOpenComponent, onRequestNavigateToStudentDemographics, onNavigateToSubSnapshot, deNavTarget, onDeNavTargetConsumed }: { nodeId?: string, title?: string, initialSubId?: string | null, onSubIdConsumed?: () => void, openSubId?: string | null, onOpenSubIdChange?: (id: string | null) => void, onRequestOpenComponent?: (nodeId: string) => void, onRequestNavigateToStudentDemographics?: () => void, onNavigateToSubSnapshot?: (subId: string) => void, deNavTarget?: import("./designed-experience-card-content").DESubView | null, onDeNavTargetConsumed?: () => void }) {
   const [description, setDescription] = useState("");
   const [keyDesignElements, setKeyDesignElements] = useState<KeyDesignElements>({ aims: [], practices: [], supports: [] });
   const [subcomponents, setSubcomponents] = useState<DESubcomponent[]>([]);
@@ -1600,6 +1602,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       aims: [],
       practices: [],
       supports: [],
+      experienceAudience: "learner" as const,
     };
     setSubcomponents(prev => [...prev, newSub]);
     setNewSubName("");
@@ -1619,6 +1622,7 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
       aims: [],
       practices: [],
       supports: [],
+      experienceAudience: "adult" as const,
     };
     setAdultSubcomponents((prev) => [...prev, newSub]);
     setNewAdultSubName("");
@@ -2710,7 +2714,13 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                     <button
                       key={sub.id}
                       type="button"
-                      onClick={() => setActiveSubId(sub.id)}
+                      onClick={() => {
+                        if (onNavigateToSubSnapshot) {
+                          onNavigateToSubSnapshot(sub.id);
+                        } else {
+                          setActiveSubId(sub.id);
+                        }
+                      }}
                       className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100 transition-colors max-w-[200px]"
                       data-testid={`button-open-subcomponent-${sub.id}`}
                     >
@@ -2948,8 +2958,12 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
                         key={sub.id}
                         type="button"
                         onClick={() => {
-                          setComponentAdultFocusSubId(sub.id);
-                          setShowComponentAdultManage(true);
+                          if (onNavigateToSubSnapshot) {
+                            onNavigateToSubSnapshot(sub.id);
+                          } else {
+                            setComponentAdultFocusSubId(sub.id);
+                            setShowComponentAdultManage(true);
+                          }
                         }}
                         className="text-left text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 transition-colors max-w-[200px]"
                         data-testid={`button-open-adult-subcomponent-${sub.id}`}

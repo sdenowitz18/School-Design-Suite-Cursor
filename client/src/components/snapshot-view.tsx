@@ -186,6 +186,7 @@ interface GradeBandLine {
 interface GradeBandEntry {
   gradeBandId: string;
   secondaryId?: string;
+  isKey?: boolean;
   lines: GradeBandLine[];
 }
 
@@ -391,26 +392,47 @@ export default function SnapshotView({ nodeId, title, color, subcomponentId }: S
     setCustomPrinciples(customs);
     setPrincipleLevels(principleLvls);
 
-    // Grade bands — prefer snapshotData, but fall back to learnersProfile selections
-    if (Array.isArray(s.gradeBandEntries) && s.gradeBandEntries.length > 0) {
-      setGradeBandEntries(s.gradeBandEntries);
-    } else {
+    // Grade bands — prefer snapshotData, but fall back to learnersProfile selections.
+    // Either way, merge isKey from learnersProfile.selections so the two stay in sync.
+    {
       const lpSels: any[] = de?.learnersProfile?.selections ?? [];
-      const migrated: GradeBandEntry[] = [];
+      const lpKeyMap = new Map<string, { primaryKey: boolean; secKeys: Record<string, boolean> }>();
       for (const sel of lpSels) {
         const pid = String(sel.primaryId || "");
-        const match = GRADE_BAND_PRIMARIES.find((p) => p.id === pid);
-        if (!match) continue;
-        const secIds: string[] = Array.isArray(sel.secondaryIds) ? sel.secondaryIds : [];
-        if (secIds.length === 0) {
-          migrated.push({ gradeBandId: pid, lines: [{ id: genLineId(), participation: "required", gating: "universal" }] });
-        } else {
-          for (const sid of secIds) {
-            migrated.push({ gradeBandId: pid, secondaryId: sid, lines: [{ id: genLineId(), participation: "required", gating: "universal" }] });
+        if (!GRADE_BAND_PRIMARIES.some((p) => p.id === pid)) continue;
+        lpKeyMap.set(pid, {
+          primaryKey: !!sel.isKey,
+          secKeys: sel.secondaryKeys ?? {},
+        });
+      }
+
+      if (Array.isArray(s.gradeBandEntries) && s.gradeBandEntries.length > 0) {
+        const merged = (s.gradeBandEntries as GradeBandEntry[]).map((entry) => {
+          const info = lpKeyMap.get(entry.gradeBandId);
+          if (!info) return entry;
+          const lpIsKey = entry.secondaryId ? !!info.secKeys[entry.secondaryId] : info.primaryKey;
+          if (lpIsKey !== !!entry.isKey) return { ...entry, isKey: lpIsKey };
+          return entry;
+        });
+        setGradeBandEntries(merged);
+      } else {
+        const migrated: GradeBandEntry[] = [];
+        for (const sel of lpSels) {
+          const pid = String(sel.primaryId || "");
+          const match = GRADE_BAND_PRIMARIES.find((p) => p.id === pid);
+          if (!match) continue;
+          const secIds: string[] = Array.isArray(sel.secondaryIds) ? sel.secondaryIds : [];
+          const info = lpKeyMap.get(pid);
+          if (secIds.length === 0) {
+            migrated.push({ gradeBandId: pid, isKey: !!info?.primaryKey, lines: [{ id: genLineId(), participation: "required", gating: "universal" }] });
+          } else {
+            for (const sid of secIds) {
+              migrated.push({ gradeBandId: pid, secondaryId: sid, isKey: !!info?.secKeys[sid], lines: [{ id: genLineId(), participation: "required", gating: "universal" }] });
+            }
           }
         }
+        setGradeBandEntries(migrated);
       }
-      setGradeBandEntries(migrated);
     }
     setAmountStudents(s.amountStudents || "0");
     setAmountClassrooms(s.amountClassrooms || "0");
@@ -700,27 +722,32 @@ export default function SnapshotView({ nodeId, title, color, subcomponentId }: S
     const existingLearnerSels: any[] = existingLearnerProfile.selections || [];
 
     // Build learner selections from grade band entries, grouping by gradeBandId
-    const gradeBandMap = new Map<string, string[]>();
+    // and syncing isKey / secondaryKeys from gradeBandEntries.
+    const gradeBandMap = new Map<string, { secIds: string[]; isKeyPrimary: boolean; secKeys: Record<string, boolean> }>();
     for (const entry of gradeBandEntries) {
+      const existing = gradeBandMap.get(entry.gradeBandId) || { secIds: [], isKeyPrimary: false, secKeys: {} };
       if (entry.secondaryId) {
-        const existing = gradeBandMap.get(entry.gradeBandId) || [];
-        existing.push(entry.secondaryId);
-        gradeBandMap.set(entry.gradeBandId, existing);
+        existing.secIds.push(entry.secondaryId);
+        if (entry.isKey) existing.secKeys[entry.secondaryId] = true;
       } else {
-        if (!gradeBandMap.has(entry.gradeBandId)) gradeBandMap.set(entry.gradeBandId, []);
+        if (entry.isKey) existing.isKeyPrimary = true;
       }
+      gradeBandMap.set(entry.gradeBandId, existing);
     }
     // Preserve non-grade-band selections from learner profile
     const nonGradeBandSels = existingLearnerSels.filter((sel: any) => {
       return !GRADE_BAND_PRIMARIES.some((p) => p.id === sel.primaryId);
     });
     const newLearnerSels = [...nonGradeBandSels];
-    gradeBandMap.forEach((secIds, primaryId) => {
+    gradeBandMap.forEach((info, primaryId) => {
       const existingSel = existingLearnerSels.find((s: any) => s.primaryId === primaryId);
+      const hasSecKeys = Object.keys(info.secKeys).length > 0;
       newLearnerSels.push({
         ...(existingSel || {}),
         primaryId,
-        secondaryIds: secIds.length > 0 ? secIds : undefined,
+        secondaryIds: info.secIds.length > 0 ? info.secIds : undefined,
+        isKey: info.secIds.length === 0 ? info.isKeyPrimary : false,
+        secondaryKeys: hasSecKeys ? info.secKeys : undefined,
       });
     });
 
@@ -902,6 +929,14 @@ export default function SnapshotView({ nodeId, title, color, subcomponentId }: S
       const entry = { ...next[entryIdx] };
       entry.lines = entry.lines.filter((_, i) => i !== lineIdx);
       next[entryIdx] = entry;
+      return next;
+    });
+  };
+
+  const toggleGradeBandKey = (entryIdx: number) => {
+    setGradeBandEntries((prev) => {
+      const next = [...prev];
+      next[entryIdx] = { ...next[entryIdx], isKey: !next[entryIdx].isKey };
       return next;
     });
   };
@@ -1513,11 +1548,24 @@ export default function SnapshotView({ nodeId, title, color, subcomponentId }: S
 
                       {/* Selected grade bands */}
                       {gradeBandEntries.map((entry, entryIdx) => (
-                        <div key={`${entry.gradeBandId}-${entry.secondaryId || "all"}`} className="border border-gray-200 rounded-lg bg-white p-3 space-y-2">
+                        <div key={`${entry.gradeBandId}-${entry.secondaryId || "all"}`} className={cn("border rounded-lg bg-white p-3 space-y-2", entry.isKey ? "border-amber-300 bg-amber-50/30" : "border-gray-200")}>
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-gray-800">
-                              {gradeBandLabel(entry.gradeBandId, entry.secondaryId)}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleGradeBandKey(entryIdx)}
+                                title={entry.isKey ? "Unmark as Key" : "Mark as Key"}
+                                className={cn(
+                                  "shrink-0 transition-colors",
+                                  entry.isKey ? "text-amber-500" : "text-gray-300 hover:text-amber-400",
+                                )}
+                              >
+                                <Star className={cn("w-4 h-4", entry.isKey && "fill-amber-500")} />
+                              </button>
+                              <span className="text-sm font-medium text-gray-800">
+                                {gradeBandLabel(entry.gradeBandId, entry.secondaryId)}
+                              </span>
+                            </div>
                             <button
                               type="button"
                               onClick={() => removeGradeBand(entry.gradeBandId, entry.secondaryId)}

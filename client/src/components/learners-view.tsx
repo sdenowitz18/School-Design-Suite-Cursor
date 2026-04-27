@@ -63,13 +63,12 @@ function genLearnerLineId() {
 
 /**
  * Project the canonical grade-band entries derived from `learnersProfile.selections`,
- * preserving any existing entries' line data when the grade band remains selected.
+ * preserving any existing entries' line data and isKey when the grade band remains selected.
  */
 function syncGradeBandEntries(
   currentEntries: any[],
   newSelections: LearnerSelection[],
 ): any[] {
-  // Keep any non-grade-band entries unchanged (shouldn't normally exist).
   const result: any[] = currentEntries.filter((e) => !GRADE_BAND_PRIMARY_IDS.has(e?.gradeBandId));
 
   for (const sel of newSelections) {
@@ -81,6 +80,7 @@ function syncGradeBandEntries(
       );
       result.push(existing ?? {
         gradeBandId: sel.primaryId,
+        isKey: !!sel.isKey,
         lines: [{ id: genLearnerLineId(), participation: "required", gating: "universal" }],
       });
     } else {
@@ -91,6 +91,7 @@ function syncGradeBandEntries(
         result.push(existing ?? {
           gradeBandId: sel.primaryId,
           secondaryId: sid,
+          isKey: !!sel.secondaryKeys?.[sid],
           lines: [{ id: genLearnerLineId(), participation: "required", gating: "universal" }],
         });
       }
@@ -254,7 +255,21 @@ export function LearnersEditor({ nodeId, title, variant = "standalone", subProfi
     const p = findPrimary(primaryId);
     if (!p) return;
     if (isPrimarySelected(primaryId)) {
-      writeProfile(selections.filter((s) => s.primaryId !== primaryId));
+      // For grade bands: if secondaries were selected, selecting the primary "All"
+      // clears them. If it was already "All", unselect entirely.
+      const sel = getSelection(primaryId);
+      const hasSecondaries = sel && Array.isArray(sel.secondaryIds) && sel.secondaryIds.length > 0;
+      if (GRADE_BAND_PRIMARY_IDS.has(primaryId) && hasSecondaries) {
+        writeProfile(
+          selections.map((s) =>
+            s.primaryId !== primaryId
+              ? s
+              : { ...s, secondaryIds: undefined, secondaryKeys: undefined, isKey: false },
+          ),
+        );
+      } else {
+        writeProfile(selections.filter((s) => s.primaryId !== primaryId));
+      }
     } else {
       writeProfile([
         ...selections,
@@ -274,6 +289,11 @@ export function LearnersEditor({ nodeId, title, variant = "standalone", subProfi
     const cur = sel.secondaryIds ?? [];
     const removing = cur.includes(secondaryId);
     const nextSec = removing ? cur.filter((id) => id !== secondaryId) : [...cur, secondaryId];
+
+    // For grade bands: if the primary was selected as "All" (no secondaryIds) and
+    // a child is toggled, convert to secondary-level selection.
+    const wasAll = GRADE_BAND_PRIMARY_IDS.has(primaryId) && cur.length === 0 && !removing;
+
     writeProfile(
       selections.map((s) => {
         if (s.primaryId !== primaryId) return s;
@@ -288,6 +308,9 @@ export function LearnersEditor({ nodeId, title, variant = "standalone", subProfi
           const sk = { ...(s.secondaryKeys ?? {}) };
           delete sk[secondaryId];
           next.secondaryKeys = Object.keys(sk).length ? sk : undefined;
+        }
+        if (wasAll) {
+          next.isKey = false;
         }
         return next;
       }),
@@ -337,10 +360,40 @@ export function LearnersEditor({ nodeId, title, variant = "standalone", subProfi
       const effectiveId = subProfileContext?.parentNodeId ?? nodeId;
       if (!effectiveId) return;
       const snap: any = (comp as any)?.snapshotData || {};
-      updateMutation.mutate({
-        nodeId: effectiveId,
-        data: { snapshotData: { ...snap, gradeBandEntries: next } },
+      const de: any = (comp as any)?.designedExperienceData || {};
+      const prevLp = de.learnersProfile || {};
+      const prevSels: LearnerSelection[] = Array.isArray(prevLp.selections) ? prevLp.selections : [];
+
+      // Sync isKey from gradeBandEntries → learnersProfile.selections
+      const updatedSels = prevSels.map((sel) => {
+        if (!GRADE_BAND_PRIMARY_IDS.has(sel.primaryId)) return sel;
+        const matching = next.filter((e: any) => e.gradeBandId === sel.primaryId);
+        if (matching.length === 0) return sel;
+        const primaryEntry = matching.find((e: any) => !e.secondaryId);
+        const secEntries = matching.filter((e: any) => !!e.secondaryId);
+        if (primaryEntry) {
+          return { ...sel, isKey: !!primaryEntry.isKey };
+        }
+        if (secEntries.length > 0) {
+          const sk: Record<string, boolean> = {};
+          for (const e of secEntries) {
+            if (e.isKey) sk[e.secondaryId] = true;
+          }
+          return { ...sel, secondaryKeys: Object.keys(sk).length ? sk : undefined };
+        }
+        return sel;
       });
+
+      const data: any = {
+        snapshotData: { ...snap, gradeBandEntries: next },
+      };
+      if (JSON.stringify(prevSels) !== JSON.stringify(updatedSels)) {
+        data.designedExperienceData = {
+          ...de,
+          learnersProfile: { ...prevLp, selections: updatedSels },
+        };
+      }
+      updateMutation.mutate({ nodeId: effectiveId, data });
     },
     [nodeId, comp, updateMutation, subProfileContext],
   );
@@ -696,8 +749,25 @@ function BucketCard({
                     : primary.label;
                   const lines: any[] = Array.isArray(entry.lines) ? entry.lines : [];
                   return (
-                    <div key={entryIdx} className="bg-gray-50 rounded-lg px-3 py-2.5 space-y-2">
-                      <p className="text-xs font-medium text-gray-700">{label}</p>
+                    <div key={entryIdx} className={cn("rounded-lg px-3 py-2.5 space-y-2", entry.isKey ? "bg-amber-50" : "bg-gray-50")}>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = [...gradeBandEntries];
+                            next[entryIdx] = { ...next[entryIdx], isKey: !next[entryIdx].isKey };
+                            onGradeBandEntriesChange(next);
+                          }}
+                          title={entry.isKey ? "Unmark as Key" : "Mark as Key"}
+                          className={cn(
+                            "shrink-0 transition-colors",
+                            entry.isKey ? "text-amber-500" : "text-gray-300 hover:text-amber-400",
+                          )}
+                        >
+                          <Star className={cn("w-3.5 h-3.5", entry.isKey && "fill-amber-500")} />
+                        </button>
+                        <p className="text-xs font-medium text-gray-700">{label}</p>
+                      </div>
                       {lines.map((line: any, lineIdx: number) => (
                         <div key={lineIdx} className="flex items-center gap-2 pl-2">
                           <Select

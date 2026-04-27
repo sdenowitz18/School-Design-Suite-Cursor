@@ -97,6 +97,7 @@ export default function ComponentLearnerExperienceView({
       aims: [],
       practices: [],
       supports: [],
+      experienceAudience: "learner" as const,
     };
     persistSubs([...localSubs, sub]);
     setScratchName("");
