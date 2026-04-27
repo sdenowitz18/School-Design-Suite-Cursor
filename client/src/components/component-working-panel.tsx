@@ -17,7 +17,7 @@ import DesignedExperienceView from "./designed-experience-view";
 import type { DESubcomponent } from "./designed-experience-view";
 import SnapshotView from "./snapshot-view";
 import ComponentHealthView, { type StatusHealthPage } from "./component-health-view";
-import SubcomponentSnapshotView from "./subcomponent-snapshot-view";
+// SubcomponentSnapshotView is deprecated — subcomponents now use the full SnapshotView
 import OverviewContextView from "./overview-context-view";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 
@@ -187,12 +187,12 @@ export default function ComponentWorkingPanel({
             <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-transparent gap-6">
               {(selectedNode?.nodeId === "overall"
                 ? [
-                    { label: "Journey & Overview", value: "overview-and-context" },
+                    { label: "Snapshot", value: "overview-and-context" },
                     { label: "Designed Experience", value: "designed-experience" },
                     { label: "Status and Health", value: "status-and-health" },
                   ]
                 : [
-                    { label: "Journey & Overview", value: "snapshot" },
+                    { label: "Snapshot", value: "snapshot" },
                     { label: "Designed Experience", value: "designed-experience" },
                     ...(!openSubId ? [{ label: "Status and Health", value: "status-and-health" }] : []),
                   ]
@@ -212,18 +212,14 @@ export default function ComponentWorkingPanel({
 
         <div className="flex-1 overflow-y-auto bg-gray-50/30">
           {(() => {
-            if (!isOverallSelected && activeSubData && activeTab === "snapshot") {
-              return (
-                <SubcomponentSnapshotView
-                  sub={activeSubData}
-                  parentTitle={selectedNode?.title || "Component"}
-                  onUpdate={updateSubInComponent}
-                />
-              );
-            }
             if (!isOverallSelected && activeTab === "snapshot") {
               return (
-                <SnapshotView nodeId={selectedNode?.nodeId} title={selectedNode?.title} color={selectedNode?.color} />
+                <SnapshotView
+                  nodeId={selectedNode?.nodeId}
+                  title={activeSubData ? activeSubData.name : selectedNode?.title}
+                  color={selectedNode?.color}
+                  subcomponentId={activeSubData?.id}
+                />
               );
             }
             if (isOverallSelected && activeTab === "overview-and-context") {

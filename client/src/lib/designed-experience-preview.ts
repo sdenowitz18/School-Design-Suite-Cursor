@@ -651,37 +651,64 @@ function readSelectedAdultPrimaryIds(de: any): string[] {
   return Array.from(new Set(ids));
 }
 
+/** Canonical order of all adult primary role IDs (always shown on center card). */
+const ALL_ADULT_PRIMARY_IDS: string[] = [
+  "educators",
+  "caregivers_families",
+  "school_leaders_administrators",
+  "student_support_wellbeing_staff",
+  "school_operations_support_staff",
+  "district_leaders_staff",
+  "other_adults",
+];
+
 function buildAdultRoleSummaries(
   overallComp: any,
   ringComponents: any[],
 ): AdultRoleSummary[] {
   const de = overallComp?.designedExperienceData ?? {};
-  const selectedRoleIds = readSelectedAdultPrimaryIds(de);
-  if (selectedRoleIds.length === 0) return [];
 
   const sliceDetail: Record<string, any> = de?.adultsProfile?.sliceDetail ?? {};
 
   // Adult ring components grouped by catalog roleId.
-  const adultRingsByRoleId = new Map<string, ComponentRef[]>();
+  const adultRingsByCatalogRole = new Map<string, ComponentRef[]>();
+  // Adult ring components grouped by snapshotData.primaryAdultGroup (new field).
+  const adultRingsByPrimaryGroup = new Map<string, ComponentRef[]>();
   for (const comp of ringComponents) {
     if (ringExperienceAudience(comp) !== "adult") continue;
-    const roleId = adultComponentCatalogRoleId(comp);
-    if (!roleId) continue;
-    if (!adultRingsByRoleId.has(roleId)) adultRingsByRoleId.set(roleId, []);
-    adultRingsByRoleId.get(roleId)!.push({
+    const ref: ComponentRef = {
       nodeId: String(comp?.nodeId ?? comp?.id ?? ""),
       title: String(comp?.title ?? "Untitled"),
-    });
+    };
+    const catalogRole = adultComponentCatalogRoleId(comp);
+    if (catalogRole) {
+      if (!adultRingsByCatalogRole.has(catalogRole)) adultRingsByCatalogRole.set(catalogRole, []);
+      adultRingsByCatalogRole.get(catalogRole)!.push(ref);
+    }
+    const primaryGroup = String(comp?.snapshotData?.primaryAdultGroup ?? "");
+    if (primaryGroup) {
+      if (!adultRingsByPrimaryGroup.has(primaryGroup)) adultRingsByPrimaryGroup.set(primaryGroup, []);
+      adultRingsByPrimaryGroup.get(primaryGroup)!.push(ref);
+    }
   }
 
   const out: AdultRoleSummary[] = [];
-  for (const roleId of selectedRoleIds) {
+  for (const roleId of ALL_ADULT_PRIMARY_IDS) {
     const def = ADULT_PRIMARY_BY_ID.get(roleId);
     if (!def) continue;
     const catalogRoleId = ADULT_ROLE_TO_CATALOG_ROLE[roleId] ?? null;
-    const experiences = catalogRoleId ? adultRingsByRoleId.get(catalogRoleId) ?? [] : [];
+    const catalogExps = catalogRoleId ? adultRingsByCatalogRole.get(catalogRoleId) ?? [] : [];
+    const groupExps = adultRingsByPrimaryGroup.get(roleId) ?? [];
 
-    // Aggregate sliceDetail across every slice keyed under this primary (primary alone or primary::secondary).
+    // Merge both sources, deduplicating by nodeId.
+    const seen = new Set<string>();
+    const experiences: ComponentRef[] = [];
+    for (const ref of [...groupExps, ...catalogExps]) {
+      if (seen.has(ref.nodeId)) continue;
+      seen.add(ref.nodeId);
+      experiences.push(ref);
+    }
+
     const sliceKeys = Object.keys(sliceDetail).filter(
       (k) => k === roleId || k.startsWith(`${roleId}::`),
     );

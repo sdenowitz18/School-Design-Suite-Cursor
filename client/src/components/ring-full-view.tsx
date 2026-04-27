@@ -197,7 +197,7 @@ export interface RingFullViewProps {
   ringNodes: RingNode[];
   onNavigate: (node: RingNode) => void;
   onClose: () => void;
-  /** Opens working panel on Journey & Overview (main component), regardless of current data window. */
+  /** Opens working panel on Snapshot (main component), regardless of current data window. */
   onOpenEdit: () => void;
   /** Opens working panel scoped to the current enlarged data (tabs, element, subcomponent). */
   onOpenScopedEdit: (payload: RingScopedEditPayload) => void;
@@ -2270,7 +2270,7 @@ function ComponentFullView({
           type="button"
           onClick={onOpenEdit}
           className="p-1.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 transition-colors"
-          title="Edit component — Journey & Overview"
+          title="Edit component — Snapshot"
         >
           <Pencil className="w-4 h-4" />
         </button>
@@ -2492,7 +2492,7 @@ function DataWindowFullView({
             type="button"
             onClick={onOpenEdit}
             className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
-            title="Edit component — Journey & Overview"
+            title="Edit component — Snapshot"
           >
             <Pencil className="w-4 h-4" />
           </button>

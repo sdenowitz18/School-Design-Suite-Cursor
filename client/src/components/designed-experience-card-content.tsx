@@ -1401,13 +1401,6 @@ function L2AdultsHub({
   preview: DesignedExperiencePreview;
   onSetRoute: (r: DesignedExperienceCardRoute) => void;
 }) {
-  if (preview.adults.length === 0) {
-    return (
-      <div className="px-3 py-3 text-[11px] text-gray-400 italic text-center">
-        No adult roles selected for the center component yet.
-      </div>
-    );
-  }
   return (
     <>
       {preview.adults.map((r, i) => (

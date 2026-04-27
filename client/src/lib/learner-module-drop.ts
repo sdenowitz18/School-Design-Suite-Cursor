@@ -67,6 +67,10 @@ export async function addRingComponentFromCatalogPick(
     primaryId: pick.primaryId,
     secondaryId: pick.secondaryId,
   };
+  const roleId = "roleId" in pick ? (pick as any).roleId : undefined;
+  const primaryAdultGroup = audience === "adult" && roleId
+    ? CATALOG_ROLE_TO_ADULT_GROUP[roleId] || ""
+    : "";
   await mutateAsync({
     nodeId,
     title: pick.title,
@@ -74,7 +78,10 @@ export async function addRingComponentFromCatalogPick(
     color,
     canvasX: pos.canvasX,
     canvasY: pos.canvasY,
-    snapshotData: defaultSnapshotForLearnerComponent(pick.title),
+    snapshotData: {
+      ...defaultSnapshotForLearnerComponent(pick.title),
+      ...(primaryAdultGroup ? { primaryAdultGroup } : {}),
+    },
     designedExperienceData: {
       description: "",
       experienceAudience: audience,
@@ -91,6 +98,15 @@ export function newSubcomponentId() {
   return `de_sub_${Date.now()}_${++subDropCounter}`;
 }
 
+const CATALOG_ROLE_TO_ADULT_GROUP: Record<string, string> = {
+  educator_exp: "educators",
+  caregiver_exp: "caregivers_families",
+  school_leaders_admin: "school_leaders_administrators",
+  student_support_wellbeing: "student_support_wellbeing_staff",
+  school_ops_support: "school_operations_support_staff",
+  district_leadership: "district_leaders_staff",
+};
+
 /** Build a subcomponent record from a catalog pick (same conceptual module as a ring component). */
 export function subcomponentFromCatalogPick(pick: ModuleCatalogPick, audience: ExperienceAudience = "learner") {
   const catalogMeta = {
@@ -98,6 +114,10 @@ export function subcomponentFromCatalogPick(pick: ModuleCatalogPick, audience: E
     primaryId: pick.primaryId,
     secondaryId: pick.secondaryId,
   };
+  const roleId = "roleId" in pick ? (pick as any).roleId : undefined;
+  const primaryAdultGroup = audience === "adult" && roleId
+    ? CATALOG_ROLE_TO_ADULT_GROUP[roleId] || ""
+    : "";
   return {
     id: newSubcomponentId(),
     name: pick.title,
@@ -105,6 +125,10 @@ export function subcomponentFromCatalogPick(pick: ModuleCatalogPick, audience: E
     aims: [],
     practices: [],
     supports: [],
+    experienceAudience: audience,
+    snapshotData: {
+      ...(primaryAdultGroup ? { primaryAdultGroup } : {}),
+    },
     ...(audience === "adult"
       ? { adultExperienceCatalogMeta: catalogMeta }
       : { learnerExperienceCatalogMeta: catalogMeta }),

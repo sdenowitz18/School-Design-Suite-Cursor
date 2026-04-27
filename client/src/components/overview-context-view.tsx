@@ -212,9 +212,9 @@ const L2_SECTION_LABEL: Record<L2Section, string> = {
 };
 
 function getBreadcrumb(route: Route): string[] {
-  if (route.level === "L1") return ["Journey & Overview"];
+  if (route.level === "L1") return ["Snapshot"];
   if (route.level === "L2") {
-    return ["Journey & Overview", L2_SECTION_LABEL[route.section]];
+    return ["Snapshot", L2_SECTION_LABEL[route.section]];
   }
   const l3 = L3_SECTION_META[route.section];
   const l2Crumb = getBreadcrumb({ level: "L2", section: l3.parent });
@@ -255,7 +255,7 @@ function chartNavParent(section: L3Section): L2Section {
 
 function titleFromRoute(route: Route): string {
   const crumbs = getBreadcrumb(route);
-  return crumbs[crumbs.length - 1] || "Journey & Overview";
+  return crumbs[crumbs.length - 1] || "Snapshot";
 }
 
 function getDeepTextKey(route: Route): "communityOverviewText" | "policyConsiderationsText" | "historyOfChangeText" | "otherContextText" | null {
@@ -524,7 +524,7 @@ export default function OverviewContextView({
         className="cursor-pointer focus:bg-gray-100 focus:text-gray-900"
         onClick={() => goHome()}
       >
-        Journey & Overview
+        Snapshot
       </DropdownMenuItem>
       <DropdownMenuSeparator className="bg-gray-200" />
       {CHART_NAV_GROUPS.map((group, gi) => (

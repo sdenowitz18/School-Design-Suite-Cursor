@@ -611,7 +611,7 @@ function buildDEBreadcrumbs(
 type JOCrumb = { label: string; route: JourneyOverviewCardRoute };
 
 function buildJOBreadcrumbs(route: JourneyOverviewCardRoute): JOCrumb[] {
-  const L1: JOCrumb = { label: "Journey & Overview", route: { level: "L1" } };
+  const L1: JOCrumb = { label: "Snapshot", route: { level: "L1" } };
   if (route.level === "L1") return [L1];
 
   if (route.level === "L2") {
@@ -656,7 +656,7 @@ function buildJOBreadcrumbs(route: JourneyOverviewCardRoute): JOCrumb[] {
 
 const SECTION_SIBLINGS: ReadonlyArray<{ label: string; slot: CenterFullViewSlot }> = [
   { label: "Designed Experience", slot: { kind: "designed", route: { level: "L1" } } },
-  { label: "Journey & Overview", slot: { kind: "overview", route: { level: "L1" } } },
+  { label: "Snapshot", slot: { kind: "overview", route: { level: "L1" } } },
   { label: "Performance & Status", slot: { kind: "status" } },
 ];
 
@@ -2921,7 +2921,7 @@ function CenterHomeView({
             type="button"
             onClick={() => onSelect({ kind: "overview", route: joRoute })}
             className="relative w-[320px] h-[220px] rounded-xl shadow-md border-2 border-orange-200 bg-orange-50/70 hover:border-orange-300 hover:shadow-lg transition-all px-4 pt-4 pb-3 text-left"
-            title="Open Journey & Overview full view"
+            title="Open Snapshot full view"
           >
             <div className="flex flex-col w-full h-full justify-between">
               <JourneyOverviewCardContent
@@ -2939,10 +2939,10 @@ function CenterHomeView({
         ) : (
           <div
             className="relative w-[320px] h-[220px] rounded-xl shadow-md border-2 border-orange-200 bg-orange-50/40 px-4 pt-4 pb-3 flex items-center justify-center text-center opacity-70"
-            title="Journey & Overview is not configured for this school yet"
+            title="Snapshot is not configured for this school yet"
           >
             <div className="text-[12px] text-orange-700/80">
-              <div className="font-semibold mb-1">Journey &amp; Overview</div>
+              <div className="font-semibold mb-1">Snapshot</div>
               <div className="text-[11px] italic">Not configured for this school yet</div>
             </div>
           </div>
@@ -3280,7 +3280,7 @@ export function CenterFullView({
             onEditClick={handleEdit}
           />
         ) : (
-          <ComingSoonView title="Journey & Overview" />
+          <ComingSoonView title="Snapshot" />
         )}
       </div>
     </div>

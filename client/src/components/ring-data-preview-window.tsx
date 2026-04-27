@@ -311,11 +311,18 @@ function isClassroomsStudentsPairBucket(bucket: { id?: string }): boolean {
   return bucket.id === BUCKET_ID_CLASSROOMS_STUDENTS;
 }
 
+function unwrapA3Value(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return v;
+  if (typeof v === "object" && v !== null && "value" in v) return (v as any).value ?? null;
+  return null;
+}
+
 function formatScheduleClassroomsStudents(expert: Record<string, Record<string, unknown>>): string {
-  const bv = expert?.schedule?.[BK_SCHEDULE_CLASSROOMS_STUDENTS] as { archetypeA3Pair?: { first: number | null; second: number | null } } | undefined;
+  const bv = expert?.schedule?.[BK_SCHEDULE_CLASSROOMS_STUDENTS] as { archetypeA3Pair?: { first: unknown; second: unknown } } | undefined;
   const pair = bv?.archetypeA3Pair;
   if (!pair) return "";
-  return formatA3PairClassroomsStudentsLine(pair.first, pair.second);
+  return formatA3PairClassroomsStudentsLine(unwrapA3Value(pair.first), unwrapA3Value(pair.second));
 }
 
 function formatA3Phrase(v: { value: number | null; unit?: string } | undefined): string {

@@ -1,7 +1,14 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { ChevronDown, ChevronLeft, Star } from "lucide-react";
+import { ChevronDown, ChevronLeft, Plus, Star, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUpdateComponent } from "@/lib/api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useMergedComponent } from "@/lib/useMergedComponent";
 import { PlainLanguageInput } from "@/components/expert-view/PlainLanguageInput";
 import { PrimaryTagPill } from "@/components/expert-view/PrimaryTagPill";
@@ -41,6 +48,55 @@ function findPrimary(primaryId: string): LearnerPrimaryDef | undefined {
     }
   }
   return undefined;
+}
+
+// Grade band primary ids — used to keep `snapshotData.gradeBandEntries` in sync
+// with `learnersProfile.selections` whenever a learner toggle changes them.
+const GRADE_BAND_PRIMARY_IDS = new Set(
+  (LEARNER_SECTIONS[0]?.buckets.find((b) => b.id === "grade_band")?.primaries ?? []).map((p) => p.id),
+);
+
+let _learnerLineCounter = 0;
+function genLearnerLineId() {
+  return `gl_${Date.now()}_${++_learnerLineCounter}`;
+}
+
+/**
+ * Project the canonical grade-band entries derived from `learnersProfile.selections`,
+ * preserving any existing entries' line data when the grade band remains selected.
+ */
+function syncGradeBandEntries(
+  currentEntries: any[],
+  newSelections: LearnerSelection[],
+): any[] {
+  // Keep any non-grade-band entries unchanged (shouldn't normally exist).
+  const result: any[] = currentEntries.filter((e) => !GRADE_BAND_PRIMARY_IDS.has(e?.gradeBandId));
+
+  for (const sel of newSelections) {
+    if (!GRADE_BAND_PRIMARY_IDS.has(sel.primaryId)) continue;
+    const secIds = Array.isArray(sel.secondaryIds) ? sel.secondaryIds : [];
+    if (secIds.length === 0) {
+      const existing = currentEntries.find(
+        (e) => e?.gradeBandId === sel.primaryId && !e.secondaryId,
+      );
+      result.push(existing ?? {
+        gradeBandId: sel.primaryId,
+        lines: [{ id: genLearnerLineId(), participation: "required", gating: "universal" }],
+      });
+    } else {
+      for (const sid of secIds) {
+        const existing = currentEntries.find(
+          (e) => e?.gradeBandId === sel.primaryId && e.secondaryId === sid,
+        );
+        result.push(existing ?? {
+          gradeBandId: sel.primaryId,
+          secondaryId: sid,
+          lines: [{ id: genLearnerLineId(), participation: "required", gating: "universal" }],
+        });
+      }
+    }
+  }
+  return result;
 }
 
 function secondaryLabel(primary: LearnerPrimaryDef, secondaryId: string): string {
@@ -115,18 +171,25 @@ export function LearnersEditor({ nodeId, title, variant = "standalone", subProfi
       if (!nodeId) return;
       const de: any = (comp as any)?.designedExperienceData || {};
       const prevLp = de.learnersProfile || {};
-      updateMutation.mutate({
-        nodeId,
-        data: {
-          designedExperienceData: {
-            ...de,
-            learnersProfile: {
-              ...prevLp,
-              selections: next,
-            },
+      const snap: any = (comp as any)?.snapshotData || {};
+      const currentEntries: any[] = Array.isArray(snap.gradeBandEntries) ? snap.gradeBandEntries : [];
+      const nextEntries = syncGradeBandEntries(currentEntries, next);
+
+      const data: any = {
+        designedExperienceData: {
+          ...de,
+          learnersProfile: {
+            ...prevLp,
+            selections: next,
           },
         },
-      });
+      };
+      // Only emit snapshotData updates when grade-band entries actually changed,
+      // so non-grade-band toggles (e.g. demographics) don't churn the snapshot.
+      if (JSON.stringify(currentEntries) !== JSON.stringify(nextEntries)) {
+        data.snapshotData = { ...snap, gradeBandEntries: nextEntries };
+      }
+      updateMutation.mutate({ nodeId, data });
     },
     [nodeId, comp, updateMutation, subProfileContext],
   );
@@ -264,6 +327,24 @@ export function LearnersEditor({ nodeId, title, variant = "standalone", subProfi
     writeProfile(selections.map((s) => (s.primaryId === primaryId ? { ...s, isKey: !s.isKey } : s)));
   }
 
+  const gradeBandEntries: any[] = useMemo(() => {
+    const snap: any = (comp as any)?.snapshotData || {};
+    return Array.isArray(snap.gradeBandEntries) ? snap.gradeBandEntries : [];
+  }, [comp]);
+
+  const writeGradeBandEntries = useCallback(
+    (next: any[]) => {
+      const effectiveId = subProfileContext?.parentNodeId ?? nodeId;
+      if (!effectiveId) return;
+      const snap: any = (comp as any)?.snapshotData || {};
+      updateMutation.mutate({
+        nodeId: effectiveId,
+        data: { snapshotData: { ...snap, gradeBandEntries: next } },
+      });
+    },
+    [nodeId, comp, updateMutation, subProfileContext],
+  );
+
   const summaryBlock =
     variant === "expert" ? (
       <div className="rounded-xl border border-purple-100 bg-purple-50/40 px-4 py-3 space-y-2">
@@ -354,6 +435,8 @@ export function LearnersEditor({ nodeId, title, variant = "standalone", subProfi
               setSecondaryNote={setSecondaryNote}
               toggleKey={toggleKey}
               toggleSecondaryKey={toggleSecondaryKey}
+              gradeBandEntries={gradeBandEntries}
+              onGradeBandEntriesChange={writeGradeBandEntries}
             />
           );
         })}
@@ -406,6 +489,8 @@ function SectionBlock({
   setSecondaryNote,
   toggleKey,
   toggleSecondaryKey,
+  gradeBandEntries,
+  onGradeBandEntriesChange,
 }: {
   section: LearnerSectionDef;
   sectionIndex: number;
@@ -420,6 +505,8 @@ function SectionBlock({
   setSecondaryNote: (pid: string, sid: string, text: string) => void;
   toggleKey: (pid: string) => void;
   toggleSecondaryKey: (pid: string, sid: string) => void;
+  gradeBandEntries?: any[];
+  onGradeBandEntriesChange?: (entries: any[]) => void;
 }) {
   const [bucketsCollapsed, setBucketsCollapsed] = useState(false);
 
@@ -456,6 +543,8 @@ function SectionBlock({
               setSecondaryNote={setSecondaryNote}
               toggleKey={toggleKey}
               toggleSecondaryKey={toggleSecondaryKey}
+              gradeBandEntries={bucket.id === "grade_band" ? gradeBandEntries : undefined}
+              onGradeBandEntriesChange={bucket.id === "grade_band" ? onGradeBandEntriesChange : undefined}
             />
           ))}
         </div>
@@ -463,6 +552,21 @@ function SectionBlock({
     </div>
   );
 }
+
+const PARTICIPATION_LABELS: Record<string, string> = {
+  required: "Required",
+  optional: "Optional",
+  targeted: "Targeted",
+};
+
+const GATING_LABELS: Record<string, string> = {
+  universal: "Universal (all students)",
+  open_opt_in: "Open opt-in",
+  course_prerequisites: "Course pre-requisites",
+  high_perf_invite: "Honors / high-perf",
+  low_perf_invite: "Remediation / low-perf",
+  specific_populations: "Specific populations",
+};
 
 function BucketCard({
   bucket,
@@ -474,6 +578,8 @@ function BucketCard({
   setSecondaryNote,
   toggleKey,
   toggleSecondaryKey,
+  gradeBandEntries,
+  onGradeBandEntriesChange,
 }: {
   bucket: LearnerBucketDef;
   isPrimarySelected: (id: string) => boolean;
@@ -484,6 +590,8 @@ function BucketCard({
   setSecondaryNote: (pid: string, sid: string, text: string) => void;
   toggleKey: (pid: string) => void;
   toggleSecondaryKey: (pid: string, sid: string) => void;
+  gradeBandEntries?: any[];
+  onGradeBandEntriesChange?: (entries: any[]) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -571,6 +679,102 @@ function BucketCard({
             <div className="space-y-2 pt-3 border-t border-gray-100">
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Notes on selected tags</p>
               <div className="space-y-2">{noteRows}</div>
+            </div>
+          )}
+
+          {gradeBandEntries && gradeBandEntries.length > 0 && onGradeBandEntriesChange && (
+            <div className="space-y-2 pt-3 border-t border-gray-100">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                Participation &amp; Selection Gating
+              </p>
+              <div className="space-y-2">
+                {gradeBandEntries.map((entry: any, entryIdx: number) => {
+                  const primary = bucket.primaries.find((p) => p.id === entry.gradeBandId);
+                  if (!primary) return null;
+                  const label = entry.secondaryId
+                    ? (primary.secondaries?.find((s) => s.id === entry.secondaryId)?.label ?? entry.secondaryId)
+                    : primary.label;
+                  const lines: any[] = Array.isArray(entry.lines) ? entry.lines : [];
+                  return (
+                    <div key={entryIdx} className="bg-gray-50 rounded-lg px-3 py-2.5 space-y-2">
+                      <p className="text-xs font-medium text-gray-700">{label}</p>
+                      {lines.map((line: any, lineIdx: number) => (
+                        <div key={lineIdx} className="flex items-center gap-2 pl-2">
+                          <Select
+                            value={line.participation || "required"}
+                            onValueChange={(v) => {
+                              const next = [...gradeBandEntries];
+                              const entryClone = { ...next[entryIdx], lines: [...next[entryIdx].lines] };
+                              entryClone.lines[lineIdx] = { ...entryClone.lines[lineIdx], participation: v };
+                              next[entryIdx] = entryClone;
+                              onGradeBandEntriesChange(next);
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-xs bg-white border-gray-200 w-28">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="required">Required</SelectItem>
+                              <SelectItem value="optional">Optional</SelectItem>
+                              <SelectItem value="targeted">Targeted</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          <Select
+                            value={line.gating || "universal"}
+                            onValueChange={(v) => {
+                              const next = [...gradeBandEntries];
+                              const entryClone = { ...next[entryIdx], lines: [...next[entryIdx].lines] };
+                              entryClone.lines[lineIdx] = { ...entryClone.lines[lineIdx], gating: v };
+                              next[entryIdx] = entryClone;
+                              onGradeBandEntriesChange(next);
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-xs bg-white border-gray-200 flex-1">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(GATING_LABELS).map(([value, gLabel]) => (
+                                <SelectItem key={value} value={value}>{gLabel}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          {lines.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = [...gradeBandEntries];
+                                const entryClone = { ...next[entryIdx], lines: next[entryIdx].lines.filter((_: any, i: number) => i !== lineIdx) };
+                                next[entryIdx] = entryClone;
+                                onGradeBandEntriesChange(next);
+                              }}
+                              className="text-gray-300 hover:text-red-500 transition-colors shrink-0"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = [...gradeBandEntries];
+                          const entryClone = {
+                            ...next[entryIdx],
+                            lines: [...next[entryIdx].lines, { id: `gl_${Date.now()}`, participation: "required", gating: "universal" }],
+                          };
+                          next[entryIdx] = entryClone;
+                          onGradeBandEntriesChange(next);
+                        }}
+                        className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 font-medium pl-2"
+                      >
+                        <Plus className="w-3 h-3" /> Add line
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

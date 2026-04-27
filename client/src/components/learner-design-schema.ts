@@ -136,26 +136,6 @@ export const LEARNER_SECTIONS: LearnerSectionDef[] = [
       },
     ],
   },
-  {
-    id: "selection_gating",
-    title: "Ways of selection-gating learners in parts of the experience",
-    setOfDesignChoices:
-      "Ways of selection-gating learners in parts of the experience",
-    buckets: [
-      {
-        id: "selection_gating_bucket",
-        title: "Selection Gating",
-        primaries: [
-          { id: "mandatory_all", label: "Mandatory for all (for applic. grade levels)" },
-          { id: "open_opt_in", label: "Open opt-in" },
-          { id: "course_prerequisites", label: "Course prerequisites" },
-          { id: "high_perf_invite", label: "High-performance-based invitation / honors" },
-          { id: "low_perf_invite", label: "Low-performance-based invitation / remediation" },
-          { id: "specific_populations", label: "For specific populations (ELLs, SPED, etc.)" },
-        ],
-      },
-    ],
-  },
 ];
 
 /** Primaries under “Demographic & situational factors” — reuse for Adults Q2 (independent state). */
