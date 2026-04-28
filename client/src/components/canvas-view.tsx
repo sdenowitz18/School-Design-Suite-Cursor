@@ -767,7 +767,7 @@ const OctagonNode = ({
             {(() => {
               const left = otherModes[0];
               const right = otherModes[1];
-              const label = (m: OverallCenterMode) => (m === "overview" ? "Snapshot" : m === "designed" ? "Designed Experience" : "Performance Status");
+              const label = (m: OverallCenterMode) => (m === "overview" ? "Journey and Overview" : m === "designed" ? "Designed Experience" : "Performance Status");
               const color = (m: OverallCenterMode) => (m === "overview" ? "text-orange-700" : m === "designed" ? "text-blue-700" : "text-emerald-700");
               const toTab = (m: OverallCenterMode) => (m === "overview" ? "overview-and-context" : m === "designed" ? "designed-experience" : "status-and-health");
               return (

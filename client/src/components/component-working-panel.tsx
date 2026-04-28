@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronDown, Check, Maximize2, X } from "lucide-react";
+import { ChevronDown, Check, Maximize2, X, Pencil } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,6 +78,17 @@ export default function ComponentWorkingPanel({
     initialData: listComponent ?? undefined,
   });
 
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [editingTitle]);
+
   if (!selectedNode) return null;
 
   const comp = (componentData as any) ?? listComponent;
@@ -86,6 +98,20 @@ export default function ComponentWorkingPanel({
   const activeSub = openSubId ? allSubs.find((s: any) => s.id === openSubId) : null;
   const dropdownTitle = activeSub ? activeSub.name : selectedNode?.title;
   const isOverallSelected = selectedNode?.nodeId === "overall";
+  const canRenameComponent = !isOverallSelected && !openSubId;
+
+  const startRename = () => {
+    setTitleDraft(selectedNode?.title || "");
+    setEditingTitle(true);
+  };
+
+  const commitRename = () => {
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== selectedNode?.title) {
+      updateMutation.mutate({ nodeId: selectedNode.nodeId, data: { title: trimmed } });
+    }
+    setEditingTitle(false);
+  };
 
   const activeSubData: DESubcomponent | undefined = activeSub
     ? {
@@ -110,6 +136,22 @@ export default function ComponentWorkingPanel({
     <>
       <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100 bg-white shrink-0">
         <div className="flex items-center gap-3 flex-1">
+          {editingTitle ? (
+            <div className="flex items-center gap-2 flex-1 max-w-md">
+              <Input
+                ref={titleInputRef}
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename();
+                  if (e.key === "Escape") setEditingTitle(false);
+                }}
+                className="h-9 text-lg font-bold"
+                data-testid="input-rename-component"
+              />
+            </div>
+          ) : (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -188,6 +230,18 @@ export default function ComponentWorkingPanel({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
+          {canRenameComponent && !editingTitle && (
+            <button
+              type="button"
+              onClick={startRename}
+              className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+              title="Rename component"
+              data-testid="button-rename-component"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -214,7 +268,7 @@ export default function ComponentWorkingPanel({
             <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-transparent gap-6">
               {(selectedNode?.nodeId === "overall"
                 ? [
-                    { label: "Snapshot", value: "overview-and-context" },
+                    { label: "Journey and Overview", value: "overview-and-context" },
                     { label: "Designed Experience", value: "designed-experience" },
                     { label: "Status and Health", value: "status-and-health" },
                   ]

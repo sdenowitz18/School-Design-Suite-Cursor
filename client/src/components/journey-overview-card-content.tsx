@@ -138,7 +138,7 @@ export interface JourneyOverviewPreview {
 const SCHOOL_OVERVIEW_LABEL = "School Overview";
 
 export function titleForJourneyRoute(route: JourneyOverviewCardRoute): string {
-  if (route.level === "L1") return "Snapshot";
+  if (route.level === "L1") return "Journey and Overview";
   if (route.level === "L2") return route.section === "mission" ? "Mission" : SCHOOL_OVERVIEW_LABEL;
   if (route.level === "L3") {
     switch (route.section) {
@@ -204,16 +204,16 @@ interface Crumb {
 /** Breadcrumbs for display below the card title. Excludes the current leaf (which is the title itself). */
 export function breadcrumbForJourneyRoute(route: JourneyOverviewCardRoute): Crumb[] {
   if (route.level === "L1") return [];
-  if (route.level === "L2") return [{ label: "Snapshot", to: { level: "L1" } }];
+  if (route.level === "L2") return [{ label: "Journey and Overview", to: { level: "L1" } }];
   if (route.level === "L3") {
     return [
-      { label: "Snapshot", to: { level: "L1" } },
+      { label: "Journey and Overview", to: { level: "L1" } },
       { label: SCHOOL_OVERVIEW_LABEL, to: { level: "L2", section: "schoolOverview" } },
     ];
   }
   const parentL3 = l3ParentForL4(route.section);
   return [
-    { label: "Snapshot", to: { level: "L1" } },
+    { label: "Journey and Overview", to: { level: "L1" } },
     { label: SCHOOL_OVERVIEW_LABEL, to: { level: "L2", section: "schoolOverview" } },
     { label: titleForJourneyRoute({ level: "L3", section: parentL3 }), to: { level: "L3", section: parentL3 } },
   ];

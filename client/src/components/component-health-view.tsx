@@ -792,7 +792,7 @@ export default function ComponentHealthView({ nodeId, title, initialPage }: Comp
                <Activity className="w-3.5 h-3.5" />
                <span>Integrated Health View</span>
             </div>
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Snapshot</span>
+            <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">{isOverall ? "Journey and Overview" : "Snapshot"}</span>
          </div>
 
          <div className="p-6">

@@ -71,7 +71,7 @@ function defaultCurrentData(): StudentDemographicsData {
 
 // ─── SVG Donut chart (used for low-income) ───────────────────────────────────
 
-function DonutChart({ pct, size = 52 }: { pct: number | null; size?: number }) {
+export function DonutChart({ pct, size = 52 }: { pct: number | null; size?: number }) {
   const filled = pct === null ? 0 : Math.max(0, Math.min(100, pct));
   const empty = 100 - filled;
   return (
@@ -105,7 +105,7 @@ function DonutChart({ pct, size = 52 }: { pct: number | null; size?: number }) {
 
 // ─── CSS Pie chart (used for male/female) ────────────────────────────────────
 
-function PieChart({ femalePct, size = 52 }: { femalePct: number | null; size?: number }) {
+export function PieChart({ femalePct, size = 52 }: { femalePct: number | null; size?: number }) {
   if (femalePct === null) {
     return (
       <div

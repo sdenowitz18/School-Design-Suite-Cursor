@@ -9,6 +9,7 @@ import { ImprovementElement } from './elements/ImprovementElement';
 import { OpsElement } from './elements/OpsElement';
 import { PartnershipsElement } from './elements/PartnershipsElement';
 import type { ComponentType, ElementsExpertData } from './expert-view-types';
+import type { SchoolCalendarData } from '../school-calendar-shared';
 
 const ELEMENT_META: Record<
   string,
@@ -80,6 +81,8 @@ interface ExpertViewShellProps {
   schoolWideElementsExpertData?: ElementsExpertData;
   /** When a parent renders DrilldownNavBar, hide the duplicate back row. */
   hideShellBackButton?: boolean;
+  schoolCalendar?: SchoolCalendarData;
+  onSchoolCalendarChange?: (next: SchoolCalendarData) => void;
 }
 
 export function ExpertViewShell({
@@ -91,6 +94,8 @@ export function ExpertViewShell({
   onBack,
   schoolWideElementsExpertData,
   hideShellBackButton = false,
+  schoolCalendar,
+  onSchoolCalendarChange,
 }: ExpertViewShellProps) {
   const [activeElement, setActiveElement] = useState<string>(() =>
     initialActiveElement === 'learners' ? 'schedule' : initialActiveElement,
@@ -193,6 +198,8 @@ export function ExpertViewShell({
             componentType={componentType}
             data={data}
             onChange={onChange}
+            schoolCalendar={schoolCalendar}
+            onSchoolCalendarChange={onSchoolCalendarChange}
           />
         )}
         {activeElement === 'learning' && (

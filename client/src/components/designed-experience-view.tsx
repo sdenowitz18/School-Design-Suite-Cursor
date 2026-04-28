@@ -64,6 +64,7 @@ import { DrilldownNavBar } from "./drilldown-nav-bar";
 import { SchemaPickerSheet } from "./de-schema-picker-sheet";
 import { ExpertViewShell } from "./expert-view/ExpertViewShell";
 import type { ElementsExpertData } from "./expert-view/expert-view-types";
+import { type SchoolCalendarData, normalizeSchoolCalendar } from "./school-calendar-shared";
 import { LEAP_SCHEMA, OUTCOME_SCHEMA, PRACTICE_SCHEMA, SUPPORT_SCHEMA } from "./designed-experience-schemas";
 import { formatLearnerSelectionPreview, learnerSelectionIsKey } from "./learner-design-schema";
 import { adultLeafChipsFromSelections, formatAdultSliceTitle } from "./adult-design-schema";
@@ -1066,6 +1067,26 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
     return ((overall?.designedExperienceData as DesignedExperienceData)?.elementsExpertData ??
       {}) as ElementsExpertData;
   }, [allComponents]);
+
+  const schoolCalendar = useMemo<SchoolCalendarData>(() => {
+    const snap: any = (componentData as any)?.snapshotData || {};
+    return normalizeSchoolCalendar(snap?.overviewContextData?.schoolCalendar);
+  }, [componentData]);
+
+  const handleSchoolCalendarChange = useCallback(
+    (next: SchoolCalendarData) => {
+      if (!nodeId) return;
+      const snap: any = (componentData as any)?.snapshotData || {};
+      const ocd = snap?.overviewContextData || {};
+      updateMutation.mutate({
+        nodeId,
+        data: {
+          snapshotData: { ...snap, overviewContextData: { ...ocd, schoolCalendar: next } },
+        },
+      });
+    },
+    [componentData, nodeId, updateMutation],
+  );
 
   useEffect(() => {
     deRef.current = (componentData as any)?.designedExperienceData || {};
@@ -2331,6 +2352,8 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
             onBack={exitExpert}
             schoolWideElementsExpertData={schoolWideElementsExpertData}
             hideShellBackButton
+            schoolCalendar={isOverall ? schoolCalendar : undefined}
+            onSchoolCalendarChange={isOverall ? handleSchoolCalendarChange : undefined}
           />
         </div>
       </div>
@@ -3001,29 +3024,33 @@ export default function DesignedExperienceView({ nodeId, title, initialSubId, on
             Demographics, incoming skills and mindsets, and selection gating — who experiences this component. Plain
             language and structured tags are separate from the other design elements below.
           </p>
-          {designedExperienceProfileSelections.learners.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {designedExperienceProfileSelections.learners.map(
-                (sel: { primaryId: string; isKey?: boolean; secondaryIds?: string[]; description?: string }) => (
-                  <span
-                    key={sel.primaryId}
-                    className={cn(
-                      "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-medium",
-                      learnerSelectionIsKey(sel)
-                        ? "bg-amber-50 border-amber-200 text-amber-900"
-                        : "bg-purple-50 border-purple-200 text-purple-800",
-                    )}
-                  >
-                    {learnerSelectionIsKey(sel) && (
-                      <Star className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />
-                    )}
-                    {formatLearnerSelectionPreview(sel)}
-                  </span>
-                ),
+          {!isOverall && (
+            <>
+              {designedExperienceProfileSelections.learners.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {designedExperienceProfileSelections.learners.map(
+                    (sel: { primaryId: string; isKey?: boolean; secondaryIds?: string[]; description?: string }) => (
+                      <span
+                        key={sel.primaryId}
+                        className={cn(
+                          "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-medium",
+                          learnerSelectionIsKey(sel)
+                            ? "bg-amber-50 border-amber-200 text-amber-900"
+                            : "bg-purple-50 border-purple-200 text-purple-800",
+                        )}
+                      >
+                        {learnerSelectionIsKey(sel) && (
+                          <Star className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />
+                        )}
+                        {formatLearnerSelectionPreview(sel)}
+                      </span>
+                    ),
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No learner tags yet — open Manage to add tags.</p>
               )}
-            </div>
-          ) : (
-            <p className="text-xs text-gray-400 italic">No learner tags yet — open Manage to add tags.</p>
+            </>
           )}
         </section>
 

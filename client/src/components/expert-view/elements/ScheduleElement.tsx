@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarDays, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronUp, Sparkles, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import { QuestionSection } from '../QuestionSection';
 import { SCHEDULE_ELEMENT } from '../expert-view-schema';
 import { YearlyScheduleBucket } from '../YearlyScheduleBucket';
@@ -13,11 +15,23 @@ import type {
   YearlyScheduleValue,
   MarkingPeriodsValue,
 } from '../expert-view-types';
+import {
+  type CalendarType,
+  type CalendarMarkingPeriod,
+  type SchoolCalendarData,
+  CALENDAR_TYPE_OPTIONS,
+  countWeekdays,
+  fmtCalDate,
+  normalizeSchoolCalendar,
+  buildDefaultPeriods,
+} from '../../school-calendar-shared';
 
 interface ScheduleElementProps {
   componentType: ComponentType;
   data: ElementsExpertData;
   onChange: (next: ElementsExpertData) => void;
+  schoolCalendar?: SchoolCalendarData;
+  onSchoolCalendarChange?: (next: SchoolCalendarData) => void;
 }
 
 const SECTION_TABS: { id: ElementSection; label: string }[] = [
@@ -167,7 +181,78 @@ function ScheduleSchoolCalendarCard({
   );
 }
 
-export function ScheduleElement({ componentType, data, onChange }: ScheduleElementProps) {
+function InlineSchoolCalendar({ cal, onChange }: { cal: SchoolCalendarData; onChange: (next: SchoolCalendarData) => void }) {
+  const update = (patch: Partial<SchoolCalendarData>) => onChange({ ...cal, ...patch });
+  const setCalType = (type: CalendarType) => update({ calendarType: type, markingPeriods: buildDefaultPeriods(type) });
+  const updatePeriod = (id: string, patch: Partial<CalendarMarkingPeriod>) =>
+    update({ markingPeriods: cal.markingPeriods.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  const removePeriod = (id: string) => update({ markingPeriods: cal.markingPeriods.filter((p) => p.id !== id) });
+  const autoWeekdays = countWeekdays(cal.schoolYearStart, cal.schoolYearEnd);
+
+  return (
+    <div className="mt-6 border border-gray-200 rounded-xl bg-white overflow-hidden">
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
+        <CalendarDays className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        <span className="text-sm font-semibold text-gray-800">School Calendar</span>
+      </div>
+      <div className="px-5 py-5 space-y-6">
+        <div className="space-y-3">
+          <h4 className="text-sm font-medium text-gray-700">School Year</h4>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">School Starts</div>
+              <input type="date" value={cal.schoolYearStart} onChange={(e) => update({ schoolYearStart: e.target.value, instructionalDays: null })} className="w-full h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" />
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">School Ends</div>
+              <input type="date" value={cal.schoolYearEnd} onChange={(e) => update({ schoolYearEnd: e.target.value, instructionalDays: null })} className="w-full h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" />
+            </div>
+          </div>
+          {autoWeekdays > 0 && (
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <span className="font-medium">Instructional Days:</span>
+              <Input type="number" value={String(cal.instructionalDays ?? autoWeekdays)} onChange={(e) => { const v = e.target.value.trim(); update({ instructionalDays: v ? Number(v) : null }); }} className="h-7 w-20 text-xs" />
+              {cal.instructionalDays !== null && cal.instructionalDays !== autoWeekdays && (
+                <button type="button" onClick={() => update({ instructionalDays: null })} className="text-[11px] text-purple-600 hover:underline">Reset to auto ({autoWeekdays})</button>
+              )}
+            </div>
+          )}
+        </div>
+        <Separator />
+        <div className="space-y-3">
+          <h4 className="text-sm font-medium text-gray-700">Marking Periods</h4>
+          <div className="space-y-1.5">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Calendar Type</div>
+            <select className="h-9 w-full max-w-[200px] rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700" value={cal.calendarType ?? ""} onChange={(e) => { const v = e.target.value as CalendarType; if (v) setCalType(v); }}>
+              <option value="">Select…</option>
+              {CALENDAR_TYPE_OPTIONS.map((o) => (<option key={o.id} value={o.id}>{o.label}</option>))}
+            </select>
+          </div>
+          {cal.markingPeriods.length > 0 && (
+            <div className="space-y-2 mt-3">
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center mb-1 pl-1">
+                <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Name</span>
+                <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide w-36 text-center">Start Date</span>
+                <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide w-36 text-center">End Date</span>
+                <span className="w-8" />
+              </div>
+              {cal.markingPeriods.map((period) => (
+                <div key={period.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center p-2 rounded-lg border border-gray-200 bg-gray-50/50">
+                  <input type="text" value={period.name} onChange={(e) => updatePeriod(period.id, { name: e.target.value })} className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300 w-full" />
+                  <input type="date" value={period.startDate} onChange={(e) => updatePeriod(period.id, { startDate: e.target.value })} className="w-36 text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" />
+                  <input type="date" value={period.endDate} onChange={(e) => updatePeriod(period.id, { endDate: e.target.value })} className="w-36 text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" />
+                  <button onClick={() => removePeriod(period.id)} className="p-1.5 text-gray-300 hover:text-red-400 transition-colors rounded" title="Remove"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ScheduleElement({ componentType, data, onChange, schoolCalendar: schoolCalendarProp, onSchoolCalendarChange }: ScheduleElementProps) {
   const [activeSection, setActiveSection] = useState<ElementSection>('practices');
   const [openQuestionId, setOpenQuestionId] = useState<string | null>(null);
   const [structureTab, setStructureTab] = useState<StructureTab>('yearly');
@@ -268,17 +353,12 @@ export function ScheduleElement({ componentType, data, onChange }: ScheduleEleme
 
               {question.id === 'schedule-q2' &&
                 componentType === 'center' &&
-                openQuestionId === question.id && (
-                  <ScheduleSchoolCalendarCard
-                    summary={calendarSummary}
-                    structureTab={structureTab}
-                    setStructureTab={setStructureTab}
-                    calendarCollapsed={calendarCollapsed}
-                    setCalendarCollapsed={setCalendarCollapsed}
-                    yearlyScheduleValue={yearlyScheduleValue}
-                    markingPeriodsValue={markingPeriodsValue}
-                    onYearlyChange={handleYearlyChange}
-                    onMarkingChange={handleMarkingChange}
+                openQuestionId === question.id &&
+                schoolCalendarProp &&
+                onSchoolCalendarChange && (
+                  <InlineSchoolCalendar
+                    cal={schoolCalendarProp}
+                    onChange={onSchoolCalendarChange}
                   />
                 )}
             </div>

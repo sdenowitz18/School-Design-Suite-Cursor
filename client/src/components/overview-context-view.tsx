@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Info, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { componentQueries, useUpdateComponent } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,7 +30,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { StudentDemographicsView, type StudentDemographicsData } from "./student-demographics-view";
+import { StudentDemographicsView, type StudentDemographicsData, DonutChart, PieChart } from "./student-demographics-view";
 import { CollegePrepView, type CollegePrepData } from "./college-prep-view";
 import { TestScoresView, type TestScoresData } from "./test-scores-view";
 import { StudentsWithDisabilitiesView, type StudentsWithDisabilitiesData } from "./students-with-disabilities-view";
@@ -38,112 +38,19 @@ import { LowIncomeStudentsView, type LowIncomeStudentsData } from "./low-income-
 import { RaceEthnicityView, type RaceEthnicityData } from "./race-ethnicity-view";
 import { CommunityReviewsView } from "./community-reviews-view";
 import { VerificationBadge } from "./academic-chart-shared";
+import {
+  type CalendarType,
+  type CalendarMarkingPeriod,
+  type SchoolCalendarData,
+  CALENDAR_TYPE_OPTIONS,
+  countWeekdays,
+  fmtCalDate,
+  emptySchoolCalendar,
+  normalizeSchoolCalendar,
+  buildDefaultPeriods,
+} from "./school-calendar-shared";
 
-const MONTHS: { value: string; label: string }[] = [
-  { value: "01", label: "Jan" },
-  { value: "02", label: "Feb" },
-  { value: "03", label: "Mar" },
-  { value: "04", label: "Apr" },
-  { value: "05", label: "May" },
-  { value: "06", label: "Jun" },
-  { value: "07", label: "Jul" },
-  { value: "08", label: "Aug" },
-  { value: "09", label: "Sep" },
-  { value: "10", label: "Oct" },
-  { value: "11", label: "Nov" },
-  { value: "12", label: "Dec" },
-];
-
-function parseMmDd(value: string): { mm: string; dd: string } {
-  const v = String(value || "").trim();
-  // Accept partial during editing:
-  // - "09-05" (complete)
-  // - "09-" (month only)
-  // - "-05" (day only; uncommon but supported)
-  if (/^\d{2}-\d{2}$/.test(v)) return { mm: v.slice(0, 2), dd: v.slice(3, 5) };
-  if (/^\d{2}-$/.test(v)) return { mm: v.slice(0, 2), dd: "" };
-  if (/^-\d{2}$/.test(v)) return { mm: "", dd: v.slice(1, 3) };
-  return { mm: "", dd: "" };
-}
-
-function makeMmDd(mm: string, dd: string): string {
-  if (!mm || !dd) return "";
-  return `${mm}-${dd}`;
-}
-
-function makePartialMmDd(mm: string, dd: string): string {
-  if (mm && dd) return `${mm}-${dd}`;
-  if (mm && !dd) return `${mm}-`;
-  if (!mm && dd) return `-${dd}`;
-  return "";
-}
-
-function formatMmDd(value: string): string {
-  const v = String(value || "").trim();
-  if (!v) return "—";
-  const { mm, dd } = parseMmDd(v);
-  if (!mm || !dd) return "—";
-  const mNum = Number(mm);
-  const dNum = Number(dd);
-  if (!mm || !dd || !Number.isFinite(mNum) || !Number.isFinite(dNum)) return v;
-  const mLabel = MONTHS.find((m) => m.value === mm)?.label || mm;
-  return `${mLabel} ${dNum}`;
-}
-
-function MonthDayPicker({
-  label,
-  value,
-  onChange,
-  testId,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  testId: string;
-}) {
-  const parsed = parseMmDd(value);
-  const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
-  return (
-    <div className="space-y-1.5">
-      <div className="text-[11px] font-semibold text-gray-500">{label}</div>
-      <div className="flex items-center gap-2">
-        <select
-          className="h-9 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
-          value={parsed.mm}
-          onChange={(e) => {
-            const nextMm = e.currentTarget.value;
-            onChange(makePartialMmDd(nextMm, parsed.dd));
-          }}
-          data-testid={`${testId}-month`}
-        >
-          <option value="">Month</option>
-          {MONTHS.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className="h-9 rounded-md border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700"
-          value={parsed.dd}
-          onChange={(e) => {
-            const nextDd = e.currentTarget.value;
-            onChange(makePartialMmDd(parsed.mm, nextDd));
-          }}
-          data-testid={`${testId}-day`}
-        >
-          <option value="">Day</option>
-          {days.map((d) => (
-            <option key={d} value={d}>
-              {Number(d)}
-            </option>
-          ))}
-        </select>
-        <div className="text-[11px] text-gray-400 w-20">{formatMmDd(value)}</div>
-      </div>
-    </div>
-  );
-}
+// ─── Section types ────────────────────────────────────────────────────────────
 
 type L2Section =
   | "mission"
@@ -212,9 +119,9 @@ const L2_SECTION_LABEL: Record<L2Section, string> = {
 };
 
 function getBreadcrumb(route: Route): string[] {
-  if (route.level === "L1") return ["Snapshot"];
+  if (route.level === "L1") return ["Journey and Overview"];
   if (route.level === "L2") {
-    return ["Snapshot", L2_SECTION_LABEL[route.section]];
+    return ["Journey and Overview", L2_SECTION_LABEL[route.section]];
   }
   const l3 = L3_SECTION_META[route.section];
   const l2Crumb = getBreadcrumb({ level: "L2", section: l3.parent });
@@ -255,7 +162,7 @@ function chartNavParent(section: L3Section): L2Section {
 
 function titleFromRoute(route: Route): string {
   const crumbs = getBreadcrumb(route);
-  return crumbs[crumbs.length - 1] || "Snapshot";
+  return crumbs[crumbs.length - 1] || "Journey and Overview";
 }
 
 function getDeepTextKey(route: Route): "communityOverviewText" | "policyConsiderationsText" | "historyOfChangeText" | "otherContextText" | null {
@@ -302,21 +209,10 @@ function normalizeOcd(raw: any) {
         ? ocd.schoolType
         : "",
     district: typeof ocd.district === "string" ? ocd.district : "",
+    state: typeof ocd.state === "string" ? ocd.state : "",
     studentCount,
     mission: typeof ocd.mission === "string" ? ocd.mission : "",
-    schedule: {
-      // Stored as generic MM-DD strings (e.g. "09-05"), not specific years.
-      schoolYearStart: String(ocd?.schedule?.schoolYearStart || ""),
-      schoolYearEnd: String(ocd?.schedule?.schoolYearEnd || ""),
-      semester1Start: String(ocd?.schedule?.semester1Start || ""),
-      semester1End: String(ocd?.schedule?.semester1End || ""),
-      semester2Start: String(ocd?.schedule?.semester2Start || ""),
-      semester2End: String(ocd?.schedule?.semester2End || ""),
-    },
-    timeModel: {
-      daysPerYear: String(ocd?.timeModel?.daysPerYear || ""),
-      hoursPerDay: String(ocd?.timeModel?.hoursPerDay || ""),
-    },
+    schoolCalendar: normalizeSchoolCalendar(ocd.schoolCalendar),
     whoWeServe: {
       compFRL: Number.isFinite(Number(ocd?.whoWeServe?.compFRL)) ? Math.max(0, Math.min(100, Math.round(Number(ocd?.whoWeServe?.compFRL)))) : 45,
       compIEP: Number.isFinite(Number(ocd?.whoWeServe?.compIEP)) ? Math.max(0, Math.min(100, Math.round(Number(ocd?.whoWeServe?.compIEP)))) : 12,
@@ -400,8 +296,7 @@ export default function OverviewContextView({
   const [initialized, setInitialized] = useState(false);
   const [ocd, setOcd] = useState(() => normalizeOcd(null));
   const [routeStack, setRouteStack] = useState<Route[]>([{ level: "L1" }]);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [timeModelOpen, setTimeModelOpen] = useState(false);
+  const [calendarEditing, setCalendarEditing] = useState(false);
 
   useEffect(() => {
     compRef.current = comp;
@@ -524,7 +419,7 @@ export default function OverviewContextView({
         className="cursor-pointer focus:bg-gray-100 focus:text-gray-900"
         onClick={() => goHome()}
       >
-        Snapshot
+        Journey and Overview
       </DropdownMenuItem>
       <DropdownMenuSeparator className="bg-gray-200" />
       {CHART_NAV_GROUPS.map((group, gi) => (
@@ -716,456 +611,356 @@ export default function OverviewContextView({
       const missionPreview = mission ? (mission.length > 160 ? `${mission.slice(0, 160).trim()}…` : mission) : "";
       const studentCount = ocd.studentCount !== undefined && ocd.studentCount !== null && String(ocd.studentCount).trim() ? String(ocd.studentCount).trim() : "—";
       const district = String(ocd.district || "").trim();
+      const state = String(ocd.state || "").trim();
 
-      const scheduleSummary = (() => {
-        const s = ocd.schedule;
-        const MMDD = /^\d{2}-\d{2}$/;
-        const isComplete = (v: string) => MMDD.test(String(v || "").trim());
-        const hasAny =
-          !!String(s.schoolYearStart || "").trim() ||
-          !!String(s.schoolYearEnd || "").trim() ||
-          !!String(s.semester1Start || "").trim() ||
-          !!String(s.semester1End || "").trim() ||
-          !!String(s.semester2Start || "").trim() ||
-          !!String(s.semester2End || "").trim();
-        const year =
-          isComplete(s.schoolYearStart) && isComplete(s.schoolYearEnd)
-            ? `${formatMmDd(s.schoolYearStart)} → ${formatMmDd(s.schoolYearEnd)}`
-            : hasAny
-              ? "Partially set"
-              : "Not set";
-        const sem1 =
-          isComplete(s.semester1Start) && isComplete(s.semester1End)
-            ? `${formatMmDd(s.semester1Start)} → ${formatMmDd(s.semester1End)}`
-            : s.semester1Start || s.semester1End
-              ? "Partially set"
-              : "—";
-        const sem2 =
-          isComplete(s.semester2Start) && isComplete(s.semester2End)
-            ? `${formatMmDd(s.semester2Start)} → ${formatMmDd(s.semester2End)}`
-            : s.semester2Start || s.semester2End
-              ? "Partially set"
-              : "—";
-        return {
-          year,
-          sem1,
-          sem2,
-          hasSemesters: !!(s.semester1Start || s.semester1End || s.semester2Start || s.semester2End),
-          isSaved: isComplete(s.schoolYearStart) && isComplete(s.schoolYearEnd),
-        };
-      })();
+      const cal = ocd.schoolCalendar;
+      const calAutoWeekdays = countWeekdays(cal.schoolYearStart, cal.schoolYearEnd);
+      const calInstructionalDays = cal.instructionalDays ?? (calAutoWeekdays || null);
+      const calHasData = !!(cal.schoolYearStart && cal.schoolYearEnd);
+      const calTypeLabel = CALENDAR_TYPE_OPTIONS.find((o) => o.id === cal.calendarType)?.label ?? "";
 
-      const scheduleHasAny = scheduleSummary.year !== "Not set";
-
-      const timeModelSummary = (() => {
-        const tm = ocd.timeModel || { daysPerYear: "", hoursPerDay: "" };
-        const days = String(tm.daysPerYear || "").trim();
-        const hours = String(tm.hoursPerDay || "").trim();
-        const isSaved = !!(days && hours);
-        return {
-          isSaved,
-          label: isSaved ? `${days} days • ${hours} hours/day` : days || hours ? "Partially set" : "Not set",
-        };
-      })();
-
-      const stakeholderLinks: { key: L3Section; label: string }[] = [
-        { key: "stakeholder.students", label: "Students" },
-        { key: "stakeholder.families", label: "Families" },
-        { key: "stakeholder.educatorsStaff", label: "Educators / Staff" },
-        { key: "stakeholder.administrationDistrict", label: "Administration (District)" },
-        { key: "stakeholder.administrationSchool", label: "Administration (School)" },
-        { key: "stakeholder.otherCommunityLeaders", label: "Other Community Leaders" },
+      const stakeholderCards: { key: L3Section; ocdKey: keyof typeof ocd.stakeholderMap; label: string; showReps?: boolean }[] = [
+        { key: "stakeholder.students", ocdKey: "students", label: "Students" },
+        { key: "stakeholder.families", ocdKey: "families", label: "Families" },
+        { key: "stakeholder.educatorsStaff", ocdKey: "educatorsStaff", label: "Educators / Staff" },
+        { key: "stakeholder.administrationDistrict", ocdKey: "administrationDistrict", label: "Admin (District)", showReps: true },
+        { key: "stakeholder.administrationSchool", ocdKey: "administrationSchool", label: "Admin (School)", showReps: true },
+        { key: "stakeholder.otherCommunityLeaders", ocdKey: "otherCommunityLeaders", label: "Community Leaders", showReps: true },
       ];
 
+      const demoData = ocd.studentDemographics;
+
+      const updateCalendar = (patch: Partial<SchoolCalendarData>) => {
+        setOcd((prev) => ({ ...prev, schoolCalendar: { ...prev.schoolCalendar, ...patch } }));
+      };
+      const setCalType = (type: CalendarType) => {
+        updateCalendar({ calendarType: type, markingPeriods: buildDefaultPeriods(type) });
+      };
+      const updatePeriod = (id: string, patch: Partial<CalendarMarkingPeriod>) => {
+        updateCalendar({ markingPeriods: cal.markingPeriods.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+      };
+      const removePeriod = (id: string) => {
+        updateCalendar({ markingPeriods: cal.markingPeriods.filter((p) => p.id !== id) });
+      };
+
       return (
-        <div className="p-6 space-y-5">
-          {/* 1) General */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4" data-testid="oc-section-general">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">General</div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">School name</div>
-                <Input
-                  value={schoolName}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setOcd((prev) => ({ ...prev, schoolName: v }));
-                  }}
-                  placeholder="Overall School"
-                  className="h-9"
-                  data-testid="oc-school-name"
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">School type</div>
-                <select
-                  className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700"
-                  value={schoolType}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setOcd((prev) => ({ ...prev, schoolType: v }));
-                  }}
-                  data-testid="oc-school-type"
-                >
-                  <option value="">Select…</option>
-                  <option value="Elementary School">Elementary School</option>
-                  <option value="Middle School">Middle School</option>
-                  <option value="High School">High School</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">District</div>
-                <Input
-                  value={district}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setOcd((prev) => ({ ...prev, district: v }));
-                  }}
-                  placeholder="e.g., Springfield Public Schools"
-                  className="h-9"
-                  data-testid="oc-district"
-                />
+        <div className="max-w-5xl mx-auto pb-24 px-6 md:px-10">
+          <div className="grid grid-cols-1 gap-6 pt-6">
+
+            {/* ── General ── */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 border-b pb-2">General</h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">School name</div>
+                    <div className="text-sm text-gray-900" data-testid="oc-school-name">{schoolName || "—"}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">District</div>
+                    <div className="text-sm text-gray-900" data-testid="oc-district">{district || "—"}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">State</div>
+                    <div className="text-sm text-gray-900" data-testid="oc-state">{state || "—"}</div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">School type</div>
+                    <select
+                      className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700"
+                      value={schoolType}
+                      onChange={(e) => setOcd((prev) => ({ ...prev, schoolType: e.target.value }))}
+                      data-testid="oc-school-type"
+                    >
+                      <option value="">Select…</option>
+                      <option value="Elementary School">Elementary School</option>
+                      <option value="Middle School">Middle School</option>
+                      <option value="High School">High School</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide"># students</div>
-                <Input
-                  value={String(ocd.studentCount ?? "")}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setOcd((prev) => ({ ...prev, studentCount: v }));
-                  }}
-                  placeholder="e.g., 500"
-                  className="h-9"
-                  data-testid="oc-student-count"
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Mission</div>
-                {mission ? (
-                  <div className="text-sm text-gray-700 whitespace-pre-wrap">{missionPreview}</div>
-                ) : (
-                  <div className="text-sm text-gray-400 italic">—</div>
-                )}
-                <div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => pushRoute({ level: "L2", section: "mission" })}
-                    data-testid="oc-edit-mission"
-                  >
-                    Edit mission
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 2) How it's structured */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4" data-testid="oc-section-structure">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">How it’s structured</div>
-
-            {/* Schedule */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Schedule</div>
-                <Collapsible open={scheduleOpen} onOpenChange={setScheduleOpen}>
-                  <CollapsibleTrigger asChild>
-                    <Button size="sm" variant="outline" className="h-8 text-xs" data-testid="oc-toggle-schedule">
-                      {scheduleOpen ? "Hide schedule" : "Set schedule"}
-                    </Button>
-                  </CollapsibleTrigger>
-                </Collapsible>
-              </div>
-
-              {!scheduleOpen ? (
-                <div
-                  className={cn(
-                    "rounded-lg border p-3 text-xs space-y-1",
-                    scheduleHasAny ? "bg-blue-50/40 border-blue-200 text-gray-700" : "bg-gray-50 border-gray-200 text-gray-500",
-                  )}
-                  data-testid="oc-schedule-summary"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <span className="font-semibold text-gray-700">School year:</span> {scheduleSummary.year}
-                    </div>
-                    {scheduleSummary.isSaved ? (
-                      <span className="shrink-0 text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full">
-                        Saved
-                      </span>
-                    ) : null}
-                  </div>
-                  {scheduleSummary.hasSemesters && (
-                    <>
-                      <div>
-                        <span className="font-semibold text-gray-700">Semester 1:</span> {scheduleSummary.sem1}
-                      </div>
-                      <div>
-                        <span className="font-semibold text-gray-700">Semester 2:</span> {scheduleSummary.sem2}
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
-                    <div className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">School year</div>
-                    <div className="text-[11px] text-gray-500">Auto-saves as you edit. Generic month/day (no year).</div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <MonthDayPicker
-                        label="Start"
-                        value={ocd.schedule.schoolYearStart}
-                        onChange={(next) =>
-                          setOcd((prev) => ({ ...prev, schedule: { ...(prev as any).schedule, schoolYearStart: next } }))
-                        }
-                        testId="oc-schoolyear-start"
-                      />
-                      <MonthDayPicker
-                        label="End"
-                        value={ocd.schedule.schoolYearEnd}
-                        onChange={(next) =>
-                          setOcd((prev) => ({ ...prev, schedule: { ...(prev as any).schedule, schoolYearEnd: next } }))
-                        }
-                        testId="oc-schoolyear-end"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
-                    <div className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">Semesters (optional)</div>
-                    <div className="text-[11px] text-gray-500">Auto-saves as you edit. Generic month/day (no year).</div>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-semibold text-gray-700">Semester 1</div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <MonthDayPicker
-                            label="Start"
-                            value={ocd.schedule.semester1Start}
-                            onChange={(next) =>
-                              setOcd((prev) => ({ ...prev, schedule: { ...(prev as any).schedule, semester1Start: next } }))
-                            }
-                            testId="oc-sem1-start"
-                          />
-                          <MonthDayPicker
-                            label="End"
-                            value={ocd.schedule.semester1End}
-                            onChange={(next) =>
-                              setOcd((prev) => ({ ...prev, schedule: { ...(prev as any).schedule, semester1End: next } }))
-                            }
-                            testId="oc-sem1-end"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-semibold text-gray-700">Semester 2</div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <MonthDayPicker
-                            label="Start"
-                            value={ocd.schedule.semester2Start}
-                            onChange={(next) =>
-                              setOcd((prev) => ({ ...prev, schedule: { ...(prev as any).schedule, semester2Start: next } }))
-                            }
-                            testId="oc-sem2-start"
-                          />
-                          <MonthDayPicker
-                            label="End"
-                            value={ocd.schedule.semester2End}
-                            onChange={(next) =>
-                              setOcd((prev) => ({ ...prev, schedule: { ...(prev as any).schedule, semester2End: next } }))
-                            }
-                            testId="oc-sem2-end"
-                          />
-                        </div>
-                      </div>
-                      <div className="text-[11px] text-gray-500">Tip: Semesters typically sit within the school year range.</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <Separator />
-
-            {/* Time model */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Time model</div>
-                <Collapsible open={timeModelOpen} onOpenChange={setTimeModelOpen}>
-                  <CollapsibleTrigger asChild>
-                    <Button size="sm" variant="outline" className="h-8 text-xs" data-testid="oc-toggle-time-model">
-                      {timeModelOpen ? "Hide time model" : "Set time model"}
-                    </Button>
-                  </CollapsibleTrigger>
-                </Collapsible>
-              </div>
-
-              {!timeModelOpen ? (
-                <div
-                  className={cn(
-                    "rounded-lg border p-3 text-xs",
-                    timeModelSummary.isSaved ? "bg-blue-50/40 border-blue-200 text-gray-700" : "bg-gray-50 border-gray-200 text-gray-500",
-                  )}
-                  data-testid="oc-time-model-summary"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <span className="font-semibold text-gray-700">Summary:</span> {timeModelSummary.label}
-                    </div>
-                    {timeModelSummary.isSaved ? (
-                      <span className="shrink-0 text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full">
-                        Saved
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
-                    <div className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">Calendar model</div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <div className="text-[11px] font-semibold text-gray-500">Days per year</div>
-                        <Input
-                          value={String(ocd.timeModel?.daysPerYear ?? "")}
-                          onChange={(e) => {
-                            const v = e.currentTarget.value;
-                            setOcd((prev) => ({ ...prev, timeModel: { ...(prev as any).timeModel, daysPerYear: v } }));
-                          }}
-                          placeholder="e.g., 180"
-                          className="h-9"
-                          data-testid="oc-time-days-per-year"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <div className="text-[11px] font-semibold text-gray-500">Hours per day</div>
-                        <Input
-                          value={String(ocd.timeModel?.hoursPerDay ?? "")}
-                          onChange={(e) => {
-                            const v = e.currentTarget.value;
-                            setOcd((prev) => ({ ...prev, timeModel: { ...(prev as any).timeModel, hoursPerDay: v } }));
-                          }}
-                          placeholder="e.g., 6.5"
-                          className="h-9"
-                          data-testid="oc-time-hours-per-day"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 3) Key Stakeholders */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-who">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Key Stakeholders</div>
-            <div className="space-y-2">
-              {stakeholderLinks.map((s) => (
-                <button
-                  key={s.key}
-                  type="button"
-                  onClick={() => pushRoute({ level: "L3", section: s.key })}
-                  className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
-                  data-testid={`oc-stakeholder-link-${s.key}`}
-                >
-                  <div className="text-xs font-semibold text-gray-900">{s.label}</div>
-                  <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+            {/* ── Mission ── */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 border-b pb-2 flex items-center justify-between">
+                Mission
+                <button type="button" onClick={() => pushRoute({ level: "L2", section: "mission" })} className="p-1 text-gray-400 hover:text-gray-600 transition-colors" data-testid="oc-edit-mission" title="Edit mission">
+                  <Pencil className="w-3.5 h-3.5" />
                 </button>
-              ))}
+              </h3>
+              <div>
+                {mission ? (
+                  <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{missionPreview}</div>
+                ) : (
+                  <div className="text-sm text-gray-400 italic">No mission statement yet.</div>
+                )}
+              </div>
             </div>
-          </div>
 
-          {/* Context and Overview */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-context-links">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Context and Overview</div>
-            <div className="space-y-2">
-              {(
-                [
+            {/* ── Who's Involved ── */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 border-b pb-2">Who's Involved</h3>
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {stakeholderCards.map((s) => {
+                    const item = ocd.stakeholderMap[s.ocdKey];
+                    const pop = item?.populationSize;
+                    const reps = item?.keyRepresentatives?.trim();
+                    const repNames = reps ? reps.split(/[\n,]+/).map((n) => n.trim()).filter(Boolean) : [];
+                    return (
+                      <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => pushRoute({ level: "L3", section: s.key })}
+                        className="flex flex-col items-start gap-1 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50/50 hover:bg-gray-100 hover:border-gray-300 transition-colors text-left group"
+                        data-testid={`oc-stakeholder-card-${s.ocdKey}`}
+                      >
+                        <span className="text-xs font-semibold text-gray-700 group-hover:text-gray-900 leading-tight">{s.label}</span>
+                        {s.showReps ? (
+                          repNames.length > 0 && (
+                            <div className="space-y-0.5 mt-0.5">
+                              {repNames.slice(0, 3).map((name, i) => (
+                                <div key={i} className="flex items-center gap-1.5">
+                                  <span className="w-1 h-1 rounded-full bg-gray-400 shrink-0" />
+                                  <span className="text-[11px] text-gray-500 leading-tight truncate">{name}</span>
+                                </div>
+                              ))}
+                              {repNames.length > 3 && <span className="text-[10px] text-gray-400">+{repNames.length - 3} more</span>}
+                            </div>
+                          )
+                        ) : (
+                          pop && <span className="text-lg font-bold text-gray-900 leading-none">{pop}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <Separator />
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Student Demographics</div>
+                    <button type="button" onClick={() => pushRoute({ level: "L3", section: "enrollment.studentDemographics" })} className="text-[11px] text-purple-600 hover:text-purple-800 font-medium" data-testid="oc-enroll-student-demographics">
+                      Edit
+                    </button>
+                  </div>
+                  {demoData && (demoData.raceEthnicity?.some((e) => e.pct !== null) || demoData.lowIncomePct !== null || demoData.femalePct !== null) ? (
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-6 items-start">
+                      <div className="space-y-1.5">
+                        {(demoData.raceEthnicity ?? []).map((entry, idx) => {
+                          const hasValue = entry.pct !== null;
+                          return (
+                            <div key={idx} className="flex items-center gap-2">
+                              <div className="text-[11px] text-gray-600 w-32 shrink-0 leading-tight truncate">{entry.label}</div>
+                              <div className={cn("text-[11px] font-semibold w-7 shrink-0 text-right", hasValue ? "text-gray-900" : "text-gray-400")}>
+                                {hasValue ? `${entry.pct}%` : "—"}
+                              </div>
+                              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                {hasValue && (entry.pct ?? 0) > 0 && (
+                                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${entry.pct}%` }} />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex flex-col gap-3 min-w-[140px]">
+                        <div className="flex items-center gap-2.5">
+                          <DonutChart pct={demoData.lowIncomePct} size={40} />
+                          <div className="text-[11px] text-gray-600 leading-tight">
+                            {demoData.lowIncomePct !== null ? (<><span className="font-bold text-gray-900">{demoData.lowIncomePct}%</span> Low income</>) : (<span className="text-gray-400 italic">Not set</span>)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <PieChart femalePct={demoData.femalePct} size={40} />
+                          <div className="text-[11px] leading-tight space-y-0.5">
+                            {demoData.femalePct !== null ? (
+                              <>
+                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-sm bg-emerald-500" /><span className="text-gray-600">{demoData.femalePct}% F</span></div>
+                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-sm bg-emerald-900" /><span className="text-gray-600">{100 - demoData.femalePct}% M</span></div>
+                              </>
+                            ) : (<span className="text-gray-400 italic">Not set</span>)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">No demographics data yet.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ── School Calendar ── */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 border-b pb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-gray-400" />
+                  School Calendar
+                </div>
+                <Button size="sm" variant="outline" className="h-7 text-xs font-normal" onClick={() => setCalendarEditing(!calendarEditing)} data-testid="oc-toggle-calendar-edit">
+                  {calendarEditing ? (<><Check className="w-3.5 h-3.5 mr-1" />Done</>) : (<><Pencil className="w-3.5 h-3.5 mr-1" />Edit Calendar</>)}
+                </Button>
+              </h3>
+
+              {!calendarEditing ? (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">School Year</div>
+                      <div className="text-sm text-gray-900">{calHasData ? `${fmtCalDate(cal.schoolYearStart)} – ${fmtCalDate(cal.schoolYearEnd)}` : "Not set"}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Instructional Days</div>
+                      <div className="text-sm text-gray-900">{calInstructionalDays ?? "—"}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Calendar Type</div>
+                      <div className="text-sm text-gray-900">{calTypeLabel || "—"}</div>
+                    </div>
+                  </div>
+
+                  {cal.markingPeriods.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Marking Periods</div>
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="grid grid-cols-[1fr_1.5fr_auto] gap-4 px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+                          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Period</div>
+                          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Date Range</div>
+                          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Instructional Days</div>
+                        </div>
+                        {cal.markingPeriods.map((period, idx) => {
+                          const pDays = countWeekdays(period.startDate, period.endDate);
+                          return (
+                            <div key={period.id} className={cn("grid grid-cols-[1fr_1.5fr_auto] gap-4 px-4 py-3 items-center", idx < cal.markingPeriods.length - 1 && "border-b border-gray-100")}>
+                              <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-purple-500 shrink-0" /><span className="text-sm font-medium text-gray-900">{period.name}</span></div>
+                              <div className="text-sm text-gray-700">{period.startDate && period.endDate ? `${fmtCalDate(period.startDate)} – ${fmtCalDate(period.endDate)}` : "—"}</div>
+                              <div className="text-sm font-medium text-gray-900 text-right min-w-[60px]">{pDays || "—"}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {!calHasData && cal.markingPeriods.length === 0 && (
+                    <p className="text-sm text-gray-400 italic">No calendar set up yet. Click "Edit Calendar" to get started.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <p className="text-xs text-gray-500 -mt-2">Set your school year dates and marking periods.</p>
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-medium text-gray-700">School Year</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">School Starts</div>
+                        <input type="date" value={cal.schoolYearStart} onChange={(e) => updateCalendar({ schoolYearStart: e.target.value, instructionalDays: null })} className="w-full h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" data-testid="oc-cal-year-start" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">School Ends</div>
+                        <input type="date" value={cal.schoolYearEnd} onChange={(e) => updateCalendar({ schoolYearEnd: e.target.value, instructionalDays: null })} className="w-full h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" data-testid="oc-cal-year-end" />
+                      </div>
+                    </div>
+                    {calAutoWeekdays > 0 && (
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <span className="font-medium">Instructional Days:</span>
+                        <Input type="number" value={String(cal.instructionalDays ?? calAutoWeekdays)} onChange={(e) => { const v = e.target.value.trim(); updateCalendar({ instructionalDays: v ? Number(v) : null }); }} className="h-7 w-20 text-xs" data-testid="oc-cal-instructional-days" />
+                        {cal.instructionalDays !== null && cal.instructionalDays !== calAutoWeekdays && (
+                          <button type="button" onClick={() => updateCalendar({ instructionalDays: null })} className="text-[11px] text-purple-600 hover:underline">Reset to auto ({calAutoWeekdays})</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <Separator />
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-medium text-gray-700">Marking Periods</h4>
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Calendar Type</div>
+                      <select className="h-9 w-full max-w-[200px] rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700" value={cal.calendarType ?? ""} onChange={(e) => { const v = e.target.value as CalendarType; if (v) setCalType(v); }} data-testid="oc-cal-type">
+                        <option value="">Select…</option>
+                        {CALENDAR_TYPE_OPTIONS.map((o) => (<option key={o.id} value={o.id}>{o.label}</option>))}
+                      </select>
+                    </div>
+                    {cal.markingPeriods.length > 0 && (
+                      <div className="space-y-2 mt-3">
+                        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center mb-1 pl-1">
+                          <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Name</span>
+                          <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide w-36 text-center">Start Date</span>
+                          <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide w-36 text-center">End Date</span>
+                          <span className="w-8" />
+                        </div>
+                        {cal.markingPeriods.map((period) => (
+                          <div key={period.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center p-2 rounded-lg border border-gray-200 bg-gray-50/50">
+                            <input type="text" value={period.name} onChange={(e) => updatePeriod(period.id, { name: e.target.value })} className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300 w-full" />
+                            <input type="date" value={period.startDate} onChange={(e) => updatePeriod(period.id, { startDate: e.target.value })} className="w-36 text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" />
+                            <input type="date" value={period.endDate} onChange={(e) => updatePeriod(period.id, { endDate: e.target.value })} className="w-36 text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-purple-300 focus:border-purple-300" />
+                            <button onClick={() => removePeriod(period.id)} className="p-1.5 text-gray-300 hover:text-red-400 transition-colors rounded" title="Remove"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Context & Overview ── */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 border-b pb-2">Context & Overview</h3>
+              <div className="space-y-1">
+                {([
                   { key: "contextOverview.communityOverview" as const, label: "Community Overview" },
                   { key: "contextOverview.policyConsiderations" as const, label: "Policy Considerations" },
                   { key: "contextOverview.historyOfChangeEfforts" as const, label: "History of Change Efforts" },
                   { key: "contextOverview.otherContext" as const, label: "Other Context" },
-                ] as const
-              ).map((it) => (
-                <button
-                  key={it.key}
-                  type="button"
-                  onClick={() => pushRoute({ level: "L3", section: it.key })}
-                  className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
-                  data-testid={`oc-context-link-${it.key}`}
-                >
-                  <div className="text-xs font-semibold text-gray-900">{it.label}</div>
-                  <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
-                </button>
-              ))}
+                ] as const).map((it) => (
+                  <button key={it.key} type="button" onClick={() => pushRoute({ level: "L3", section: it.key })} className="flex items-center justify-between w-full text-left py-2 group" data-testid={`oc-context-link-${it.key}`}>
+                    <span className="text-sm text-gray-700 group-hover:text-gray-900 transition-colors">{it.label}</span>
+                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 shrink-0" />
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Enrollment & Composition */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-enrollment">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Enrollment & Composition</div>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => pushRoute({ level: "L3", section: "enrollment.studentDemographics" })}
-                className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
-                data-testid="oc-enroll-student-demographics"
-              >
-                <div className="text-xs font-semibold text-gray-900">Student Demographics</div>
-                <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
-              </button>
-            </div>
-          </div>
-
-          {/* Public Academic Profile */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-public-academic">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Public Academic Profile</div>
-            <div className="space-y-2">
-              {(
-                [
+            {/* ── Public Academic Profile ── */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 border-b pb-2">Public Academic Profile</h3>
+              <div className="space-y-1">
+                {([
                   { key: "publicAcademic.collegePrep" as const, label: "College Prep" },
                   { key: "publicAcademic.testScores" as const, label: "Test Scores" },
                   { key: "publicAcademic.raceEthnicity" as const, label: "Race & Ethnicity" },
                   { key: "publicAcademic.studentsWithDisabilities" as const, label: "Students with Disabilities" },
                   { key: "publicAcademic.lowIncomeStudents" as const, label: "Low Income Students" },
-                ] as const
-              ).map((it) => (
-                <button
-                  key={it.key}
-                  type="button"
-                  onClick={() => pushRoute({ level: "L3", section: it.key })}
-                  className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
-                  data-testid={`oc-public-${it.key}`}
-                >
-                  <div className="text-xs font-semibold text-gray-900">{it.label}</div>
-                  <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
-                </button>
-              ))}
+                ] as const).map((it) => (
+                  <button key={it.key} type="button" onClick={() => pushRoute({ level: "L3", section: it.key })} className="flex items-center justify-between w-full text-left py-2 group" data-testid={`oc-public-${it.key}`}>
+                    <span className="text-sm text-gray-700 group-hover:text-gray-900 transition-colors">{it.label}</span>
+                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 shrink-0" />
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Community Reviews */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-3" data-testid="oc-section-community-reviews">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Community Reviews</div>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => pushRoute({ level: "L2", section: "communityReviews" as const })}
-                className="w-full flex items-center justify-between text-left px-3 py-2 rounded-md bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
-                data-testid="oc-community-reviews"
-              >
-                <div className="text-xs font-semibold text-gray-900">Community Reviews</div>
-                <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
-              </button>
+            {/* ── Community Reviews ── */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900 border-b pb-2">Community Reviews</h3>
+              <div className="space-y-1">
+                <button type="button" onClick={() => pushRoute({ level: "L2", section: "communityReviews" as const })} className="flex items-center justify-between w-full text-left py-2 group" data-testid="oc-community-reviews">
+                  <span className="text-sm text-gray-700 group-hover:text-gray-900 transition-colors">Community Reviews</span>
+                  <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 shrink-0" />
+                </button>
+              </div>
             </div>
+
           </div>
         </div>
       );
     }
+
 
     if (currentRoute.level === "L2") {
       if (currentRoute.section === "mission") {
@@ -1412,19 +1207,21 @@ export default function OverviewContextView({
                 </div>
                 <div className="space-y-2">
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Key representatives</div>
-                  <Input
+                  <Textarea
                     value={item.keyRepresentatives}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
                       setOcd((prev) => ({
                         ...prev,
                         stakeholderMap: {
                           ...prev.stakeholderMap,
-                          [key]: { ...prev.stakeholderMap[key], keyRepresentatives: e.target.value },
+                          [key]: { ...prev.stakeholderMap[key], keyRepresentatives: v },
                         },
-                      }))
-                    }
-                    placeholder="Names…"
-                    className="h-9"
+                      }));
+                    }}
+                    placeholder="One per line…"
+                    className="min-h-[80px] text-sm"
+                    style={{ listStyleType: "disc" }}
                     data-testid="oc-stakeholder-reps"
                   />
                 </div>
